@@ -158,11 +158,13 @@ public final class PrayerController {
         long now = System.currentTimeMillis();
         boolean sent = false;
 
-        if (enumName != null) sent = invokePrayerButtonClick(enumName);
+        // Packet path first (frame 186) — works regardless of the open tab and
+        // is the most reliable. Widget clicks only as fallback.
         if (!sent && enumName != null) sent = trySendPrayerEnumByName(enumName);
         if (!sent) sent = trySendPrayerPacket(liveId);
         if (!sent) sent = trySendPrayerViaMap(liveId);
         if (!sent) sent = sendPrayerBufferFallback(liveId);
+        if (!sent && enumName != null) sent = invokePrayerButtonClick(enumName);
         if (!sent) sent = clickProtectWidget(prayerId);
 
         if (sent) {
@@ -272,7 +274,10 @@ public final class PrayerController {
         try {
             Class<?> p = RtLookup.prayer();
             if (p == null) throw new ClassNotFoundException("p");
-            Object prayer = p.getMethod("getPrayerWithId", int.class).invoke(null, prayerId);
+            // Roat Prayer exposes prayerIdToPrayer (HashMap<Integer,Prayer>),
+            // not getPrayerWithId(). Resolve the enum from the map, then send.
+            Object map = p.getField("prayerIdToPrayer").get(null);
+            Object prayer = map.getClass().getMethod("get", Object.class).invoke(map, prayerId);
             if (prayer == null) return false;
             int id = (int) p.getMethod("getId").invoke(prayer);
             return trySendPrayerPacket(id);
@@ -284,7 +289,8 @@ public final class PrayerController {
         try {
             Class<?> p = RtLookup.prayer();
             if (p == null) throw new ClassNotFoundException("p");
-            Object prayer = p.getMethod("getPrayerWithId", int.class).invoke(null, prayerId);
+            Object map = p.getField("prayerIdToPrayer").get(null);
+            Object prayer = map.getClass().getMethod("get", Object.class).invoke(map, prayerId);
             if (prayer != null) {
                 Object book = p.getField("currentPrayerBook").get(null);
                 if (book instanceof java.util.List) {
