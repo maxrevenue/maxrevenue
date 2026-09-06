@@ -4436,16 +4436,7 @@ public class CombatScript implements TickListener {
     }
 
     private static Field findField(Class<?> cls, String name) {
-        Class<?> c = cls;
-        while (c != null) {
-            try {
-                Field f = c.getDeclaredField(name);
-                f.setAccessible(true);
-                return f;
-            } catch (NoSuchFieldException e) { c = c.getSuperclass(); }
-              catch (Exception e) { break; }
-        }
-        return null;
+        return Reflect.declaredField(cls, name);
     }
 
     // ════════════════════════════════════════════════════════════════════════
@@ -6844,42 +6835,14 @@ public class CombatScript implements TickListener {
     }
 
     private static Field getStaticField(Class<?> cls, String name) {
-        if (cls == null) return null;
-        Class<?> c = cls;
-        while (c != null) {
-            try {
-                Field f = c.getDeclaredField(name);
-                f.setAccessible(true);
-                return f;
-            } catch (NoSuchFieldException e) {
-                c = c.getSuperclass();
-            } catch (Exception e) {
-                break;
-            }
-        }
-        return null;
+        return Reflect.declaredField(cls, name);
     }
 
     private static Field getField(Class<?> cls, String name) {
-        Class<?> c = cls;
-        while (c != null) {
-            try {
-                Field f = c.getDeclaredField(name);
-                f.setAccessible(true);
-                return f;
-            } catch (NoSuchFieldException e) { c = c.getSuperclass(); }
-              catch (Exception e) { break; }
-        }
-        return null;
+        return Reflect.declaredField(cls, name);
     }
 
     private static Method findMethod(Class<?> cls, String name, int paramCount) {
-        for (Method m : cls.getMethods())
-            if (m.getName().equals(name) && m.getParameterCount() == paramCount) return m;
-        return null;
-    }
-
-    private static Class<?> findClass(String name) {
-        try { return Class.forName(name); } catch (ClassNotFoundException e) { return null; }
+        return Reflect.method(cls, name, paramCount);
     }
 }
