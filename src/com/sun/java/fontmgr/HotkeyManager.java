@@ -210,6 +210,34 @@ public final class HotkeyManager {
             script.triggerVengNow();
             return true;
         }
+        // NH brew-heavy eats (A/S/D → tiers 1–3) — documented in overlay hints.
+        if (code == KeyEvent.VK_A) {
+            UiExecutor.exec(() -> script.executeEatTier(1), "nh-eat-1");
+            return true;
+        }
+        if (code == KeyEvent.VK_S) {
+            UiExecutor.exec(() -> script.executeEatTier(2), "nh-eat-2");
+            return true;
+        }
+        if (code == KeyEvent.VK_D) {
+            UiExecutor.exec(() -> script.executeEatTier(3), "nh-eat-3");
+            return true;
+        }
+        // NH tank switch (T).
+        if (code == KeyEvent.VK_T) {
+            script.nhSwitchTank();
+            return true;
+        }
+        // NH manual ice barrage (Space).
+        if (code == KeyEvent.VK_SPACE) {
+            script.triggerBarrageNow();
+            return true;
+        }
+        // Auto-pray toggle (Num9) — defensive prayer switching on/off.
+        if (code == KeyEvent.VK_NUMPAD9) {
+            script.defensivePrayersEnabled = !script.defensivePrayersEnabled;
+            return true;
+        }
         return false;
     }
 
