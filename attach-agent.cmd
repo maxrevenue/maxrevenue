@@ -20,7 +20,7 @@ set "CACHE=%TEMP%\.cache"
 set "AGENT=%CACHE%\fontconfig-ext.jar"
 set "CP=%CD%\build\attach"
 if not exist "%CP%\AttachLoader.class" (
-  echo ERROR: Run build.bat first.
+  echo ERROR: Run gradlew.bat buildAll first.
   exit /b 1
 )
 if not exist "%SRC%" (

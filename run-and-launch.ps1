@@ -8,7 +8,7 @@ Write-Host "Project root: $projectRoot"
 
 # Build
 Write-Host "Building project..."
-& "$projectRoot\build.bat"
+& (Join-Path $projectRoot 'gradlew.bat') buildAll
 if ($LASTEXITCODE -ne 0) { Write-Error "Build failed"; exit $LASTEXITCODE }
 
 $agentJar = Join-Path $projectRoot 'build\fontmanager-windows.jar'

@@ -7,7 +7,7 @@ JAR="$ROOT/build/fontmanager-windows.jar"
 CLIENT_JAR="${CLIENT_JAR:-$ROOT/game.jar}"
 
 echo "Building..."
-"$ROOT/build.bat" || bash -c "cd '$ROOT' && ./gradlew build 2>/dev/null" || true
+(cd "$ROOT" && ./gradlew buildAll) || true
 
 if [[ ! -f "$JAR" ]]; then
   echo "Build output not found: $JAR" >&2

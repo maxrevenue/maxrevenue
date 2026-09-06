@@ -3313,6 +3313,9 @@ public class CombatScript implements TickListener {
             lastAction = "LC_" + spell.displayName.toUpperCase().replace(' ', '_') + "@" + currentTick;
             FontManager.log("[Swapper] left-click armed: " + spell.displayName
                     + " sel=" + selected + " arm=" + armed
+                    + " staff=" + isStaffEquipped()
+                    + " selectedField=" + readIntField(clientSpellSelectedField)
+                    + " spellId=" + readIntField(clientSpellIdField)
                     + " usableOn=" + readIntField(clientSpellUsableOnField)
                     + " nameField=" + (clientSpellNameField != null));
             sendGameMessage("Cast " + spell.displayName + " — left-click a target");
@@ -3651,6 +3654,10 @@ public class CombatScript implements TickListener {
         if (isStaffEquipped()) {
             reassertLeftClickArm();
             lastAction = "LC_NATIVE@" + currentTick;
+            FontManager.log("[Swapper] staff click-cast native left-click (widget="
+                    + leftClickCastWidget + " armed=" + leftClickCastArmed
+                    + " selectedField=" + readIntField(clientSpellSelectedField)
+                    + " usableOn=" + readIntField(clientSpellUsableOnField) + ")");
             return;
         }
 

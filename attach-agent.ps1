@@ -90,7 +90,7 @@ $attachDir = Join-Path $ScriptRoot 'build\attach'
 $loaderClass = Join-Path $attachDir 'AttachLoader.class'
 
 if (-not (Test-Path -LiteralPath $loaderClass)) {
-    Write-Host 'ERROR: Missing build\attach\AttachLoader.class - run build.bat first.' -ForegroundColor Red
+    Write-Host 'ERROR: Missing build\attach\AttachLoader.class - run gradlew.bat buildAll first.' -ForegroundColor Red
     exit 1
 }
 

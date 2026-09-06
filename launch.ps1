@@ -53,7 +53,7 @@ if ($Official) {
 
 # ── Build agent ───────────────────────────────────────────────────────────
 Write-Host "[1/5] Building agent..." -ForegroundColor Yellow
-cmd /c "`"$ScriptDir\build.bat`"" | Out-Null
+& (Join-Path $ScriptDir "gradlew.bat") buildAll --console=plain | Out-Null
 if (-not (Test-Path -LiteralPath $BuiltAgentJar)) {
     Write-Host "  BUILD FAILED" -ForegroundColor Red
     Read-Host "Press Enter to exit"
@@ -64,7 +64,7 @@ Copy-Item -LiteralPath $BuiltAgentJar -Destination $AgentJar -Force
 $AttachLoaderClass = Join-Path $ScriptDir "build\attach\AttachLoader.class"
 if (-not (Test-Path -LiteralPath $AttachLoaderClass)) {
     Write-Host "  BUILD FAILED: missing build\attach\AttachLoader.class" -ForegroundColor Red
-    Write-Host "  Re-run: .\build.bat" -ForegroundColor Yellow
+    Write-Host "  Re-run: .\gradlew.bat buildAll" -ForegroundColor Yellow
     Read-Host "Press Enter to exit"
     exit 1
 }
