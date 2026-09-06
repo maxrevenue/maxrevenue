@@ -1,0 +1,21 @@
+# Normalize line endings: LF in the repo, CRLF checked out on Windows.
+* text=auto
+
+# Shell scripts must stay LF (they break with CRLF on POSIX systems).
+*.sh text eol=lf
+
+# Batch files are Windows-only; keep them CRLF so cmd.exe parses them reliably.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# PowerShell is tolerant of both, but keep CRLF for ISE/editors on Windows.
+*.ps1 text eol=crlf
+*.psm1 text eol=crlf
+
+# Explicitly binary — never apply line-ending conversion.
+*.jar binary
+*.class binary
+*.dat binary
+*.png binary
+*.jpg binary
+*.gif binary
