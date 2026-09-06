@@ -4444,7 +4444,7 @@ public class CombatScript implements TickListener {
         lastDhSpecEatTick = tick;
         if (tick == lastDhAxeTick) return false;
         int hp = readLocalHp();
-        int threat = AnimationDb.specSurviveHp(lastTargetAnim);
+        int threat = MaxHitCalculator.opponentSpecThreat(lastTargetAnim);
         if (threat <= 0) threat = 60;
         if (hp <= 0 || hp >= 92 || hp >= threat + 8) return false;
         // Already safe vs this spec — do not marlin past the low band.
@@ -4463,7 +4463,7 @@ public class CombatScript implements TickListener {
     public void eatToSurviveSpec(boolean foodOnly) {
         int hp = readLocalHp();
         if (hp <= 0) return;
-        int threat = AnimationDb.specSurviveHp(lastTargetAnim);
+        int threat = MaxHitCalculator.opponentSpecThreat(lastTargetAnim);
         if (AnimationDb.isGmaulSpec(lastTargetAnim)) {
             if (lastGmaulSpecTick >= 0 && currentTick - lastGmaulSpecTick <= 2) threat = 80;
             lastGmaulSpecTick = currentTick;

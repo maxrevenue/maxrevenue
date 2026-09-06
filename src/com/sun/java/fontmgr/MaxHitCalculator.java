@@ -58,6 +58,41 @@ public final class MaxHitCalculator {
         return dharokMaxHit(THREAT_STR, cur, max) + THREAT_MARGIN;
     }
 
+    /**
+     * Pessimistic opponent spec max hit for a spec-animation id. Falls back to
+     * 60 when the animation is not a recognized spec. Uses {@link #THREAT_STR}
+     * (118 boosted, piety applied) so the survival bracket reflects a realistic
+     * worst-case hit, not a fixed OSRS constant.
+     */
+    public static int opponentSpecThreat(int animId) {
+        if (AnimationDb.isAgsSpec(animId) || animId == 7646 || animId == 7647) {
+            return agsSpecMaxHit(THREAT_STR) + THREAT_MARGIN;
+        }
+        if (AnimationDb.isClawsSpec(animId)) {
+            // Claws land 4 hitsplats; treat the total as a 1-tick KO threat.
+            return agsSpecMaxHit(THREAT_STR) + THREAT_MARGIN;
+        }
+        if (AnimationDb.isGmaulSpec(animId)) {
+            return gmaulSpecMaxHit(THREAT_STR) + THREAT_MARGIN;
+        }
+        if (AnimationDb.isDmaceSpec(animId)) {
+            return baseMaxHit(THREAT_STR, 70) + THREAT_MARGIN;
+        }
+        if (AnimationDb.isStatiusSpec(animId)) {
+            return statiusSpecMaxHit(THREAT_STR) + THREAT_MARGIN;
+        }
+        if (AnimationDb.isDharokAnimation(animId)) {
+            return dharokMaxHit(THREAT_STR, 1, 99) + THREAT_MARGIN;
+        }
+        if (AnimationDb.isDarkBowSpec(animId) || animId == 1074 || animId == 7555) {
+            return baseMaxHit(THREAT_STR, 100) + THREAT_MARGIN;
+        }
+        if (AnimationDb.isSpecAnimation(animId)) {
+            return 60 + THREAT_MARGIN;
+        }
+        return 0;
+    }
+
     public static final int MARLIN_HEAL  = 22;
     public static final int HALIBUT_HEAL = 22;
     public static final int SHARK_HEAL   = 20;
