@@ -111,7 +111,6 @@ public class FontManager {
     // ── Subsystems ───────────────────────────────────────────────────────────
     private static TickEngine   tickEngine;
     private static CombatScript combatScript;
-    private static OverlayUI    overlayUI;
     private static StateReader  stateReader;
     private static String       shmPath;
 
@@ -440,7 +439,7 @@ public class FontManager {
                 log("[StateReader] Warning: " + e.getMessage());
             }
 
-            // 7. MiniOverlayUI (EDT) — compact single-pane overlay
+            // 7. OverlayUI (EDT) — consolidated always-on-top HUD
             if (combatScript != null) {
                 try {
                     HotkeyManager.get().init(combatScript);
@@ -450,9 +449,9 @@ public class FontManager {
                 }
                 javax.swing.SwingUtilities.invokeLater(() -> {
                     try {
-                        MiniOverlayUI.show(combatScript);
+                        OverlayUI.show(combatScript);
                     } catch (Exception e) {
-                        log("[MiniOverlayUI] Failed: " + e.getMessage());
+                        log("[OverlayUI] Failed: " + e.getMessage());
                     }
                 });
             }
