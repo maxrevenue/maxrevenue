@@ -1,9 +1,12 @@
 # ── Build output ──────────────────────────────────────────────────────────
 build/
+.gradle/
 
 # ── JARs / binaries (client packs + agent artifacts are large & derivable) ─
 *.jar
-!*.class
+*.class
+# ...except the Gradle wrapper jar, which is conventionally committed.
+!gradle/wrapper/gradle-wrapper.jar
 
 # ── Decompiled client classes (generated, not source-of-truth) ────────────
 /com/

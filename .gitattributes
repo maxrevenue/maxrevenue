@@ -3,6 +3,7 @@
 
 # Shell scripts must stay LF (they break with CRLF on POSIX systems).
 *.sh text eol=lf
+gradlew text eol=lf
 
 # Batch files are Windows-only; keep them CRLF so cmd.exe parses them reliably.
 *.bat text eol=crlf
