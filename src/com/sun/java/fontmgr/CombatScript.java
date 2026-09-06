@@ -190,6 +190,7 @@ public class CombatScript implements TickListener {
     private final DharokController  dharokController;
     private final EatPunishController eatPunish;
     public final PrayerController prayer = new PrayerController(this);
+    public final WalkUnder walkUnder = new WalkUnder(this);
 
     // StateReader handle (set by FontManager after init)
     public StateReader stateReader;
@@ -3325,59 +3326,7 @@ public class CombatScript implements TickListener {
      * Walk onto the current opponent's tile (Advanced Swapper {@code walkunder}).
      */
     public boolean walkUnderTarget() {
-        try {
-            Object myPlayer = myPlayerField != null ? myPlayerField.get(null) : null;
-            if (myPlayer == null) return false;
-
-            Object target = null;
-            if (getInteractingMethod != null) {
-                try { target = getInteractingMethod.invoke(myPlayer); } catch (Exception ignored) {}
-            }
-            if (target == null) target = stickyTarget != null ? stickyTarget : cachedTarget;
-            if (target == null) {
-                FontManager.log("[Swapper] walkunder: no target");
-                return false;
-            }
-
-            Class<?> actorClass = RtLookup.actor();
-            if (actorClass == null) actorClass = myPlayer.getClass().getSuperclass();
-            Field sx = findField(actorClass != null ? actorClass : myPlayer.getClass(), "smallX");
-            Field sy = findField(actorClass != null ? actorClass : myPlayer.getClass(), "smallY");
-            if (sx == null || sy == null) return false;
-
-            int[] myX = (int[]) sx.get(myPlayer);
-            int[] myY = (int[]) sy.get(myPlayer);
-            int[] tX = (int[]) sx.get(target);
-            int[] tY = (int[]) sy.get(target);
-            if (myX == null || myY == null || tX == null || tY == null) return false;
-            if (myX.length == 0 || myY.length == 0 || tX.length == 0 || tY.length == 0) return false;
-
-            Method walk = findMethod(clientInstance.getClass(), "doWalkTo", 11);
-            if (walk == null) {
-                // Some builds keep it private on Client
-                for (Method m : clientInstance.getClass().getDeclaredMethods()) {
-                    if (m.getName().equals("doWalkTo") && m.getParameterCount() == 11) {
-                        walk = m;
-                        break;
-                    }
-                }
-            }
-            if (walk == null) {
-                FontManager.log("[Swapper] walkunder: doWalkTo not found");
-                return false;
-            }
-            walk.setAccessible(true);
-            // Mirror Client follow/trade walk: walkType=2 onto target smallX/Y[0]
-            walk.invoke(clientInstance,
-                    2, 0, 1, 0,
-                    myY[0], 1, 0,
-                    tY[0], myX[0], false, tX[0]);
-            lastAction = "WALKUNDER@" + currentTick;
-            return true;
-        } catch (Exception e) {
-            FontManager.log("[Swapper] walkunder failed: " + e.getMessage());
-            return false;
-        }
+        return walkUnder.walkUnderTarget();
     }
 
     private static final class SpellRef {
@@ -6427,4 +6376,9 @@ public class CombatScript implements TickListener {
 
     int lastTargetAnim() { return lastTargetAnim; }
     int lastIncomingDmg() { return lastIncomingDmg; }
+
+    Field myPlayerField() { return myPlayerField; }
+    Method getInteractingMethod() { return getInteractingMethod; }
+    Object stickyTarget() { return stickyTarget; }
+    Object cachedTarget() { return cachedTarget; }
 }
