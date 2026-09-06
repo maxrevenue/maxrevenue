@@ -3634,11 +3634,26 @@ public class CombatScript implements TickListener {
     /**
      * Only fire when we already have a real target (dummy / last attack).
      * Never pick a random NPC — that + Walk was sending the character everywhere.
+     *
+     * <p>Wearing a staff (no autocast) the spell must reach the target via the
+     * native click-cast under the cursor, not a cached auto-target. In that case
+     * we only cancel a racing walk and keep the spell armed, so the client's own
+     * "Cast Ice Barrage ->" left-click resolves the entity the player actually
+     * clicked.
      */
     private void fireArmedSpellAtClick() {
         if (!leftClickCastArmed) return;
         cancelPendingWalk();
         String label = leftClickCastName != null ? leftClickCastName : "Ice Barrage";
+
+        // Staff (no autocast): let the native client click-cast handle the target
+        // under the cursor. Do not re-route the click to cachedAttackId.
+        if (isStaffEquipped()) {
+            reassertLeftClickArm();
+            lastAction = "LC_NATIVE@" + currentTick;
+            return;
+        }
+
         refreshAttackTarget();
         if (cachedAttackId < 0) {
             int npc = findNpcIndexByName("dummy");
@@ -3662,6 +3677,15 @@ public class CombatScript implements TickListener {
         } else {
             reassertLeftClickArm();
         }
+    }
+
+    /** True when the wielded weapon is a staff (no autocast — click-cast only). */
+    private boolean isStaffEquipped() {
+        int wid = readEquippedWeaponId();
+        if (wid <= 0) return false;
+        String name = resolveItemName(wid);
+        return InventoryTracker.isNonAutocastStaff(wid, name)
+                || InventoryTracker.isAutocastStaff(wid, name);
     }
 
     private int findNpcIndexByName(String needle) {
