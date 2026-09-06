@@ -189,6 +189,7 @@ public class CombatScript implements TickListener {
     public final GearSwapEngine   gearSwap;
     private final DharokController  dharokController;
     private final EatPunishController eatPunish;
+    public final PrayerController prayer = new PrayerController(this);
 
     // StateReader handle (set by FontManager after init)
     public StateReader stateReader;
@@ -2355,7 +2356,7 @@ public class CombatScript implements TickListener {
     }
 
     /** Frame 185 / button 5004 — identical to spec-orb click. */
-    private boolean sendClickingButton(int buttonId) {
+    boolean sendClickingButton(int buttonId) {
         Object helper = livePacketHelper();
         Method meth = sendClickingButtonMethod;
         if (helper != null) {
@@ -2395,415 +2396,107 @@ public class CombatScript implements TickListener {
     }
 
     private void ensurePiety() {
-        ensureOffensivePrayer(AnimationDb.AttackStyle.MELEE);
+        prayer.ensurePiety();
     }
 
     private void ensureMysticMight() {
-        ensureOffensivePrayer(AnimationDb.AttackStyle.MAGIC);
+        prayer.ensureMysticMight();
     }
 
     private void ensureEagleEye() {
-        ensureOffensivePrayer(AnimationDb.AttackStyle.RANGED);
+        prayer.ensureEagleEye();
     }
 
     private void ensureOffensivePrayer(AnimationDb.AttackStyle style) {
-        if (style == AnimationDb.AttackStyle.MAGIC) {
-            if (isPrayerActive("AUGURY") || isPrayerActive("MYSTIC_MIGHT")) return;
-            ensurePrayerTab();
-            if (trySendPrayerEnumByName("AUGURY") || trySendPrayerPacket(AnimationDb.AUGURY_PRAYER_ID)) {
-                setPrayerActive("AUGURY", true);
-                return;
-            }
-            clickOffensivePrayerWidget(AnimationDb.AUGURY_WIDGET, "Augury");
-            setPrayerActive("AUGURY", true);
-            if (isPrayerActive("AUGURY")) return;
-            if (trySendPrayerEnumByName("MYSTIC_MIGHT") || trySendPrayerPacket(AnimationDb.MYSTIC_MIGHT_PRAYER_ID)) {
-                setPrayerActive("MYSTIC_MIGHT", true);
-                return;
-            }
-            clickOffensivePrayerWidget(AnimationDb.MYSTIC_MIGHT_WIDGET, "Mystic Might");
-            setPrayerActive("MYSTIC_MIGHT", true);
-            return;
-        }
-        String enumName = AnimationDb.offensivePrayerEnumName(style);
-        if (isPrayerActive(enumName)) return;
-
-        int prayerId = AnimationDb.offensivePrayerId(style);
-        String name = AnimationDb.offensivePrayerName(style);
-        int widget = AnimationDb.offensivePrayerWidget(style);
-
-        ensurePrayerTab();
-        if (trySendPrayerEnumByName(enumName) || trySendPrayerPacket(prayerId)) {
-            setPrayerActive(enumName, true);
-            return;
-        }
-        clickOffensivePrayerWidget(widget, name);
-        setPrayerActive(enumName, true);
-
-        // Rigour locked → Eagle Eye fallback for range.
-        if (style == AnimationDb.AttackStyle.RANGED && enumName != null && enumName.equals("RIGOUR")) {
-            if (isPrayerActive("EAGLE_EYE")) return;
-            if (trySendPrayerEnumByName("EAGLE_EYE") || trySendPrayerPacket(AnimationDb.EAGLE_EYE_PRAYER_ID)) {
-                setPrayerActive("EAGLE_EYE", true);
-                return;
-            }
-            clickOffensivePrayerWidget(AnimationDb.EAGLE_EYE_WIDGET, "Eagle Eye");
-            setPrayerActive("EAGLE_EYE", true);
-        }
+        prayer.ensureOffensivePrayer(style);
     }
 
     private boolean isPietyActive() {
-        return isPrayerActive("PIETY");
+        return prayer.isPietyActive();
     }
 
     private boolean isPrayerActive(String enumName) {
-        try {
-            Class<?> p = RtLookup.prayer();
-            if (p == null) throw new ClassNotFoundException("p");
-            Object prayer = p.getField(enumName).get(null);
-            return p.getField("isActive").getBoolean(prayer);
-        } catch (Exception e) {
-            return false;
-        }
-    }
-
-    private boolean trySendPrayerEnumByName(String enumName) {
-        if (enumName == null) return false;
-        Object helper = livePacketHelper();
-        Method meth = sendPrayerButtonMethod;
-        if (helper != null) {
-            Method live = RtLookup.method(helper.getClass(), "sendPrayerButton", 1);
-            if (live != null) meth = live;
-        }
-        if (helper == null || meth == null) return false;
-        try {
-            Class<?> p = RtLookup.prayer();
-            if (p == null) throw new ClassNotFoundException("p");
-            Object prayer = p.getField(enumName).get(null);
-            int id = (int) p.getMethod("getId").invoke(prayer);
-            Method getStream = helper.getClass().getMethod("getStream");
-            if (getStream.invoke(helper) == null) return false;
-            meth.invoke(helper, id);
-            return true;
-        } catch (Exception ignored) {}
-        return false;
-    }
-
-    private void clickOffensivePrayerWidget(int widget, String name) {
-        if (doActionMethod == null) return;
-        for (int child : new int[] { -1, 0, 315, 316, 314, 317 }) {
-            try {
-                doActionMethod.invoke(clientInstance, 0, 0, widget, child, -1, 0,
-                        "Activate", name, -1, -1);
-                return;
-            } catch (Exception ignored) {}
-        }
+        return prayer.isPrayerActive(enumName);
     }
 
     /** Protect hotkeys: Z = mage, X = range, C = melee (fires this tick). */
-    public void triggerProtectMagic()  { fireProtectNow(AnimationDb.PROTECT_MAGIC_PRAYER_ID); }
-    public void triggerProtectRange() { fireProtectNow(AnimationDb.PROTECT_RANGE_PRAYER_ID); }
-    public void triggerProtectMelee() { fireProtectNow(AnimationDb.PROTECT_MELEE_PRAYER_ID); }
+    public void triggerProtectMagic()  { prayer.triggerProtectMagic(); }
+    public void triggerProtectRange()  { prayer.triggerProtectRange(); }
+    public void triggerProtectMelee()  { prayer.triggerProtectMelee(); }
 
     private void fireProtectNow(int prayerId) {
-        // Cancel any queued protect so tick drain can't race this hotkey.
-        pendingProtectPrayer = -1;
-        lastAction = "PROT_NOW_" + prayerId + "@" + currentTick;
-        ClientThreadGuard.get().invokeLater(() ->
-                activateProtectPrayer(prayerId, AnimationDb.protectPrayerName(prayerId)));
+        prayer.fireProtectNow(prayerId);
     }
 
     private void queueProtectPrayer(int prayerId) {
-        pendingProtectPrayer = prayerId;
-        lastAction = "PROT_Q_" + prayerId + "@" + currentTick;
+        prayer.queueProtectPrayer(prayerId);
     }
 
     private void activateProtectPrayer(int prayerId, String label) {
-        String enumName = AnimationDb.protectPrayerEnumName(prayerId);
-        int liveId = livePrayerId(enumName, prayerId);
-
-        // Skip only when the live enum says this overhead is really on.
-        if (enumName != null && isPrayerActive(enumName) && activeProtectPrayer == prayerId) {
-            return;
-        }
-
-        long now = System.currentTimeMillis();
-        boolean sent = false;
-
-        // 1) Exact same path as clicking the prayer icon
-        if (enumName != null) sent = invokePrayerButtonClick(enumName);
-        // 2) Packet 186 (prayer id)
-        if (!sent && enumName != null) sent = trySendPrayerEnumByName(enumName);
-        if (!sent) sent = trySendPrayerPacket(liveId);
-        if (!sent) sent = trySendPrayerViaMap(liveId);
-        if (!sent) sent = sendPrayerBufferFallback(liveId);
-        if (!sent) sent = clickProtectWidget(prayerId);
-
-        if (sent) {
-            setPrayerActive(enumName, true);
-            deactivateOtherProtectOverheads(enumName);
-            markProtectActivated(prayerId, label, now);
-            FontManager.log("[CombatScript] Protect ON " + label + " id=" + liveId);
-            return;
-        }
-        lastAction = "PROT_FAIL_" + prayerId + "@" + currentTick;
-        FontManager.log("[CombatScript] Protect prayer failed id=" + liveId + " (" + label + ")");
+        prayer.activateProtectPrayer(prayerId, label);
     }
 
-    /** Call PrayerButton.onButtonClick for the matching overhead icon. */
     private boolean invokePrayerButtonClick(String enumName) {
-        if (enumName == null || interfaceCacheField == null) return false;
-        try {
-            Class<?> p = RtLookup.prayer();
-            if (p == null) return false;
-            Object want = p.getField(enumName).get(null);
-            if (want == null) return false;
-            // Don't toggle OFF an already-active prayer.
-            if (p.getField("isActive").getBoolean(want)) return true;
-
-            Object cacheObj = Modifier.isStatic(interfaceCacheField.getModifiers())
-                    ? interfaceCacheField.get(null) : interfaceCacheField.get(clientInstance);
-            if (!(cacheObj instanceof Object[])) return false;
-            Object[] cache = (Object[]) cacheObj;
-            Class<?> btnCls = Class.forName("com.roatpkz.client.game.cache.graphics.types.PrayerButton");
-            Field prayerField = btnCls.getDeclaredField("currentPrayer");
-            prayerField.setAccessible(true);
-            Method click = btnCls.getMethod("onButtonClick");
-            // Prayer buttons live at 50351+.
-            for (int id = 50351; id < 50351 + 40 && id < cache.length; id++) {
-                Object iface = cache[id];
-                if (iface == null || !btnCls.isInstance(iface)) continue;
-                Object cur = prayerField.get(iface);
-                if (cur != want) continue;
-                Object ok = click.invoke(iface);
-                return ok instanceof Boolean ? (Boolean) ok : true;
-            }
-            // Full scan fallback
-            for (Object iface : cache) {
-                if (iface == null || !btnCls.isInstance(iface)) continue;
-                Object cur = prayerField.get(iface);
-                if (cur != want) continue;
-                Object ok = click.invoke(iface);
-                return ok instanceof Boolean ? (Boolean) ok : true;
-            }
-        } catch (Exception e) {
-            FontManager.debug("[CombatScript] PrayerButton click: " + e.getMessage());
-        }
-        return false;
+        return prayer.invokePrayerButtonClick(enumName);
     }
 
     private int livePrayerId(String enumName, int fallback) {
-        if (enumName == null) return fallback;
-        try {
-            Class<?> p = RtLookup.prayer();
-            if (p == null) return fallback;
-            Object prayer = p.getField(enumName).get(null);
-            return (int) p.getMethod("getId").invoke(prayer);
-        } catch (Exception ignored) {}
-        return fallback;
+        return prayer.livePrayerId(enumName, fallback);
     }
 
     private void setPrayerActive(String enumName, boolean on) {
-        if (enumName == null) return;
-        try {
-            Class<?> p = RtLookup.prayer();
-            if (p == null) return;
-            Object prayer = p.getField(enumName).get(null);
-            p.getField("isActive").setBoolean(prayer, on);
-        } catch (Exception ignored) {}
+        prayer.setPrayerActive(enumName, on);
     }
 
     private void deactivateOtherProtectOverheads(String keepEnum) {
-        for (String n : new String[] {
-                "PROTECT_FROM_MAGIC", "PROTECT_FROM_MISSILES", "PROTECT_FROM_MELEE" }) {
-            if (keepEnum != null && keepEnum.equals(n)) continue;
-            setPrayerActive(n, false);
-        }
+        prayer.deactivateOtherProtectOverheads(keepEnum);
     }
 
     private void markProtectActivated(int prayerId, String label, long now) {
-        activeProtectPrayer = prayerId;
-        lastPrayerSwitchMs = now;
-        lastAction = label.replace(' ', '_').toUpperCase() + "@" + currentTick;
+        prayer.markProtectActivatedPublic(prayerId, label, now);
     }
 
     private boolean trySendPrayerPacket(int prayerId) {
-        Object helper = livePacketHelper();
-        Method meth = sendPrayerButtonMethod;
-        if (helper != null) {
-            Method live = RtLookup.method(helper.getClass(), "sendPrayerButton", 1);
-            if (live != null) meth = live;
-        }
-        if (helper == null || meth == null) return false;
-        try {
-            Method getStream = helper.getClass().getMethod("getStream");
-            if (getStream.invoke(helper) == null) return false;
-            meth.invoke(helper, prayerId);
-            return true;
-        } catch (Exception e) {
-            FontManager.debug("[CombatScript] sendPrayerButton(" + prayerId + ") " + e.getMessage());
-            return false;
-        }
+        return prayer.trySendPrayerPacket(prayerId);
     }
 
-    /** Prayer.getPrayerWithId(id) — same map the client uses for frame 186. */
     private boolean trySendPrayerViaMap(int prayerId) {
-        try {
-            Class<?> p = RtLookup.prayer();
-            if (p == null) throw new ClassNotFoundException("p");
-            Object prayer = p.getMethod("getPrayerWithId", int.class).invoke(null, prayerId);
-            if (prayer == null) return false;
-            int id = (int) p.getMethod("getId").invoke(prayer);
-            return trySendPrayerPacket(id);
-        } catch (Exception ignored) {}
-        return false;
+        return prayer.trySendPrayerViaMap(prayerId);
     }
 
     private boolean trySendPrayerEnum(int prayerId) {
         String enumName = AnimationDb.protectPrayerEnumName(prayerId);
         if (enumName == null) return false;
-        return trySendPrayerEnumByName(enumName);
+        return prayer.trySendPrayerEnumByNamePublic(enumName);
     }
 
-    /** PrayerButton widgets are 50351 + index in currentPrayerBook. */
     private int resolvePrayerWidgetId(int prayerId) {
-        try {
-            Class<?> p = RtLookup.prayer();
-            if (p == null) throw new ClassNotFoundException("p");
-            Object prayer = p.getMethod("getPrayerWithId", int.class).invoke(null, prayerId);
-            if (prayer != null) {
-                Object book = p.getField("currentPrayerBook").get(null);
-                if (book instanceof java.util.List) {
-                    int idx = ((java.util.List<?>) book).indexOf(prayer);
-                    if (idx >= 0) return 50351 + idx;
-                }
-                Object[] base = (Object[]) p.getField("BASE_PRAYER_BOOK").get(null);
-                for (int i = 0; i < base.length; i++) {
-                    if (base[i] == prayer) return 50351 + i;
-                }
-            }
-        } catch (Exception ignored) {}
-        return AnimationDb.counterPrayerWidget(prayerIdToStyle(prayerId));
+        return prayer.resolvePrayerWidgetId(prayerId);
     }
 
     private boolean clickProtectWidget(int prayerId) {
-        if (doActionMethod == null) return false;
-        int widget = resolvePrayerWidgetId(prayerId);
-        for (int child : new int[] { -1, 0, 315, 316, 314, 317 }) {
-            for (String name : AnimationDb.protectPrayerNameVariants(prayerId)) {
-                try {
-                    doActionMethod.invoke(clientInstance, 0, 0, widget, child, -1, 0,
-                            "Activate", name, -1, -1);
-                    return true;
-                } catch (Exception ignored) {}
-            }
-        }
-        return false;
+        return prayer.clickProtectWidget(prayerId);
     }
 
-    /** Frame 186 prayer packet — same path as clicking the prayer orb. */
     private boolean sendPrayerBufferFallback(int prayerId) {
-        if (bufferField == null) return false;
-        try {
-            Object buf = bufferField.get(clientInstance);
-            if (buf == null) return false;
-            if (bufferCreateFrame == null) {
-                bufferCreateFrame = buf.getClass().getMethod("createFrame", int.class);
-                bufferWriteUnsignedShort = buf.getClass().getMethod("writeUnsignedShort", int.class);
-                try {
-                    bufferWriteUnsignedByte = buf.getClass().getMethod("writeUnsignedByte", int.class);
-                } catch (NoSuchMethodException ignored) {}
-            }
-            bufferCreateFrame.invoke(buf, 186);
-            if (bufferWriteUnsignedByte != null) {
-                bufferWriteUnsignedByte.invoke(buf, prayerId);
-            } else {
-                bufferWriteUnsignedShort.invoke(buf, prayerId);
-            }
-            return true;
-        } catch (Exception e) {
-            FontManager.debug("[CombatScript] prayer buffer fallback: " + e.getMessage());
-            return false;
-        }
+        return prayer.sendPrayerBufferFallback(prayerId);
     }
 
     private static AnimationDb.AttackStyle prayerIdToStyle(int id) {
-        if (id == AnimationDb.PROTECT_MAGIC_PRAYER_ID) return AnimationDb.AttackStyle.MAGIC;
-        if (id == AnimationDb.PROTECT_RANGE_PRAYER_ID) return AnimationDb.AttackStyle.RANGED;
-        return AnimationDb.AttackStyle.MELEE;
+        return PrayerController.prayerIdToStyle(id);
     }
 
     private void ensureProtectFromStyle(AnimationDb.AttackStyle style) {
-        if (style == null || style == AnimationDb.AttackStyle.UNKNOWN) return;
-        queueProtectPrayer(AnimationDb.protectPrayerId(style));
+        prayer.ensureProtectFromStyle(style);
     }
 
     /** Switch protect when the target's attack style changes or they hit us. */
     private void runAutoDefPrayer(int tick) {
-        AnimationDb.AttackStyle style = detectDefPrayStyle();
-        if (style == null || style == AnimationDb.AttackStyle.UNKNOWN) return;
-
-        int needId = AnimationDb.protectPrayerId(style);
-        String enumName = AnimationDb.protectPrayerEnumName(needId);
-
-        boolean alreadyOn = enumName != null && isPrayerActive(enumName);
-        if (alreadyOn) {
-            activeProtectPrayer = needId;
-            lastPrayerSwitchAnim = lastTargetAnim;
-            return;
-        }
-
-        // Same prayer already queued this tick
-        if (pendingProtectPrayer == needId) return;
-
-        // Retry when enum says off even if we thought we switched — throttle to ~every 2 ticks
-        // unless a fresh hit demands an immediate re-send.
-        if (activeProtectPrayer == needId
-                && (tick - lastProtectSendTick) < 2
-                && !isFreshIncomingHit()) {
-            return;
-        }
-
-        lastPrayerSwitchAnim = lastTargetAnim;
-        lastProtectSendTick = tick;
-        // Fire immediately — don't wait another tick for the queue drain.
-        pendingProtectPrayer = -1;
-        activateProtectPrayer(needId, AnimationDb.protectPrayerName(needId));
+        prayer.runAutoDefPrayer(tick);
     }
 
     private AnimationDb.AttackStyle detectDefPrayStyle() {
-        // Prefer fresh hit style — anim DB can lag or miss custom Roat anims.
-        if (isFreshIncomingHit() && lastIncomingDmg >= 1) {
-            AnimationDb.AnimInfo info = AnimationDb.lookup(lastTargetAnim);
-            if (info != null && info.style != AnimationDb.AttackStyle.UNKNOWN) {
-                return info.style;
-            }
-            if (AnimationDb.isIceCast(lastTargetAnim)) {
-                return AnimationDb.AttackStyle.MAGIC;
-            }
-            if (AnimationDb.isSpecAnimation(lastTargetAnim)) {
-                return AnimationDb.AttackStyle.MELEE;
-            }
-            // Unknown hit anim → keep current overhead if any, else melee
-            if (activeProtectPrayer == AnimationDb.PROTECT_MAGIC_PRAYER_ID)
-                return AnimationDb.AttackStyle.MAGIC;
-            if (activeProtectPrayer == AnimationDb.PROTECT_RANGE_PRAYER_ID)
-                return AnimationDb.AttackStyle.RANGED;
-            return AnimationDb.AttackStyle.MELEE;
-        }
-        if (lastTargetAnim > 0) {
-            if (AnimationDb.isSpecAnimation(lastTargetAnim)) {
-                return AnimationDb.AttackStyle.MELEE;
-            }
-            if (AnimationDb.isIceCast(lastTargetAnim)) {
-                return AnimationDb.AttackStyle.MAGIC;
-            }
-            AnimationDb.AnimInfo info = AnimationDb.lookup(lastTargetAnim);
-            if (info != null && info.style != AnimationDb.AttackStyle.UNKNOWN) {
-                return info.style;
-            }
-        }
-        return AnimationDb.AttackStyle.UNKNOWN;
+        return prayer.detectDefPrayStyle();
     }
 
     private void refreshAttackTarget() {
@@ -3453,101 +3146,20 @@ public class CombatScript implements TickListener {
 
     /** Activate prayer by friendly name (piety, protect item, protect from melee, …). */
     public boolean activatePrayerNamed(String prayerName) {
-        if (prayerName == null || prayerName.trim().isEmpty()) return false;
-        pendingNamedPrayer = prayerName.trim();
-        lastAction = "PRAY_Q@" + currentTick;
-        FontManager.log("[Swapper] queue prayer: " + pendingNamedPrayer);
-        return true;
+        return prayer.activatePrayerNamed(prayerName);
     }
 
     private boolean fireNamedPrayer(String prayerName) {
-        int id = resolvePrayerIdByName(prayerName);
-        Object enumObj = resolvePrayerEnum(prayerName, id);
-        if (enumObj != null) {
-            try { id = (int) enumObj.getClass().getMethod("getId").invoke(enumObj); }
-            catch (Exception ignored) {}
-        }
-        if (id < 0 && enumObj == null) {
-            FontManager.log("[Swapper] unknown prayer: " + prayerName);
-            return false;
-        }
-        if (id == AnimationDb.PROTECT_MAGIC_PRAYER_ID
-                || id == AnimationDb.PROTECT_RANGE_PRAYER_ID
-                || id == AnimationDb.PROTECT_MELEE_PRAYER_ID) {
-            activateProtectPrayer(id, AnimationDb.protectPrayerName(id));
-            return true;
-        }
-        String enumName = prayerEnumName(id);
-        if (enumName != null && isPrayerActive(enumName)) {
-            lastAction = "PRAY_ON@" + currentTick;
-            return true;
-        }
-        boolean sent = false;
-        if (enumName != null) sent |= trySendPrayerEnumByName(enumName);
-        if (!sent && id >= 0) sent |= trySendPrayerPacket(id);
-        if (!sent && id >= 0) sent |= trySendPrayerViaMap(id);
-        if (!sent && id >= 0) sent |= sendPrayerBufferFallback(id);
-        ensurePrayerTab();
-        if (enumObj != null) {
-            try {
-                String display = enumObj.getClass().getMethod("getName").invoke(enumObj).toString();
-                int widget = id >= 0 ? resolvePrayerWidgetId(id) : AnimationDb.AUGURY_WIDGET;
-                clickOffensivePrayerWidget(widget, display);
-                if (widget > 0) sendClickingButton(widget);
-                setPrayerActive(enumName, true);
-            } catch (Exception ignored) {
-                setPrayerActive(enumName, true);
-            }
-        } else {
-            clickOffensivePrayerWidget(AnimationDb.AUGURY_WIDGET, prayerName);
-            setPrayerActive(enumName, true);
-        }
-        lastAction = (sent || isPrayerActive(enumName) ? "PRAY_" : "PRAY_TRY_")
-                + (enumName != null ? enumName : prayerName) + "@" + currentTick;
-        FontManager.log("[Swapper] prayer " + prayerName + " id=" + id + " sent=" + sent
-                + " active=" + isPrayerActive(enumName));
-        return sent || isPrayerActive(enumName) || enumObj != null;
+        return prayer.fireNamedPrayer(prayerName);
     }
 
     private Object resolvePrayerEnum(String prayerName, int fallbackId) {
-        try {
-            Class<?> p = RtLookup.prayer();
-            if (p == null) return null;
-            String enumName = fallbackId >= 0 ? prayerEnumName(fallbackId) : null;
-            if (enumName == null) {
-                String n = prayerName.toLowerCase().replaceAll("[^a-z0-9]", "");
-                if (n.equals("augury")) enumName = "AUGURY";
-                else if (n.equals("piety")) enumName = "PIETY";
-                else if (n.equals("rigour") || n.equals("rigor")) enumName = "RIGOUR";
-                else if (n.equals("mysticmight")) enumName = "MYSTIC_MIGHT";
-                else if (n.equals("eagleeye")) enumName = "EAGLE_EYE";
-                else if (n.equals("chivalry")) enumName = "CHIVALRY";
-            }
-            if (enumName != null) {
-                try { return p.getField(enumName).get(null); } catch (Exception ignored) {}
-            }
-            if (fallbackId >= 0) {
-                return p.getMethod("getPrayerWithId", int.class).invoke(null, fallbackId);
-            }
-        } catch (Exception ignored) {}
-        return null;
+        return prayer.resolvePrayerEnumPublic(prayerName, fallbackId);
     }
 
     /** Best-effort: turn off piety/rigour/augury/mystic/eagle via toggle packet. */
     public boolean disableOffensivePrayers() {
-        int[] ids = {
-                AnimationDb.PIETY_PRAYER_ID, AnimationDb.RIGOUR_PRAYER_ID,
-                AnimationDb.AUGURY_PRAYER_ID, AnimationDb.MYSTIC_MIGHT_PRAYER_ID,
-                AnimationDb.EAGLE_EYE_PRAYER_ID, AnimationDb.CHIVALRY_PRAYER_ID
-        };
-        boolean any = false;
-        for (int id : ids) {
-            String enumName = prayerEnumName(id);
-            if (enumName != null && isPrayerActive(enumName)) {
-                if (trySendPrayerPacket(id)) any = true;
-            }
-        }
-        return any;
+        return prayer.disableOffensivePrayers();
     }
 
     /**
@@ -4040,7 +3652,7 @@ public class CombatScript implements TickListener {
         }
     }
 
-    private Object livePacketHelper() {
+    Object livePacketHelper() {
         try {
             Method m = findMethod(clientInstance.getClass(), "getPacketHelper", 0);
             if (m != null) {
@@ -4214,73 +3826,6 @@ public class CombatScript implements TickListener {
         }
         pendingSwapCastLabel = null;
         pendingSwapCastWidget = -1;
-    }
-
-    private static int resolvePrayerIdByName(String raw) {
-        if (raw == null) return -1;
-        // Collapse to letters only so "Protect from Melee", "protect_from_melee",
-        // and "protectfrommelee" all resolve the same way.
-        String n = raw.toLowerCase().replaceAll("[^a-z0-9]", "");
-        switch (n) {
-            case "protectitem": case "protitem": case "pi":
-                return AnimationDb.PROTECT_ITEM_PRAYER_ID;
-            case "protectfrommagic": case "protectmagic": case "protmagic":
-            case "protmage": case "mage": case "magic": case "praymage":
-                return AnimationDb.PROTECT_MAGIC_PRAYER_ID;
-            case "protectfrommissiles": case "protectfrommissile": case "protectfromrange":
-            case "protectfromranged": case "protectmissiles": case "protectrange":
-            case "protrange": case "range": case "ranged": case "prayrange":
-                return AnimationDb.PROTECT_RANGE_PRAYER_ID;
-            case "protectfrommelee": case "protectmelee": case "protmelee":
-            case "melee": case "praymelee":
-                return AnimationDb.PROTECT_MELEE_PRAYER_ID;
-            case "eagleeye":
-                return AnimationDb.EAGLE_EYE_PRAYER_ID;
-            case "mysticmight":
-                return AnimationDb.MYSTIC_MIGHT_PRAYER_ID;
-            case "chivalry":
-                return AnimationDb.CHIVALRY_PRAYER_ID;
-            case "piety":
-                return AnimationDb.PIETY_PRAYER_ID;
-            case "rigour": case "rigor":
-                return AnimationDb.RIGOUR_PRAYER_ID;
-            case "augury":
-                return AnimationDb.AUGURY_PRAYER_ID;
-            case "smite":
-                return 24;
-            case "redemption":
-                return 23;
-            case "retribution":
-                return 22;
-            case "preserve":
-                return 25;
-            case "rapidheal":
-                return 10;
-            case "rapidrestore":
-                return 9;
-            default:
-                return -1;
-        }
-    }
-
-    private static String prayerEnumName(int prayerId) {
-        if (prayerId == AnimationDb.PROTECT_ITEM_PRAYER_ID) return "PROTECT_ITEM";
-        if (prayerId == AnimationDb.PROTECT_MAGIC_PRAYER_ID) return "PROTECT_FROM_MAGIC";
-        if (prayerId == AnimationDb.PROTECT_RANGE_PRAYER_ID) return "PROTECT_FROM_MISSILES";
-        if (prayerId == AnimationDb.PROTECT_MELEE_PRAYER_ID) return "PROTECT_FROM_MELEE";
-        if (prayerId == AnimationDb.EAGLE_EYE_PRAYER_ID) return "EAGLE_EYE";
-        if (prayerId == AnimationDb.MYSTIC_MIGHT_PRAYER_ID) return "MYSTIC_MIGHT";
-        if (prayerId == AnimationDb.CHIVALRY_PRAYER_ID) return "CHIVALRY";
-        if (prayerId == AnimationDb.PIETY_PRAYER_ID) return "PIETY";
-        if (prayerId == AnimationDb.RIGOUR_PRAYER_ID) return "RIGOUR";
-        if (prayerId == AnimationDb.AUGURY_PRAYER_ID) return "AUGURY";
-        if (prayerId == 24) return "SMITE";
-        if (prayerId == 23) return "REDEMPTION";
-        if (prayerId == 22) return "RETRIBUTION";
-        if (prayerId == 25) return "PRESERVE";
-        if (prayerId == 10) return "RAPID_HEAL";
-        if (prayerId == 9) return "RAPID_RESTORE";
-        return null;
     }
 
     /** Scan inventory for an item whose definition name fuzzy-matches the query. */
@@ -4552,7 +4097,7 @@ public class CombatScript implements TickListener {
         invokeSetTab(5);
     }
 
-    private void invokeSetTab(int tab) {
+    void invokeSetTab(int tab) {
         if (setTabMethod == null) return;
         try {
             if (java.lang.reflect.Modifier.isStatic(setTabMethod.getModifiers())) {
@@ -6110,7 +5655,7 @@ public class CombatScript implements TickListener {
         }
     }
 
-    private void ensureBufferWriters(Object buf) {
+    void ensureBufferWriters(Object buf) {
         if (bufferCreateFrame != null) return;
         try {
             Class<?> bc = buf.getClass();
@@ -6845,4 +6390,41 @@ public class CombatScript implements TickListener {
     private static Method findMethod(Class<?> cls, String name, int paramCount) {
         return Reflect.method(cls, name, paramCount);
     }
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  Package-private accessors for PrayerController
+    // ════════════════════════════════════════════════════════════════════════
+
+    Object client() { return clientInstance; }
+    Method doActionMethod() { return doActionMethod; }
+    Field interfaceCacheField() { return interfaceCacheField; }
+    Method sendPrayerButtonMethod() { return sendPrayerButtonMethod; }
+    Field bufferField() { return bufferField; }
+    Method bufferCreateFrame() { return bufferCreateFrame; }
+    Method bufferWriteUnsignedShort() { return bufferWriteUnsignedShort; }
+    Method bufferWriteUnsignedByte() { return bufferWriteUnsignedByte; }
+    int currentTick() { return currentTick; }
+
+    String lastAction() { return lastAction; }
+    void lastAction(String v) { lastAction = v; }
+
+    int pendingProtectPrayer() { return pendingProtectPrayer; }
+    void pendingProtectPrayer(int v) { pendingProtectPrayer = v; }
+
+    int activeProtectPrayer() { return activeProtectPrayer; }
+    void activeProtectPrayer(int v) { activeProtectPrayer = v; }
+
+    int lastProtectSendTick() { return lastProtectSendTick; }
+    void lastProtectSendTick(int v) { lastProtectSendTick = v; }
+
+    int lastPrayerSwitchAnim() { return lastPrayerSwitchAnim; }
+    void lastPrayerSwitchAnim(int v) { lastPrayerSwitchAnim = v; }
+
+    void lastPrayerSwitchMs(long v) { lastPrayerSwitchMs = v; }
+
+    String pendingNamedPrayer() { return pendingNamedPrayer; }
+    void pendingNamedPrayer(String v) { pendingNamedPrayer = v; }
+
+    int lastTargetAnim() { return lastTargetAnim; }
+    int lastIncomingDmg() { return lastIncomingDmg; }
 }
