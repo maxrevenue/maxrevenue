@@ -440,7 +440,8 @@ public final class InventoryTracker {
     public static boolean isHalibut(int itemId, String name) {
         String n = stripName(name);
         if (n.contains("halibut")) return true;
-        if (itemId == 42349 || itemId == 42355 || itemId == 41428) return !isMarlin(itemId, name);
+        // ID-based fallback (covers Roat PKz halibut even when name lookup fails).
+        if (containsId(HALIBUT_IDS, itemId)) return !isMarlin(itemId, name);
         return false;
     }
 

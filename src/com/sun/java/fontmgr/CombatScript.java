@@ -926,12 +926,7 @@ public class CombatScript implements TickListener {
 
             if (enabled && !nhEnabled) ensurePiety();
 
-            // Spec dumps and eats are keybind-only. Auto paths stay behind flags.
-            // DH stays low for max hit — no passive safety/combo eats while orb stacking.
-            if (comboEatEnabled && inDhDanger && !dharokEnabled) {
-                executeComboEat(EatContext.SAFETY);
-            }
-
+            // Eats are keybind-only (1-4). No auto combo-eat in regular PK.
             if (autoSpecEnabled && tryAutoSpecDump(tick)) {
                 drainActionQueue();
                 return;
@@ -954,10 +949,6 @@ public class CombatScript implements TickListener {
                 if (autoVengEnabled && !vengWithSpecOnly) tryCastVengeance();
                 drainActionQueue();
                 return;
-            }
-
-            if (comboEatEnabled && !dharokEnabled && !Humanizer.skipPassiveEat()) {
-                executeComboEat(EatContext.AUTO);
             }
 
             boolean ko = inKillRange && targetHp > 0 && specEnergy >= primaryMinSpecPct();
@@ -5121,6 +5112,8 @@ public class CombatScript implements TickListener {
             int raw = inv[slot];
             if (raw <= 0) continue;
             int id = raw - 1;
+            // ID-based first (no name resolution needed), then name fallback.
+            if (InventoryTracker.containsId(InventoryTracker.HALIBUT_IDS, id)) return slot;
             String name = resolveItemName(id);
             if (InventoryTracker.isHalibut(id, name)) return slot;
         }
