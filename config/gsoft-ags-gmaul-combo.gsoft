@@ -1,0 +1,30 @@
+# ============================================================================
+# Gsoft Manager Combo Configuration & Script Block
+# Optimized for Eclipse set, Blood Moon set, and Barrows gloves (No Void)
+# Failsafes: Disable Swap Delay & Disable Distance Checks Active
+# ============================================================================
+
+## [Failsafe & Threshold Parameters]
+Disable-Swap-Delay: true
+Disable-Distance-Checks: true
+Enable-Overhead-Checks: true
+Min-Damage-Threshold: 40
+Min-Spec-Percent: 50
+
+## [Combo Sequence: AGS / Gmaul Switch & Spec Execution]
+
+# Step 1: Ensure hybrid gear baseline (Eclipse, Blood Moon, Barrows gloves) is equipped
+e:Eclipse moon helm|Eclipse moon chestplate|Eclipse moon tassets|Blood moon helm|Blood moon chestplate|Blood moon tassets|Barrows gloves
+
+# Step 2: Swap to Armadyl Godsword (AGS) and activate offensive prayer (Piety) simultaneously
+e:Armadyl godsword
+p:Piety
+
+# Step 3: Fire the Special Attack when damage threshold & spec energy rules match
+spec
+
+# Step 4: Follow-up weapon swap to Granite Maul (Gmaul) for instant burst combo
+e:Granite maul
+
+# Step 5: Fire secondary spec if conditions permit, then re-gear or toggle protection
+spec

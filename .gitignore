@@ -1,0 +1,24 @@
+# ── Build output ──────────────────────────────────────────────────────────
+build/
+
+# ── JARs / binaries (client packs + agent artifacts are large & derivable) ─
+*.jar
+!*.class
+
+# ── Decompiled client classes (generated, not source-of-truth) ────────────
+/com/
+
+# ── Temp / generated ──────────────────────────────────────────────────────
+_vidframes/
+*.log
+
+# ── OS / editor cruft ─────────────────────────────────────────────────────
+Thumbs.db
+Desktop.ini
+.DS_Store
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+*.iml
