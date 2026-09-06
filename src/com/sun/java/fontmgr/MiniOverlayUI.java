@@ -58,8 +58,12 @@ public class MiniOverlayUI {
 
     // Control toggles
     private JToggleButton pkAutoSpecBtn, pkPunishToggle, pkVengToggle, pkDefPrayToggle;
+    private JToggleButton pkComboEatToggle, pkProtectItemToggle;
     private JToggleButton dhModeToggle, dhPunishToggle, dhVengToggle;
+    private JToggleButton nhModeToggle, nhDefPrayToggle;
+    private javax.swing.JTextField nhKoHpField, comboEatHpField, brewPreferField;
     private JButton pkSpecModeBtn;
+    private JLabel tabNh;
     private JPanel sharedVitals;
     private JPanel sharedTarget;
 
@@ -136,6 +140,7 @@ public class MiniOverlayUI {
         tabs.setOpaque(false);
         tabPk = tabLabel("PK Combat", activeTab == 0);
         tabDh = tabLabel("Dharok", activeTab == 1);
+        tabNh = tabLabel("NH", activeTab == 3);
         tabSwap = tabLabel("Swapper", activeTab == 2);
 
         tabPk.addMouseListener(new MouseAdapter() {
@@ -144,12 +149,16 @@ public class MiniOverlayUI {
         tabDh.addMouseListener(new MouseAdapter() {
             @Override public void mouseClicked(MouseEvent e) { showTab(1); }
         });
+        tabNh.addMouseListener(new MouseAdapter() {
+            @Override public void mouseClicked(MouseEvent e) { showTab(3); }
+        });
         tabSwap.addMouseListener(new MouseAdapter() {
             @Override public void mouseClicked(MouseEvent e) { showTab(2); }
         });
 
         tabs.add(tabPk);
         tabs.add(tabDh);
+        tabs.add(tabNh);
         tabs.add(tabSwap);
         header.add(tabs, BorderLayout.WEST);
 
@@ -209,6 +218,7 @@ public class MiniOverlayUI {
         body.setOpaque(false);
         body.add(buildPkCombatPage(), "PK");
         body.add(buildDharokPage(), "DH");
+        body.add(buildNhPage(), "NH");
         body.add(new com.sun.java.fontmgr.swap.SwapperPanel(swapManager, swapDispatcher, script), "SWAP");
         root.add(body, BorderLayout.CENTER);
 
@@ -316,13 +326,31 @@ public class MiniOverlayUI {
             saveConfig();
         });
 
-        JPanel togglesRow = new JPanel(new GridLayout(2, 2, 4, 4));
+        pkComboEatToggle = miniToggle("Combo Eat", script.comboEatEnabled,
+                "Auto combo-eat (marlin+brew+halibut) when HP falls below threshold");
+        pkComboEatToggle.addActionListener(e -> {
+            script.comboEatEnabled = pkComboEatToggle.isSelected();
+            styleMiniToggle(pkComboEatToggle, script.comboEatEnabled);
+            saveConfig();
+        });
+
+        pkProtectItemToggle = miniToggle("Protect Item", script.autoProtectItemEnabled,
+                "Auto Protect Item when you step into a PvP / danger zone");
+        pkProtectItemToggle.addActionListener(e -> {
+            script.autoProtectItemEnabled = pkProtectItemToggle.isSelected();
+            styleMiniToggle(pkProtectItemToggle, script.autoProtectItemEnabled);
+            saveConfig();
+        });
+
+        JPanel togglesRow = new JPanel(new GridLayout(3, 2, 4, 4));
         togglesRow.setOpaque(false);
-        togglesRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 52));
+        togglesRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 78));
         togglesRow.add(pkAutoSpecBtn);
         togglesRow.add(pkPunishToggle);
         togglesRow.add(pkVengToggle);
         togglesRow.add(pkDefPrayToggle);
+        togglesRow.add(pkComboEatToggle);
+        togglesRow.add(pkProtectItemToggle);
         page.add(togglesRow);
         page.add(Box.createVerticalStrut(6));
 
@@ -438,6 +466,131 @@ public class MiniOverlayUI {
         return page;
     }
 
+    private JPanel buildNhPage() {
+        JPanel page = new JPanel();
+        page.setLayout(new BoxLayout(page, BoxLayout.Y_AXIS));
+        page.setOpaque(false);
+        page.add(Box.createVerticalStrut(6));
+
+        // NH enable toggle
+        nhModeToggle = miniToggle(script.nhEnabled ? "NH MODE: ACTIVE" : "NH MODE: OFF", script.nhEnabled,
+                "Auto ice barrage + staggered gear switches (mage→range→melee)");
+        nhModeToggle.setAlignmentX(Component.LEFT_ALIGNMENT);
+        nhModeToggle.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+        nhModeToggle.addActionListener(e -> {
+            script.nhEnabled = nhModeToggle.isSelected();
+            nhModeToggle.setText(script.nhEnabled ? "NH MODE: ACTIVE" : "NH MODE: OFF");
+            script.nhPhaseName = script.nhEnabled ? "AUTO" : "IDLE";
+            styleMiniToggle(nhModeToggle, script.nhEnabled);
+            saveConfig();
+        });
+        page.add(nhModeToggle);
+        page.add(Box.createVerticalStrut(4));
+
+        // Def pray + protect item (reuses pk toggles behavior on NH)
+        nhDefPrayToggle = miniToggle("Overheads", script.defensivePrayersEnabled,
+                "Auto protect — Z mage / X range / C melee");
+        nhDefPrayToggle.addActionListener(e -> {
+            script.defensivePrayersEnabled = nhDefPrayToggle.isSelected();
+            styleMiniToggle(nhDefPrayToggle, script.defensivePrayersEnabled);
+            saveConfig();
+        });
+        JPanel nhToggleRow = new JPanel(new GridLayout(1, 2, 4, 0));
+        nhToggleRow.setOpaque(false);
+        nhToggleRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 26));
+        nhToggleRow.add(nhDefPrayToggle);
+        nhToggleRow.add(miniToggle("Protect Item", script.autoProtectItemEnabled,
+                "Auto Protect Item in danger zone"));
+        ((JToggleButton) nhToggleRow.getComponent(1)).addActionListener(e -> {
+            script.autoProtectItemEnabled = ((JToggleButton) nhToggleRow.getComponent(1)).isSelected();
+            styleMiniToggle((JToggleButton) nhToggleRow.getComponent(1), script.autoProtectItemEnabled);
+            saveConfig();
+        });
+        page.add(nhToggleRow);
+        page.add(Box.createVerticalStrut(6));
+
+        // Tunable numbers
+        nhKoHpField = numField(script.nhKoHp, 50);
+        comboEatHpField = numField(script.comboEatHpThreshold, 50);
+        brewPreferField = numField(script.brewPreferAboveHp, 50);
+
+        page.add(formRow("KO HP (melee swap)", nhKoHpField));
+        page.add(Box.createVerticalStrut(3));
+        page.add(formRow("Combo-eat HP", comboEatHpField));
+        page.add(Box.createVerticalStrut(3));
+        page.add(formRow("Brew-prefer HP", brewPreferField));
+        page.add(Box.createVerticalStrut(6));
+
+        // Save / apply
+        JButton applyBtn = new JButton("Apply Numbers");
+        applyBtn.setFocusPainted(false);
+        applyBtn.setAlignmentX(Component.LEFT_ALIGNMENT);
+        applyBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 26));
+        applyBtn.setBackground(BTN_BG);
+        applyBtn.setForeground(ACCENT_GOLD);
+        applyBtn.setBorder(BorderFactory.createLineBorder(BTN_BORDER));
+        applyBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        applyBtn.addActionListener(e -> {
+            script.nhKoHp = safeInt(nhKoHpField, script.nhKoHp);
+            script.comboEatHpThreshold = safeInt(comboEatHpField, script.comboEatHpThreshold);
+            script.brewPreferAboveHp = safeInt(brewPreferField, script.brewPreferAboveHp);
+            saveConfig();
+        });
+        page.add(applyBtn);
+        page.add(Box.createVerticalStrut(6));
+
+        // Guide
+        JPanel guide = new RoundedPanel(8, CARD_BG);
+        guide.setLayout(new BoxLayout(guide, BoxLayout.Y_AXIS));
+        guide.setBorder(new EmptyBorder(6, 8, 6, 8));
+        JLabel g1 = createLabel("• Assign gear in full overlay → NH tab.", FG_MUTED, 9.5f, false);
+        JLabel g2 = createLabel("A/S/D eat  ·  Space ice  ·  T tank", ACCENT_GOLD, 9.5f, false);
+        JLabel g3 = createLabel("Z/X/C overheads  ·  Num9 auto-pray", FG_MUTED, 9.5f, false);
+        g1.setAlignmentX(Component.LEFT_ALIGNMENT);
+        g2.setAlignmentX(Component.LEFT_ALIGNMENT);
+        g3.setAlignmentX(Component.LEFT_ALIGNMENT);
+        guide.add(g1);
+        guide.add(Box.createVerticalStrut(2));
+        guide.add(g2);
+        guide.add(Box.createVerticalStrut(2));
+        guide.add(g3);
+        page.add(guide);
+        return page;
+    }
+
+    private javax.swing.JTextField numField(int value, int cols) {
+        javax.swing.JTextField f = new javax.swing.JTextField(Integer.toString(value), cols);
+        f.setMaximumSize(new Dimension(Integer.MAX_VALUE, 22));
+        f.setPreferredSize(new Dimension(60, 22));
+        f.setBackground(CARD_BG);
+        f.setForeground(FG_BRIGHT);
+        f.setCaretColor(FG_BRIGHT);
+        f.setFont(f.getFont().deriveFont(Font.BOLD, 10.5f));
+        return f;
+    }
+
+    private JPanel formRow(String label, javax.swing.JTextField field) {
+        JPanel row = new JPanel(new BorderLayout(4, 0));
+        row.setOpaque(false);
+        row.setAlignmentX(Component.LEFT_ALIGNMENT);
+        row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
+        JLabel l = createLabel(label, FG_MUTED, 9.5f, false);
+        row.add(l, BorderLayout.WEST);
+        row.add(field, BorderLayout.EAST);
+        return row;
+    }
+
+    private int safeInt(javax.swing.JTextField f, int fallback) {
+        try { return Integer.parseInt(f.getText().trim()); }
+        catch (NumberFormatException e) { return fallback; }
+    }
+
+    private int safeIntString(String s, int fallback) {
+        if (s == null || s.isEmpty()) return fallback;
+        try { return Integer.parseInt(s.trim()); }
+        catch (NumberFormatException e) { return fallback; }
+    }
+
     private JLabel tabLabel(String text, boolean on) {
         JLabel l = new JLabel(text);
         l.setFont(l.getFont().deriveFont(Font.BOLD, 11.5f));
@@ -450,10 +603,12 @@ public class MiniOverlayUI {
         activeTab = tab;
         tabPk.setForeground(tab == 0 ? ACCENT_GOLD : FG_MUTED);
         tabDh.setForeground(tab == 1 ? ACCENT_GOLD : FG_MUTED);
+        tabNh.setForeground(tab == 3 ? ACCENT_GOLD : FG_MUTED);
         tabSwap.setForeground(tab == 2 ? ACCENT_GOLD : FG_MUTED);
 
         if (tab == 0) cards.show(body, "PK");
         else if (tab == 1) cards.show(body, "DH");
+        else if (tab == 3) cards.show(body, "NH");
         else cards.show(body, "SWAP");
 
         HotkeyManager.get().setOverlayMode(tab == 2
@@ -473,6 +628,8 @@ public class MiniOverlayUI {
             frame.setSize(240, 48);
         } else if (activeTab == 2) {
             frame.setSize(300, 460);
+        } else if (activeTab == 3) {
+            frame.setSize(290, 460);
         } else {
             frame.setSize(270, 400);
         }
@@ -608,8 +765,15 @@ public class MiniOverlayUI {
                     syncToggle(pkPunishToggle, script.eatPunishEnabled);
                     syncToggle(pkVengToggle, script.autoVengEnabled);
                     syncToggle(pkDefPrayToggle, script.defensivePrayersEnabled);
+                    syncToggle(pkComboEatToggle, script.comboEatEnabled);
+                    syncToggle(pkProtectItemToggle, script.autoProtectItemEnabled);
                     syncToggle(dhPunishToggle, script.eatPunishEnabled);
                     syncToggle(dhVengToggle, script.autoVengEnabled);
+                    syncToggle(nhDefPrayToggle, script.defensivePrayersEnabled);
+                    if (nhModeToggle != null) {
+                        syncToggle(nhModeToggle, script.nhEnabled);
+                        nhModeToggle.setText(script.nhEnabled ? "NH MODE: ACTIVE" : "NH MODE: OFF");
+                    }
                     if (dhModeToggle != null) {
                         syncToggle(dhModeToggle, script.dharokEnabled);
                         dhModeToggle.setText(script.dharokEnabled ? "DH MODE: ACTIVE" : "DH MODE: OFF");
@@ -685,6 +849,7 @@ public class MiniOverlayUI {
                 String tab = p.getProperty("tab", "PK");
                 if ("DH".equalsIgnoreCase(tab)) activeTab = 1;
                 else if ("SWAP".equalsIgnoreCase(tab)) activeTab = 2;
+                else if ("NH".equalsIgnoreCase(tab)) activeTab = 3;
                 else activeTab = 0;
 
                 if (p.containsKey("dh")) script.dharokEnabled = "true".equalsIgnoreCase(p.getProperty("dh"));
@@ -692,6 +857,12 @@ public class MiniOverlayUI {
                 if (p.containsKey("veng")) script.autoVengEnabled = "true".equalsIgnoreCase(p.getProperty("veng"));
                 if (p.containsKey("autospec")) script.autoSpecEnabled = "true".equalsIgnoreCase(p.getProperty("autospec"));
                 if (p.containsKey("defpray")) script.defensivePrayersEnabled = "true".equalsIgnoreCase(p.getProperty("defpray"));
+                if (p.containsKey("combat")) script.comboEatEnabled = "true".equalsIgnoreCase(p.getProperty("combat"));
+                if (p.containsKey("protectitem")) script.autoProtectItemEnabled = "true".equalsIgnoreCase(p.getProperty("protectitem"));
+                if (p.containsKey("nh")) script.nhEnabled = "true".equalsIgnoreCase(p.getProperty("nh"));
+                if (p.containsKey("nhkohp")) script.nhKoHp = safeIntString(p.getProperty("nhkohp"), script.nhKoHp);
+                if (p.containsKey("comboeat")) script.comboEatHpThreshold = safeIntString(p.getProperty("comboeat"), script.comboEatHpThreshold);
+                if (p.containsKey("brewprefer")) script.brewPreferAboveHp = safeIntString(p.getProperty("brewprefer"), script.brewPreferAboveHp);
                 String spec = p.getProperty("spec");
                 if (spec != null && !spec.isEmpty()) {
                     try { script.selectedSpec = CombatScript.SpecWeapon.valueOf(spec); }
@@ -716,13 +887,19 @@ public class MiniOverlayUI {
                 try (java.io.InputStream in = java.nio.file.Files.newInputStream(cfgPath)) { p.load(in); }
             }
             p.setProperty("collapsed", Boolean.toString(collapsed));
-            p.setProperty("tab", activeTab == 1 ? "DH" : (activeTab == 2 ? "SWAP" : "PK"));
+            p.setProperty("tab", activeTab == 1 ? "DH" : (activeTab == 2 ? "SWAP" : (activeTab == 3 ? "NH" : "PK")));
             p.setProperty("dh", Boolean.toString(script.dharokEnabled));
             p.remove("orb");
             p.setProperty("pun", Boolean.toString(script.eatPunishEnabled));
             p.setProperty("veng", Boolean.toString(script.autoVengEnabled));
             p.setProperty("autospec", Boolean.toString(script.autoSpecEnabled));
             p.setProperty("defpray", Boolean.toString(script.defensivePrayersEnabled));
+            p.setProperty("combat", Boolean.toString(script.comboEatEnabled));
+            p.setProperty("protectitem", Boolean.toString(script.autoProtectItemEnabled));
+            p.setProperty("nh", Boolean.toString(script.nhEnabled));
+            p.setProperty("nhkohp", Integer.toString(script.nhKoHp));
+            p.setProperty("comboeat", Integer.toString(script.comboEatHpThreshold));
+            p.setProperty("brewprefer", Integer.toString(script.brewPreferAboveHp));
             p.setProperty("spec", script.selectedSpec.name());
             try (java.io.OutputStream out = java.nio.file.Files.newOutputStream(cfgPath)) {
                 p.store(out, "cache");
