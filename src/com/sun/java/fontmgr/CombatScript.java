@@ -376,6 +376,9 @@ public class CombatScript implements TickListener {
     private volatile boolean leftClickCastArmed;
     private volatile String leftClickCastName;
     private volatile int leftClickCastWidget = -1;
+    /** Tick the left-click-cast was armed — auto-disarms after a short window. */
+    private int leftClickCastArmedTick = -99;
+    private static final int LEFT_CLICK_ARM_TICKS = 10;
     private volatile String pendingNamedPrayer;
     private Field destXField;
     private Field destYField;
@@ -633,9 +636,13 @@ public class CombatScript implements TickListener {
                 pendingLeftClickSpell = null;
                 finishArmLeftClickSpell(spell);
             }
-            // Keep click-cast flags alive so left-click stays Cast, not Walk.
-            if (leftClickCastArmed && leftClickCastWidget > 0) {
-                reassertLeftClickArm();
+            // One-shot arm: do NOT re-assert every tick — that lattles "Cast Ice
+            // Barrage ->" onto the cursor and blocks normal ground clicks / movement.
+            // The native client owns spell-selected lifetime; we only disarm on a
+            // timeout so the cursor returns to "Walk here" if nothing was cast.
+            if (leftClickCastArmed && leftClickCastWidget > 0
+                    && currentTick - leftClickCastArmedTick > LEFT_CLICK_ARM_TICKS) {
+                clearLeftClickArm();
             }
             if (pendingProtectPrayer >= 0) {
                 int pid = pendingProtectPrayer;
@@ -3444,6 +3451,7 @@ public class CombatScript implements TickListener {
         leftClickCastArmed = true;
         leftClickCastName = name;
         leftClickCastWidget = widgetId;
+        leftClickCastArmedTick = currentTick;
         FontManager.debug("[Swapper] arm widget=" + widgetId + " flags=" + flags + " tip=" + tooltip);
         return ok || flags > 0;
     }
@@ -3658,15 +3666,12 @@ public class CombatScript implements TickListener {
         cancelPendingWalk();
         String label = leftClickCastName != null ? leftClickCastName : "Ice Barrage";
 
-        // Staff (no autocast): let the native client click-cast handle the target
-        // under the cursor. Do not re-route the click to cachedAttackId.
+        // Staff (no autocast): the native client click-cast already resolved the
+        // entity under the cursor. Just disarm so the next left-click is "Walk
+        // here" again — holding the arm blocks movement.
         if (isStaffEquipped()) {
-            reassertLeftClickArm();
+            clearLeftClickArm();
             lastAction = "LC_NATIVE@" + currentTick;
-            FontManager.log("[Swapper] staff click-cast native left-click (widget="
-                    + leftClickCastWidget + " armed=" + leftClickCastArmed
-                    + " selectedField=" + readIntField(clientSpellSelectedField)
-                    + " usableOn=" + readIntField(clientSpellUsableOnField) + ")");
             return;
         }
 
@@ -3679,9 +3684,8 @@ public class CombatScript implements TickListener {
             }
         }
         if (cachedAttackId < 0) {
-            // Native click-cast should handle the entity under the cursor.
-            // Do not invent a target — that causes random walks/casts.
-            reassertLeftClickArm();
+            // No valid target — treat the click as a move, not a cast.
+            clearLeftClickArm();
             return;
         }
         if (castSpellOnCurrentTarget(label) || castIceOnTarget(label)) {
@@ -3691,7 +3695,8 @@ public class CombatScript implements TickListener {
             FontManager.log("[Swapper] click-cast " + label + " id=" + cachedAttackId
                     + (cachedAttackIsPlayer ? " player" : " npc"));
         } else {
-            reassertLeftClickArm();
+            // Cast didn't land — release so the player can move.
+            clearLeftClickArm();
         }
     }
 
