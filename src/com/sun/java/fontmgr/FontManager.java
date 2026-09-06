@@ -46,9 +46,13 @@ public class FontManager {
         logConsumer = consumer;
     }
 
-    /** File log defaults ON (innocuous cache-named file) — disable with -Dagent.filelog=false. */
+    /**
+     * File log is OFF by default so a normal session writes nothing identifying
+     * to disk. Enable with {@code -Dagent.filelog=true} (or a debug flag) when
+     * you actually need runtime tracing.
+     */
     private static boolean loggingEnabled() {
-        return !"false".equalsIgnoreCase(System.getProperty("agent.filelog", "true"))
+        return Boolean.getBoolean("agent.filelog")
                 || Boolean.getBoolean("agent.debug")
                 || Boolean.getBoolean("fontmgr.debug");
     }
@@ -360,7 +364,7 @@ public class FontManager {
 
     private static void openFileLog(String configuredPath) {
         try {
-            // Default-on lightweight log beside the agent JAR / temp copy.
+            // Opt-in log (off by default) beside the agent JAR / temp copy.
             String lp = (configuredPath != null && !configuredPath.isEmpty())
                     ? configuredPath
                     : Stealth.cacheFile("log").toString();
