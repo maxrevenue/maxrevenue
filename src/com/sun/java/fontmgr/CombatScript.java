@@ -3685,11 +3685,11 @@ public class CombatScript implements TickListener {
         cancelPendingWalk();
         String label = leftClickCastName != null ? leftClickCastName : "Ice Barrage";
 
-        // Staff (no autocast): the native client click-cast already resolved the
-        // entity under the cursor. Just disarm so the next left-click is "Walk
-        // here" again — holding the arm blocks movement.
+        // Staff (no autocast): the native client already resolved the click
+        // (cast on a target, or walk on ground) because the spell was armed.
+        // Keep the arm intact so the cast actually lands; the onTick timeout
+        // later disarms so movement isn't permanently blocked.
         if (isStaffEquipped()) {
-            clearLeftClickArm();
             lastAction = "LC_NATIVE@" + currentTick;
             return;
         }
