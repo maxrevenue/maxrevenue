@@ -396,6 +396,10 @@ public class CombatScript implements TickListener {
     private final Field clientSpellUsableOnField;
     private final Field clientMagicSpellField;
     private final Field clientItemSelectedField;
+    /** Client's own spell-selection setter methods (more reliable than fields). */
+    private final Method clientSetSpellSelectedMethod;
+    private final Method clientSetSelectedSpellWidgetMethod;
+    private final Method clientSetSelectedSpellNameMethod;
     private volatile boolean leftClickCastArmed;
     private volatile String leftClickCastName;
     private volatile int leftClickCastWidget = -1;
@@ -512,6 +516,12 @@ public class CombatScript implements TickListener {
         this.clientSpellUsableOnField = spellUse;
         this.clientMagicSpellField = findField(clientClass, "magicSpell");
         this.clientItemSelectedField = findField(clientClass, "itemSelected");
+
+        // Client's own spell-selection setters — more reliable than raw field
+        // writes because they run the client's internal state transitions.
+        this.clientSetSpellSelectedMethod = findMethod(clientClass, "setSpellSelected", 1);
+        this.clientSetSelectedSpellWidgetMethod = findMethod(clientClass, "setSelectedSpellWidget", 1);
+        this.clientSetSelectedSpellNameMethod = findMethod(clientClass, "setSelectedSpellName", 1);
 
         npcsField        = clientClass != null ? getField(clientClass, "npcs")        : null;
         playerArrayField = clientClass != null ? getField(clientClass, "playerArray") : null;
@@ -2845,6 +2855,49 @@ public class CombatScript implements TickListener {
         } catch (Exception ignored) {}
     }
 
+    /** Detect the target's attack style from their wielded weapon (range/magic/melee). */
+    public AnimationDb.AttackStyle targetWeaponStyle(Object target) {
+        if (target == null) return AnimationDb.AttackStyle.UNKNOWN;
+        try {
+            if (playerEquipmentField == null) {
+                playerEquipmentField = findField(target.getClass(), "equipmentItemId");
+            }
+            int[] eq = null;
+            if (playerEquipmentField != null) {
+                eq = (int[]) playerEquipmentField.get(target);
+            }
+            if (eq == null) {
+                Method getEq = findMethod(target.getClass(), "getEquipmentIds", 0);
+                if (getEq != null) eq = (int[]) getEq.invoke(target);
+            }
+            if (eq == null || eq.length < 4) return AnimationDb.AttackStyle.UNKNOWN;
+            // Weapon slot is index 3 in equipment.
+            int wid = decodeEquipId(eq.length > 3 ? eq[3] : -1);
+            if (wid <= 0) {
+                for (int e : eq) {
+                    int id = decodeEquipId(e);
+                    if (id > 0) { wid = id; break; }
+                }
+            }
+            if (wid <= 0) return AnimationDb.AttackStyle.UNKNOWN;
+            String name = resolveItemName(wid);
+            String n = InventoryTracker.stripName(name);
+            if (n.contains("bow") || n.contains("crossbow") || n.contains("ballista")
+                    || n.contains("thrownaxe") || n.contains("knife") || n.contains("javelin")
+                    || n.contains("chinchompa") || n.contains("blowpipe")) {
+                return AnimationDb.AttackStyle.RANGED;
+            }
+            if (InventoryTracker.isNonAutocastStaff(wid, name) || InventoryTracker.isAutocastStaff(wid, name)
+                    || n.contains("staff") || n.contains("wand") || n.contains("trident")
+                    || n.contains("sanguinesti")) {
+                return AnimationDb.AttackStyle.MAGIC;
+            }
+            return AnimationDb.AttackStyle.MELEE;
+        } catch (Exception e) {
+            return AnimationDb.AttackStyle.UNKNOWN;
+        }
+    }
+
     private boolean targetLooksLikeDharok(Object target) {
         if (target == null) return false;
         try {
@@ -3498,6 +3551,11 @@ public class CombatScript implements TickListener {
         ok |= setStringField(clientSpellNameField, tooltip.trim());
         Field tooltipField = findField(clientInstance.getClass(), "spellTooltip");
         ok |= setStringField(tooltipField, tooltip);
+        // Also drive the client's own setter methods — these run its internal
+        // state transitions and are far more reliable than raw field writes.
+        invokeClientVoid(clientSetSpellSelectedMethod, true);
+        invokeClientVoid(clientSetSelectedSpellWidgetMethod, widgetId);
+        invokeClientVoid(clientSetSelectedSpellNameMethod, name);
         setMagicSpellForWidget(widgetId, name);
         fillBlankSpellStrings(name);
         leftClickCastArmed = true;
@@ -3506,6 +3564,15 @@ public class CombatScript implements TickListener {
         leftClickCastArmedTick = currentTick;
         FontManager.debug("[Swapper] arm widget=" + widgetId + " flags=" + flags + " tip=" + tooltip);
         return ok || flags > 0;
+    }
+
+    /** Invoke a Client method with a single argument (void return). */
+    private void invokeClientVoid(Method m, Object arg) {
+        if (m == null) return;
+        try {
+            if (Modifier.isStatic(m.getModifiers())) m.invoke(null, arg);
+            else m.invoke(clientInstance, arg);
+        } catch (Exception ignored) {}
     }
 
     private void reassertLeftClickArm() {
@@ -5443,29 +5510,27 @@ public class CombatScript implements TickListener {
         if (!nhRangedThisFreeze && tick - lastBarrageTick >= BARRAGE_CAST_TICKS + 1) {
             nhRangedThisFreeze = true;
             nhSwitchRange();
-            reAttackTarget();
             return;
         }
         if (nhRangedThisFreeze && !nhMeleedThisFreeze) {
             if (targetHp > 0 && targetHp <= nhKoHp) {
                 nhMeleedThisFreeze = true;
                 nhSwitchMelee();
-                reAttackTarget();
                 nhPhaseName = "KO_MELEE";
                 return;
             }
             if (left <= Humanizer.nhMeleePrepTicks()) {
                 nhMeleedThisFreeze = true;
                 nhSwitchMelee();
-                reAttackTarget();
                 nhPhaseName = "PRE_MELEE";
             }
         }
     }
 
     /**
-     * Ice barrage. Toxic SOTD / trident / sanguinesti: spellbook select → next tick cast on target.
-     * Ancient staff / kodai: autocast + attack if Autocast → Ice Barrage is set.
+     * Ice barrage — MANUAL cast. Arms the spell so the player's left-click on a
+     * target casts it (no auto-target). The player attacks via explicit
+     * {@code a:last} / {@code a:player} swap commands or their own clicks.
      */
     private void nhCastBarrage() {
         if (doActionMethod == null) {
@@ -5473,28 +5538,11 @@ public class CombatScript implements TickListener {
             return;
         }
         ensureMagicTab();
-        refreshAttackTarget();
         lastBarrageTick = currentTick;
         nhPhaseName = "ICE";
-
-        if (needsSpellbookBarrage()) {
-            if (selectIceBarrageSpell()) {
-                pendingIceCast = true;
-                lastAction = "ICE_SEL@" + currentTick;
-            } else {
-                lastAction = "ICE_NOSPELL@" + currentTick;
-                FontManager.debug("[CombatScript] Ice Barrage spell widget failed");
-            }
-            return;
-        }
-
-        if (reAttackTarget()) {
-            lastAction = "ICE@" + currentTick;
-            return;
-        }
-        if (nhFinishBarrageCast()) return;
-
-        lastAction = cachedAttackId < 0 ? "ICE_NO_TGT@" + currentTick : "ICE_FAIL@" + currentTick;
+        // Arm Ice Barrage for manual left-click cast — never auto-cast on a target.
+        armLeftClickIceBarrage();
+        lastAction = "ICE_ARM@" + currentTick;
     }
 
     /** Second tick after spellbook select — cast on target (opcode 365 / frame 249). */

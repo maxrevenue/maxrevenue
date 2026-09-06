@@ -386,6 +386,12 @@ public final class PrayerController {
     }
 
     public AnimationDb.AttackStyle detectDefPrayStyle() {
+        // Primary: the target's wielded weapon is the most reliable signal for
+        // range/mage (bows, crossbows, staves). Check it first.
+        AnimationDb.AttackStyle weaponStyle = script.targetWeaponStyle(script.cachedTarget());
+        if (weaponStyle != AnimationDb.AttackStyle.UNKNOWN) {
+            return weaponStyle;
+        }
         if (script.isFreshIncomingHit() && script.lastIncomingDmg() >= 1) {
             AnimationDb.AnimInfo info = AnimationDb.lookup(script.lastTargetAnim());
             if (info != null && info.style != AnimationDb.AttackStyle.UNKNOWN) {
