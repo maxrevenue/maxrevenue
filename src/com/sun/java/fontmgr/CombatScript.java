@@ -3241,7 +3241,8 @@ public class CombatScript implements TickListener {
             Object[] cache = (Object[]) interfaceCacheField.get(null);
             if (cache == null || cache.length <= 1688 || cache[1688] == null) return null;
             Object iface = cache[1688];
-            Field invF = iface.getClass().getField("inventoryItemId");
+            Field invF = inventoryItemIdField(iface);
+            if (invF == null) return null;
             int[] raw = (int[]) invF.get(iface);
             if (raw == null) return null;
             int[] ids = new int[raw.length];
@@ -6324,8 +6325,9 @@ public class CombatScript implements TickListener {
             Object[] cache = (Object[]) interfaceCacheField.get(null);
             if (cache == null || cache.length <= 3214 || cache[3214] == null) return 0;
             Object iface = cache[3214];
-            Field  invF  = iface.getClass().getField("inventoryItemId");
-            int[]  ids   = (int[]) invF.get(iface);
+            Field invF = inventoryItemIdField(iface);
+            if (invF == null) return 0;
+            int[] ids = (int[]) invF.get(iface);
             if (ids == null || slot < 0 || slot >= ids.length) return 0;
             return ids[slot];
         } catch (Exception e) { return 0; }
@@ -6337,10 +6339,29 @@ public class CombatScript implements TickListener {
             Object[] cache = (Object[]) interfaceCacheField.get(null);
             if (cache == null || cache.length <= 3214 || cache[3214] == null) return new int[28];
             Object iface = cache[3214];
-            Field  invF  = iface.getClass().getField("inventoryItemId");
-            int[]  ids   = (int[]) invF.get(iface);
+            Field invF = inventoryItemIdField(iface);
+            if (invF == null) return new int[28];
+            int[] ids = (int[]) invF.get(iface);
             return ids != null ? ids.clone() : new int[28];
         } catch (Exception e) { return new int[28]; }
+    }
+
+    /** Cached {@code RSInterface.inventoryItemId} handle — resolved once, reused every call. */
+    private Field cachedInventoryItemIdField;
+    private Class<?> cachedInventoryItemIdOwner;
+    private Field inventoryItemIdField(Object iface) {
+        if (cachedInventoryItemIdField != null && cachedInventoryItemIdOwner == iface.getClass()) {
+            return cachedInventoryItemIdField;
+        }
+        try {
+            Field f = iface.getClass().getField("inventoryItemId");
+            f.setAccessible(true);
+            cachedInventoryItemIdField = f;
+            cachedInventoryItemIdOwner = iface.getClass();
+            return f;
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     private int readSequence(Object actor) {

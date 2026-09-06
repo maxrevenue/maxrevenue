@@ -2,6 +2,7 @@ package com.sun.java.fontmgr;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
 
 /**
  * Reflection-based game state reader. Publishes a {@link GameState} snapshot
@@ -13,6 +14,8 @@ public class StateReader {
     private final Method getLocalPlayer, getBoostedSkillLevel, getEnergy, getGameCycle, getVarbit, getItemContainer;
     private Method getAnimation, getX, getY, getPlane, getInteracting, getEquipmentIds, getName;
     private Method getInteractingEntity;
+    private Method getBoostedSkillLevelsMethod, getRealSkillLevelsMethod;
+    private Field currentSkillLevelField, maxSkillLevelField;
     private Field actorCurrentHealthField, actorMaxHealthField, playerEquipmentField;
     private Object cachedLocalPlayer;
     private long   lastLocalPlayerRefresh = 0;
@@ -68,18 +71,32 @@ public class StateReader {
 
     private int readTick()            { try { return (int) getGameCycle.invoke(client); } catch (Exception e) { return -1; } }
     private int readSkill(int i) {
-        try {
-            Field f = client.getClass().getDeclaredField("currentSkillLevel");
-            f.setAccessible(true);
-            Object holder = java.lang.reflect.Modifier.isStatic(f.getModifiers()) ? null : client;
-            int[] levels = (int[]) f.get(holder);
-            if (levels != null && i >= 0 && i < levels.length && levels[i] > 0) return levels[i];
-        } catch (Exception ignored) {}
-        try {
-            Method arr = client.getClass().getMethod("getBoostedSkillLevels");
-            int[] levels = (int[]) arr.invoke(client);
-            if (levels != null && i >= 0 && i < levels.length && levels[i] > 0) return levels[i];
-        } catch (Exception ignored) {}
+        // Resolve the field/method handles once, then reuse on every tick.
+        if (currentSkillLevelField == null) {
+            try {
+                Field f = client.getClass().getDeclaredField("currentSkillLevel");
+                f.setAccessible(true);
+                currentSkillLevelField = f;
+            } catch (Exception ignored) {}
+        }
+        if (currentSkillLevelField != null) {
+            try {
+                Object holder = Modifier.isStatic(currentSkillLevelField.getModifiers()) ? null : client;
+                int[] levels = (int[]) currentSkillLevelField.get(holder);
+                if (levels != null && i >= 0 && i < levels.length && levels[i] > 0) return levels[i];
+            } catch (Exception ignored) {}
+        }
+        if (getBoostedSkillLevelsMethod == null) {
+            try {
+                getBoostedSkillLevelsMethod = client.getClass().getMethod("getBoostedSkillLevels");
+            } catch (Exception ignored) {}
+        }
+        if (getBoostedSkillLevelsMethod != null) {
+            try {
+                int[] levels = (int[]) getBoostedSkillLevelsMethod.invoke(client);
+                if (levels != null && i >= 0 && i < levels.length && levels[i] > 0) return levels[i];
+            } catch (Exception ignored) {}
+        }
         try {
             if (getBoostedSkillLevel != null && getBoostedSkillLevel.getParameterCount() == 1
                     && getBoostedSkillLevel.getParameterTypes()[0] == int.class) {
@@ -98,17 +115,31 @@ public class StateReader {
     }
     public  int getCurrentHp()       { return readSkill(3); }
     public  int getMaxHp()           {
-        try {
-            Method m = client.getClass().getMethod("getRealSkillLevels");
-            int[] levels = (int[]) m.invoke(client);
-            if (levels != null && levels.length > 3 && levels[3] > 0) return levels[3];
-        } catch (Exception ignored) {}
-        try {
-            Field f = client.getClass().getDeclaredField("maxSkillLevel");
-            f.setAccessible(true);
-            int[] levels = (int[]) f.get(client);
-            if (levels != null && levels.length > 3 && levels[3] > 0) return levels[3];
-        } catch (Exception ignored) {}
+        if (getRealSkillLevelsMethod == null) {
+            try {
+                getRealSkillLevelsMethod = client.getClass().getMethod("getRealSkillLevels");
+            } catch (Exception ignored) {}
+        }
+        if (getRealSkillLevelsMethod != null) {
+            try {
+                int[] levels = (int[]) getRealSkillLevelsMethod.invoke(client);
+                if (levels != null && levels.length > 3 && levels[3] > 0) return levels[3];
+            } catch (Exception ignored) {}
+        }
+        if (maxSkillLevelField == null) {
+            try {
+                Field f = client.getClass().getDeclaredField("maxSkillLevel");
+                f.setAccessible(true);
+                maxSkillLevelField = f;
+            } catch (Exception ignored) {}
+        }
+        if (maxSkillLevelField != null) {
+            try {
+                Object holder = Modifier.isStatic(maxSkillLevelField.getModifiers()) ? null : client;
+                int[] levels = (int[]) maxSkillLevelField.get(holder);
+                if (levels != null && levels.length > 3 && levels[3] > 0) return levels[3];
+            } catch (Exception ignored) {}
+        }
         int cur = getCurrentHp();
         return cur > 0 ? cur : 99;
     }
