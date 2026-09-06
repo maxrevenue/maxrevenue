@@ -192,7 +192,7 @@ public final class HardcodedCombatAgent implements ClassFileTransformer {
         script.axeSpecMinPct           = 25;
         script.agsMaxHit               = 77;
         script.agsHighHitMin           = 40;
-        script.clawsHighHitMin         = 1;
+        script.clawsHighHitMin         = 50;
         script.comboEatHpThreshold     = COMBO_EAT_HP_THRESHOLD;
         script.brewPreferAboveHp       = 30;
         script.counterSpecEnabled      = false;

@@ -112,8 +112,8 @@ public class CombatScript implements TickListener {
     public volatile int        agsMaxHit = 77;
     /** Gmaul follow-up only if the AGS splat is at least this. */
     public volatile int        agsHighHitMin = 40;
-    /** Gmaul after claws even on a low roll. Q / auto-spec always want the follow. */
-    public volatile int        clawsHighHitMin = 1;
+    /** Gmaul after claws only if the combined claws splat is at least this. */
+    public volatile int        clawsHighHitMin = 50;
 
     // v7 failsafe flags (hardcoded by HardcodedCombatAgent)
     public volatile boolean disableSwapDelay      = true;
@@ -2208,6 +2208,16 @@ public class CombatScript implements TickListener {
         int hit = isClawsCombo() ? watchSplatSum : lastHitsplatDmg;
         int wait = isClawsCombo() ? CLAWS_SPLAT_WAIT : 0;
         if (forceGmaulFollow && tick - agsWatchTick > wait) {
+            // For claws, the player only wants the gmaul on a 50+ splat — do
+            // NOT force it on a low roll. For AGS/dmace, Q-dump still follows.
+            if (isClawsCombo() && hit < Math.max(1, clawsHighHitMin)) {
+                agsWatchArmed = false;
+                forceGmaulFollow = false;
+                agsSpecFromScript = false;
+                lastAction = "NOGMAUL_" + hit + "of" + Math.max(1, clawsHighHitMin) + "@" + tick;
+                scheduleBaselineRestore();
+                return;
+            }
             agsWatchArmed = false;
             pendingGmaulDump = true;
             forceGmaulFollow = false;
@@ -3705,41 +3715,13 @@ public class CombatScript implements TickListener {
      */
     private void fireArmedSpellAtClick() {
         if (!leftClickCastArmed) return;
+        // Manual cast: the player clicks the target. The spell is already armed
+        // ("Cast Ice Barrage ->"), so the native client casts on whatever entity
+        // is under the cursor. Do NOT auto-route to a cached target — that was
+        // casting on the wrong entity / firing on dummies when the player was
+        // trying to move.
         cancelPendingWalk();
-        String label = leftClickCastName != null ? leftClickCastName : "Ice Barrage";
-
-        // Staff (no autocast): the native client already resolved the click
-        // (cast on a target, or walk on ground) because the spell was armed.
-        // Keep the arm intact so the cast actually lands; the onTick timeout
-        // later disarms so movement isn't permanently blocked.
-        if (isStaffEquipped()) {
-            lastAction = "LC_NATIVE@" + currentTick;
-            return;
-        }
-
-        refreshAttackTarget();
-        if (cachedAttackId < 0) {
-            int npc = findNpcIndexByName("dummy");
-            if (npc >= 0) {
-                cachedAttackId = npc;
-                cachedAttackIsPlayer = false;
-            }
-        }
-        if (cachedAttackId < 0) {
-            // No valid target — treat the click as a move, not a cast.
-            clearLeftClickArm();
-            return;
-        }
-        if (castSpellOnCurrentTarget(label) || castIceOnTarget(label)) {
-            cancelPendingWalk();
-            clearLeftClickArm();
-            lastAction = "LC_CLICK@" + currentTick;
-            FontManager.log("[Swapper] click-cast " + label + " id=" + cachedAttackId
-                    + (cachedAttackIsPlayer ? " player" : " npc"));
-        } else {
-            // Cast didn't land — release so the player can move.
-            clearLeftClickArm();
-        }
+        lastAction = "LC_NATIVE@" + currentTick;
     }
 
     /** True when the wielded weapon is a staff (no autocast — click-cast only). */
