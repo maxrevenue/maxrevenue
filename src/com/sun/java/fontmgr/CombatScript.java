@@ -147,6 +147,27 @@ public class CombatScript implements TickListener {
     public final NhLoadout meleeLoadout = new NhLoadout();
     public final NhLoadout tankLoadout  = new NhLoadout();
 
+    /** The four NH gear sets, keyed for the Swapper snapshot buttons. */
+    public enum NH_SET { MAGE, RANGE, MELEE, TANK }
+
+    /** Snapshot currently-equipped gear into one NH loadout set. */
+    public void snapshotNhLoadout(NH_SET set) {
+        NhLoadout target;
+        switch (set) {
+            case MAGE:  target = mageLoadout; break;
+            case RANGE: target = rangeLoadout; break;
+            case MELEE: target = meleeLoadout; break;
+            default:    target = tankLoadout; break;
+        }
+        target.clear();
+        EquippedPiece[] worn = snapshotEquippedGear();
+        for (EquippedPiece p : worn) {
+            if (p.itemId > 0) target.pieces().add(new NhLoadout.Piece(p.itemId, p.name));
+        }
+        NhLoadout.saveAll(this);
+        lastAction = "NH_SNAP_" + set.name() + "@" + currentTick;
+    }
+
     /** Mini overlay NH tab — auto ice barrage + gear loop. Off until you turn it on. */
     public volatile boolean nhEnabled = false;
     /** Melee switch when target HP is at or below this. */

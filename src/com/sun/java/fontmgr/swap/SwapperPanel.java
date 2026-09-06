@@ -102,7 +102,23 @@ public final class SwapperPanel extends JPanel {
         iceBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 26));
         iceBtn.setForeground(ACCENT);
         body.add(iceBtn);
+        body.add(Box.createVerticalStrut(6));
+
+        // NH gear loadouts — snapshot currently-equipped gear into each NH set.
+        JLabel nhTitle = new JLabel("NH Loadouts (snapshot current gear)");
+        nhTitle.setForeground(ACCENT);
+        nhTitle.setFont(nhTitle.getFont().deriveFont(Font.BOLD, 11f));
+        nhTitle.setAlignmentX(Component.LEFT_ALIGNMENT);
+        body.add(nhTitle);
         body.add(Box.createVerticalStrut(3));
+        body.add(row(
+                btn("Mage", e -> snapshotNh(com.sun.java.fontmgr.CombatScript.NH_SET.MAGE)),
+                btn("Range", e -> snapshotNh(com.sun.java.fontmgr.CombatScript.NH_SET.RANGE))));
+        body.add(Box.createVerticalStrut(3));
+        body.add(row(
+                btn("Melee", e -> snapshotNh(com.sun.java.fontmgr.CombatScript.NH_SET.MELEE)),
+                btn("Tank", e -> snapshotNh(com.sun.java.fontmgr.CombatScript.NH_SET.TANK))));
+        body.add(Box.createVerticalStrut(4));
 
         JLabel hint = new JLabel("<html>mage swap last lines (Save, then hotkey):<br>"
                 + "p:mystic might<br>s:Ice Barrage<br>"
@@ -121,6 +137,11 @@ public final class SwapperPanel extends JPanel {
     private void armIce() {
         if (script == null) return;
         com.sun.java.fontmgr.ClientThreadGuard.get().invokeLater(script::armLeftClickIceBarrage);
+    }
+
+    private void snapshotNh(com.sun.java.fontmgr.CombatScript.NH_SET set) {
+        if (script == null) return;
+        com.sun.java.fontmgr.ClientThreadGuard.get().invokeLater(() -> script.snapshotNhLoadout(set));
     }
 
     private JPanel row(JButton a, JButton b) {

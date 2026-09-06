@@ -334,14 +334,9 @@ public class OverlayUI {
         page.add(apply);
         page.add(Box.createVerticalStrut(6));
 
-        // NH gear loadout pickers
-        page.add(loadoutPicker("Mage", ACCENT_PURPLE, script.mageLoadout));
-        page.add(Box.createVerticalStrut(4));
-        page.add(loadoutPicker("Range", ACCENT_ORANGE, script.rangeLoadout));
-        page.add(Box.createVerticalStrut(4));
-        page.add(loadoutPicker("Melee", ACCENT_GREEN, script.meleeLoadout));
-        page.add(Box.createVerticalStrut(4));
-        page.add(loadoutPicker("Tank", ACCENT_BLUE, script.tankLoadout));
+        page.add(infoLine("NH = no-honor fight loop: freeze (Ice Barrage) → range hits → melee KO"));
+        page.add(infoLine("Set NH gear in Swapper tab → NH Loadouts."));
+        page.add(infoLine("A/S/D eat · Space ice · T tank · Z/X/C overheads"));
         return page;
     }
 
@@ -432,6 +427,8 @@ public class OverlayUI {
         });
         page.add(apply);
         page.add(Box.createVerticalStrut(6));
+        page.add(infoLine("Anim Trigger: dump spec when target plays a spec animation."));
+        page.add(infoLine("Damage Trigger: dump spec when you take a hit >= min damage."));
         page.add(infoLine("INSERT toggles HUD · Ctrl+Shift+R toggles HUD"));
         return page;
     }
@@ -444,32 +441,6 @@ public class OverlayUI {
         p.setOpaque(false);
         p.add(Box.createVerticalStrut(6));
         return p;
-    }
-
-    private JPanel loadoutPicker(String name, Color accent, NhLoadout loadout) {
-        RoundedPanel card = new RoundedPanel(8, CARD_BG);
-        card.setLayout(new BorderLayout(4, 4));
-        card.setBorder(new EmptyBorder(6, 8, 6, 8));
-        JLabel title = createLabel(name, accent, 10.5f, true);
-        card.add(title, BorderLayout.NORTH);
-        InventoryGridPicker grid = new InventoryGridPicker(name, accent, null);
-        card.add(grid, BorderLayout.CENTER);
-        JButton apply = new JButton("Save " + name);
-        styleBtn(apply, accent);
-        apply.addActionListener(e -> {
-            int[] slots = grid.getSelectedSlots();
-            loadout.clear();
-            int[] inv = script.getInventorySnapshot();
-            for (int s : slots) {
-                int raw = inv[s];
-                if (raw <= 0) continue;
-                com.sun.java.fontmgr.CombatScript.InvCell cell = script.getInventoryView()[s];
-                loadout.pieces().add(new NhLoadout.Piece(cell.itemId, cell.name));
-            }
-            NhLoadout.saveAll(script);
-        });
-        card.add(apply, BorderLayout.SOUTH);
-        return card;
     }
 
     private JLabel infoLine(String text) {
