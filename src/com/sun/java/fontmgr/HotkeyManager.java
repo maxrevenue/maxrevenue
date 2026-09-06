@@ -160,7 +160,7 @@ public final class HotkeyManager {
 
         if (overlayMode == OverlayMode.SWAP) {
             if (code == KeyEvent.VK_Q) {
-                script.triggerClawsGmaulNow();
+                script.triggerSpecNow();
                 return true;
             }
             return false;
@@ -199,7 +199,7 @@ public final class HotkeyManager {
             return true;
         }
         if (code == KeyEvent.VK_Q) {
-            script.triggerClawsGmaulNow();
+            script.triggerSpecNow();
             return true;
         }
         if (code == KeyEvent.VK_W) {

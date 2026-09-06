@@ -896,11 +896,10 @@ public class CombatScript implements TickListener {
 
             if (nhEnabled) runNhTick(tick);
 
-            // NH (and PK) spec-survive eat: react to a fresh opponent spec
-            // animation by eating out of the one-shot bracket. This was DH-only;
-            // NH auto (your primary mode) had no reactive protection against
-            // incoming AGS/Gmaul/claws specs.
-            if (!dharokEnabled && (nhEnabled || enabled)
+            // NH spec-survive eat: react to a fresh opponent spec animation by
+            // eating out of the one-shot bracket. NH-only — regular PK stays
+            // fully manual (keys 1-4 / Q).
+            if (!dharokEnabled && nhEnabled
                     && isFreshOpponentSpec()
                     && tryEatOffOpponentSpec(tick)) {
                 return;
@@ -1227,10 +1226,14 @@ public class CombatScript implements TickListener {
     }
 
     /**
-     * Manual Q. Always claws → gmaul on the next tick, regardless of spec setup.
+     * Manual spec hotkey (Q / F) — fires the currently-selected spec setup
+     * (Gmaul, Claws→Gmaul, AGS→Gmaul, DMace→Gmaul, VLS, DBow+Axes).
      */
     public void triggerSpecNow() {
-        triggerClawsGmaulNow();
+        forceGmaulFollow = true;
+        pendingQDump = true;
+        lastAction = "Q_" + comboSetupName();
+        FontManager.log("[CombatScript] Q → " + comboSetupName());
     }
 
     /** Q / hotkey: wield claws, spec, then gmaul — not gated on splat size. */
