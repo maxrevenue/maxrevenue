@@ -105,7 +105,7 @@ public final class SwapperPanel extends JPanel {
         body.add(Box.createVerticalStrut(3));
 
         JLabel hint = new JLabel("<html>mage swap last lines (Save, then hotkey):<br>"
-                + "p:augury<br>s:Ice Barrage<br>"
+                + "p:mystic might<br>s:Ice Barrage<br>"
                 + "then left-click the dummy / player<br>"
                 + "chat:hello &nbsp; cmd:::command</html>");
         hint.setForeground(MUTED);

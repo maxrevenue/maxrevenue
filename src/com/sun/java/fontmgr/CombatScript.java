@@ -3338,8 +3338,8 @@ public class CombatScript implements TickListener {
                 || spell.widgetId == iceBarrageWidgetId;
         boolean selected = ice ? selectIceBarrageSpell() : selectSpell(spell);
         boolean armed = armSpellSelected(ice ? iceBarrageWidgetId : spell.widgetId, spell.displayName);
-        // Mage click-cast always wants Augury / Mystic Might on.
-        pendingNamedPrayer = "augury";
+        // Mage click-cast always wants Mystic Might on (account doesn't have Augury).
+        pendingNamedPrayer = "mystic might";
         leftClickCastArmed = selected || armed;
         leftClickCastName = spell.displayName;
         leftClickCastWidget = ice ? iceBarrageWidgetId : spell.widgetId;
