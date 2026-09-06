@@ -280,6 +280,8 @@ public class CombatScript implements TickListener {
     private int prevSpecEnergy = -1;
     /** Ticks to wait for the AGS splat before giving up on the gmaul. */
     private static final int AGS_SPLAT_WAIT = 3;
+    /** Dragon claws is a multi-hit spec — let all 4 splats land before gmaul. */
+    private static final int CLAWS_SPLAT_WAIT = 3;
     /** Dragon mace is 4-tick. Swap off earlier and the spec never lands. */
     private static final int DMACE_SPLAT_WAIT = 5;
     private static final int DMACE_WIELD_WAIT = 1;
@@ -2204,8 +2206,8 @@ public class CombatScript implements TickListener {
         boolean freshSplat = lastSeenSplatCycle > watchSplatBaselineCycle;
         // Claws land 4 hitsplats — use the running total, not the last 8.
         int hit = isClawsCombo() ? watchSplatSum : lastHitsplatDmg;
-        int wait = isClawsCombo() ? 2 : 0;
-        if (forceGmaulFollow && tick > agsWatchTick) {
+        int wait = isClawsCombo() ? CLAWS_SPLAT_WAIT : 0;
+        if (forceGmaulFollow && tick - agsWatchTick > wait) {
             agsWatchArmed = false;
             pendingGmaulDump = true;
             forceGmaulFollow = false;

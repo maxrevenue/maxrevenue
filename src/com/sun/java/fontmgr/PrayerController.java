@@ -39,11 +39,14 @@ public final class PrayerController {
             // every-tick retry was spamming an unusable prayer. If Augury ever
             // becomes available, this can be re-promoted selectively.
             if (isPrayerActive("MYSTIC_MIGHT")) return;
-            ensurePrayerTab();
+            // Packet path works regardless of the open tab — do NOT switch tabs
+            // (a mage click-cast needs the magic tab). Only fall back to the
+            // prayer-tab widget click if the packet path is unavailable.
             if (trySendPrayerEnumByName("MYSTIC_MIGHT") || trySendPrayerPacket(AnimationDb.MYSTIC_MIGHT_PRAYER_ID)) {
                 setPrayerActive("MYSTIC_MIGHT", true);
                 return;
             }
+            ensurePrayerTab();
             clickOffensivePrayerWidget(AnimationDb.MYSTIC_MIGHT_WIDGET, "Mystic Might");
             setPrayerActive("MYSTIC_MIGHT", true);
             return;
@@ -55,11 +58,11 @@ public final class PrayerController {
         String name = AnimationDb.offensivePrayerName(style);
         int widget = AnimationDb.offensivePrayerWidget(style);
 
-        ensurePrayerTab();
         if (trySendPrayerEnumByName(enumName) || trySendPrayerPacket(prayerId)) {
             setPrayerActive(enumName, true);
             return;
         }
+        ensurePrayerTab();
         clickOffensivePrayerWidget(widget, name);
         setPrayerActive(enumName, true);
 
@@ -406,6 +409,11 @@ public final class PrayerController {
                 return info.style;
             }
         }
+        // Fallback: active fight with an unrecognized animation → default to
+        // melee so we always keep a protect overhead up instead of sitting bare.
+        if (script.isInActivePvpFight()) {
+            return AnimationDb.AttackStyle.MELEE;
+        }
         return AnimationDb.AttackStyle.UNKNOWN;
     }
 
@@ -449,7 +457,7 @@ public final class PrayerController {
         if (!sent && id >= 0) sent |= trySendPrayerPacket(id);
         if (!sent && id >= 0) sent |= trySendPrayerViaMap(id);
         if (!sent && id >= 0) sent |= sendPrayerBufferFallback(id);
-        ensurePrayerTab();
+        if (!sent) ensurePrayerTab();
         if (enumObj != null) {
             try {
                 String display = enumObj.getClass().getMethod("getName").invoke(enumObj).toString();
