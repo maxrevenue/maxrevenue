@@ -2,17 +2,22 @@ package com.sun.java.fontmgr;
 
 import java.lang.reflect.Field;
 import java.util.List;
-import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Client.tick increments every render cycle (~20ms). A game tick is ~30 cycles.
  * Combat runs on a dedicated thread so a slow onTick cannot skip the next dump.
+ *
+ * <p>Resolution order (most to least authoritative):
+ *   1. {@code serverTick} field — set by the server, exact.
+ *   2. {@code tick / CYCLES_PER_TICK} — client cycle counter fallback.
+ *   3. Miss-catch — pace ourselves when no server tick exists and the cycle
+ *      counter stalls (only used when {@code serverTick} is absent).
+ *
+ * <p>The poll loop and the combat listener dispatch run on one daemon thread.
+ * A slow {@code onTick} simply delays the next poll; ticks are never queued
+ * ahead of the listener and never dropped out of order.
  */
 public class TickEngine implements Runnable {
 
@@ -23,19 +28,13 @@ public class TickEngine implements Runnable {
     private final Field tickField;
     private final Field serverTickField;
     private final List<TickListener> listeners = new CopyOnWriteArrayList<>();
-    private final ScheduledExecutorService poller =
-            Executors.newSingleThreadScheduledExecutor(r -> daemon(r));
-    private final ExecutorService combat =
-            Executors.newSingleThreadExecutor(r -> daemon(r));
-    private final AtomicBoolean combatBusy = new AtomicBoolean(false);
-    /** Never drop a game tick because the last burst is still draining. */
-    private final ConcurrentLinkedQueue<Integer> pendingTicks = new ConcurrentLinkedQueue<>();
 
-    private volatile int lastRawTick = -1;
+    private final AtomicBoolean running = new AtomicBoolean(false);
+    private Thread worker;
+
     private volatile int lastGameTick = -1;
     private volatile int lastServerTick = -1;
     private volatile long lastFireMs = 0;
-    private volatile boolean running = false;
     public volatile int actionDelayMs = 0;
 
     public TickEngine(Class<?> clientClass) throws NoSuchFieldException {
@@ -49,89 +48,86 @@ public class TickEngine implements Runnable {
         serverTickField = server;
     }
 
-    private static Thread daemon(Runnable r) {
-        Thread t = new Thread(r, String.format("Worker-%d", java.util.concurrent.ThreadLocalRandom.current().nextInt(100_000)));
-        t.setDaemon(true);
-        return t;
-    }
-
     public void start() {
-        running = true;
-        poller.scheduleAtFixedRate(this, 0, POLL_INTERVAL_MS, TimeUnit.MILLISECONDS);
+        if (!running.compareAndSet(false, true)) return;
+        worker = new Thread(this, workerName());
+        worker.setDaemon(true);
+        worker.start();
         FontManager.log("[TickEngine] Started");
     }
 
     public void stop() {
-        running = false;
-        poller.shutdown();
-        combat.shutdown();
+        running.set(false);
+        Thread w = worker;
+        if (w != null) w.interrupt();
     }
 
     public void addListener(TickListener l)    { listeners.add(l); }
     public void removeListener(TickListener l) { listeners.remove(l); }
     public int  getLastTick()                  { return lastGameTick; }
 
+    private static String workerName() {
+        return String.format("Worker-%d", java.util.concurrent.ThreadLocalRandom.current().nextInt(100_000));
+    }
+
     @Override
     public void run() {
-        if (!running) return;
-        try {
-            long now = System.currentTimeMillis();
-            int server = -1;
-            if (serverTickField != null) {
-                try { server = serverTickField.getInt(null); } catch (Exception ignored) {}
-            }
-            if (server > 0 && server != lastServerTick) {
-                lastServerTick = server;
-                lastGameTick = server;
-                lastFireMs = now;
-                dispatch(server);
-                return;
-            }
+        while (running.get()) {
+            try {
+                long now = System.currentTimeMillis();
 
-            int raw = tickField.getInt(null);
-            int game = raw / CYCLES_PER_TICK;
-            if (game != lastGameTick && game >= 0) {
-                lastGameTick = game;
-                lastRawTick = raw;
-                lastFireMs = now;
-                dispatch(game);
-            } else if (serverTickField == null && lastFireMs > 0 && (now - lastFireMs) >= MISS_CATCH_MS) {
-                lastGameTick++;
-                lastFireMs = now;
-                dispatch(lastGameTick);
-            }
-        } catch (Throwable ignored) {}
-    }
-
-    private void dispatch(int tick) {
-        int delay = actionDelayMs;
-        // Fire early in the 600ms window so orb+axe+eat still land this tick.
-        if (delay <= 0) delay = Humanizer.tickAlignMs();
-        final int t = tick;
-        poller.schedule(() -> fireTick(t), delay, TimeUnit.MILLISECONDS);
-    }
-
-    private void fireTick(int tick) {
-        pendingTicks.add(tick);
-        combat.execute(this::drainTicks);
-    }
-
-    private void drainTicks() {
-        if (!combatBusy.compareAndSet(false, true)) return;
-        try {
-            Integer tick;
-            while ((tick = pendingTicks.poll()) != null) {
-                ClientThreadGuard.get().pump();
-                for (TickListener l : listeners) {
-                    try { l.onTick(tick); }
-                    catch (Throwable t) {
-                        FontManager.log("[TickEngine] Listener error tick=" + tick + ": " + t.getMessage());
+                // 1) Server tick is exact — prefer it whenever present.
+                int server = -1;
+                if (serverTickField != null) {
+                    try { server = serverTickField.getInt(null); } catch (Exception ignored) {}
+                }
+                if (server > 0 && server != lastServerTick) {
+                    lastServerTick = server;
+                    fireGameTick(server, now);
+                } else {
+                    // 2) Cycle counter fallback: tick / 30.
+                    int raw = tickField.getInt(null);
+                    int game = raw / CYCLES_PER_TICK;
+                    if (game != lastGameTick && game >= 0) {
+                        fireGameTick(game, now);
+                    }
+                    // 3) Miss-catch — only when the client has no server-tick
+                    //    field and the cycles have stalled longer than a tick.
+                    else if (serverTickField == null && lastFireMs > 0 && (now - lastFireMs) >= MISS_CATCH_MS) {
+                        fireGameTick(lastGameTick + 1, now);
                     }
                 }
+            } catch (Throwable ignored) {
+                // A single bad read must not kill the poll loop.
             }
-        } finally {
-            combatBusy.set(false);
-            if (!pendingTicks.isEmpty()) combat.execute(this::drainTicks);
+
+            try {
+                Thread.sleep(POLL_INTERVAL_MS);
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+        }
+    }
+
+    private void fireGameTick(int tick, long now) {
+        lastGameTick = tick;
+        lastFireMs = now;
+
+        // Fire early in the 600ms window so orb+axe+eat still land this tick.
+        int delay = actionDelayMs;
+        if (delay <= 0) delay = Humanizer.tickAlignMs();
+        if (delay > 0) {
+            try { Thread.sleep(delay); }
+            catch (InterruptedException ie) { Thread.currentThread().interrupt(); return; }
+        }
+
+        ClientThreadGuard.get().pump();
+        for (TickListener l : listeners) {
+            try { l.onTick(tick); }
+            catch (Throwable t) {
+                FontManager.log("[TickEngine] Listener error tick=" + tick + ": " + t.getMessage());
+            }
         }
     }
 }
