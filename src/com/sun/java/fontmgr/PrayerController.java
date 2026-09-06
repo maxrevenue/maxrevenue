@@ -482,6 +482,29 @@ public final class PrayerController {
         return sent || isPrayerActive(enumName) || enumObj != null;
     }
 
+    /**
+     * Turn on Protect Item (prayer id 11) once. Returns true if the prayer is
+     * now active. Uses the same send paths as {@link #fireNamedPrayer} but with
+     * no {@code lastAction} spam — intended for the auto-danger-zone loop.
+     */
+    public boolean activateProtectItem() {
+        if (isPrayerActive("PROTECT_ITEM")) return true;
+        boolean sent = false;
+        sent |= trySendPrayerEnumByName("PROTECT_ITEM");
+        if (!sent) sent |= trySendPrayerPacket(AnimationDb.PROTECT_ITEM_PRAYER_ID);
+        if (!sent) sent |= trySendPrayerViaMap(AnimationDb.PROTECT_ITEM_PRAYER_ID);
+        if (!sent) sent |= sendPrayerBufferFallback(AnimationDb.PROTECT_ITEM_PRAYER_ID);
+        if (!sent) {
+            ensurePrayerTab();
+            clickOffensivePrayerWidget(AnimationDb.PROTECT_ITEM_PRAYER_ID, "Protect Item");
+        }
+        if (sent || isPrayerActive("PROTECT_ITEM")) {
+            setPrayerActive("PROTECT_ITEM", true);
+            return true;
+        }
+        return false;
+    }
+
     private Object resolvePrayerEnum(String prayerName, int fallbackId) {
         return doResolvePrayerEnum(prayerName, fallbackId);
     }

@@ -123,6 +123,12 @@ public class CombatScript implements TickListener {
     public volatile boolean counterSpecEnabled    = false;
     /** Auto protect from mage/range/melee based on target animation. */
     public volatile boolean defensivePrayersEnabled = true;
+    /** Auto-enable Protect Item whenever we step into a PvP (danger) zone. */
+    public volatile boolean autoProtectItemEnabled = true;
+    /** Protect Item is actively on (tracked so we don't spam the packet). */
+    private boolean protectItemActive = false;
+    /** Last tick we toggled Protect Item (throttle re-sends). */
+    private int lastProtectItemTick = -99;
     /** Require ice barrage selected on staff (Autocast → Ice Barrage) once per login. */
     public volatile boolean nhAutocastHint = true;
  
@@ -829,6 +835,7 @@ public class CombatScript implements TickListener {
             }
 
             if (defensivePrayersEnabled) runAutoDefPrayer(tick);
+            tryAutoProtectItem(tick);
 
             boolean inCombat = hasCombatContext();
             boolean justHit = isFreshIncomingHit();
@@ -6356,6 +6363,59 @@ public class CombatScript implements TickListener {
             return loggedInField.getBoolean(null);
         } catch (Exception e) {
             return true;
+        }
+    }
+
+    /** Cached reflective handle for Client.isInPvP(). */
+    private Method isInPvPMethod;
+    private boolean isInPvPMethodResolved;
+
+    /** True when the client reports we are in a PvP (danger) zone. */
+    public boolean isInPvP() {
+        if (!isInPvPMethodResolved) {
+            isInPvPMethodResolved = true;
+            try {
+                isInPvPMethod = clientInstance.getClass().getMethod("isInPvP");
+            } catch (Exception ignored) {
+                isInPvPMethod = null;
+            }
+        }
+        if (isInPvPMethod != null) {
+            try {
+                Object r = isInPvPMethod.invoke(clientInstance);
+                return r instanceof Boolean && (Boolean) r;
+            } catch (Exception ignored) {}
+        }
+        // Fallback: static field.
+        try {
+            Field f = clientInstance.getClass().getField("isInPvP");
+            Object v = f.get(clientInstance);
+            return v instanceof Boolean && (Boolean) v;
+        } catch (Exception ignored) {}
+        return false;
+    }
+
+    /**
+     * Auto-enable Protect Item when in a danger zone. Fires the prayer once,
+     * then throttles re-sends so it doesn't spam. Clears our tracking flag when
+     * we leave the zone so it re-arms next time.
+     */
+    private void tryAutoProtectItem(int tick) {
+        if (!autoProtectItemEnabled) return;
+        boolean inZone = isInPvP();
+        if (!inZone) {
+            protectItemActive = false;
+            return;
+        }
+        if (protectItemActive) return;
+        // Throttle: at most one Protect Item attempt every 2 ticks while in zone.
+        if (tick - lastProtectItemTick < 2) return;
+        lastProtectItemTick = tick;
+        if (prayer.activateProtectItem()) {
+            protectItemActive = true;
+            lastAction = "PROTECT_ITEM@" + tick;
+        } else {
+            lastAction = "PROTECT_ITEM_FAIL@" + tick;
         }
     }
 
