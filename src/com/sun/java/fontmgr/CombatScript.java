@@ -863,6 +863,25 @@ public class CombatScript implements TickListener {
 
             if (nhEnabled) runNhTick(tick);
 
+            // NH (and PK) spec-survive eat: react to a fresh opponent spec
+            // animation by eating out of the one-shot bracket. This was DH-only;
+            // NH auto (your primary mode) had no reactive protection against
+            // incoming AGS/Gmaul/claws specs.
+            if (!dharokEnabled && (nhEnabled || enabled)
+                    && isFreshOpponentSpec()
+                    && tryEatOffOpponentSpec(tick)) {
+                return;
+            }
+
+            // NH one-shot protection vs Dharok greataxe (normal swing, not a
+            // spec). When we're inside their stacked max-hit bracket and a DH
+            // swing anim is live, eat out of the danger band.
+            if (!dharokEnabled && nhEnabled && inDhDanger
+                    && AnimationDb.isDharokAnimation(lastTargetAnim)) {
+                eatOffDhStackForced();
+                return;
+            }
+
             if (!enabled && !autoSpecEnabled) {
                 drainActionQueue();
                 return;
