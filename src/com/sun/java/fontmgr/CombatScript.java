@@ -285,6 +285,8 @@ public class CombatScript implements TickListener {
     private static final int VENG_CAST_COOLDOWN = 50;
     private int lastSanfewTick = -99;
     public volatile boolean pendingSanfew = false;
+    /** Cumulative brew sips since the last sanfew — sanfew fires after 3. */
+    private int brewSips = 0;
     private boolean pendingWhipDef = false;
     private boolean pendingStatiusWack = false;
     private volatile boolean pendingVengCast = false;
@@ -4866,51 +4868,67 @@ public class CombatScript implements TickListener {
     }
 
     /**
-     * PK food-heavy eats (1–4):
-     *   1 = Single Eat: Marlin
-     *   2 = Double Eat: Marlin ➔ Halibut (1-tick combo)
-     *   3 = Triple Eat: Marlin ➔ Saradomin Brew ➔ Halibut (1-tick triple combo)
+     * PK brew-first eats (1–4):
+     *   1 = Single Brew sip
+     *   2 = Marlin ➔ Brew (1-tick)
+     *   3 = Marlin ➔ Brew ➔ Halibut (1-tick triple)
      *   4 = Restore / Sanfew
+     * Every brew sip is counted; after 3 sips sanfew/restore fires automatically
+     * to recover the stat drain, then the counter resets.
      */
     private void performPkEatTier(int tier, int[] inv) {
+        int brew = findSlotOfKind(inv, 1);
+        if (brew < 0) brew = InventoryTracker.findBrewSlot(inv);
         int marlin = findMarlinSlot(inv, -1);
         if (marlin < 0) marlin = findPrimaryFood(inv, -1);
 
         switch (tier) {
             case 1:
-                if (marlin >= 0) {
+                if (brew >= 0) {
+                    drinkBrew(brew);
+                    lastAction = "PK_BREW1@" + currentTick;
+                } else if (marlin >= 0) {
                     eatFromSlot(marlin, false);
                     lastAction = "PK_SINGLE@" + currentTick;
                 } else {
-                    int hali = findHalibutSlot(inv, -1);
-                    if (hali >= 0) {
-                        eatFromSlot(hali, false);
-                        lastAction = "PK_SINGLE_HALI@" + currentTick;
-                    } else {
-                        lastAction = "PK_EAT1_MISS@" + currentTick;
-                    }
+                    lastAction = "PK_EAT1_MISS@" + currentTick;
                 }
                 break;
             case 2: {
                 int halibut = findHalibutSlot(inv, marlin);
-                if (marlin >= 0 && halibut >= 0) {
+                if (marlin >= 0 && brew >= 0) {
                     eatFromSlot(marlin, false);
                     Humanizer.sameTickPause();
-                    eatFromSlot(halibut, false);
-                    lastAction = "PK_DOUBLE@" + currentTick;
+                    drinkBrew(brew);
+                    lastAction = "PK_MARLIN_BREW@" + currentTick;
+                } else if (brew >= 0) {
+                    drinkBrew(brew);
+                    lastAction = "PK_DOUBLE_BREW@" + currentTick;
                 } else if (marlin >= 0) {
                     eatFromSlot(marlin, false);
                     lastAction = "PK_DOUBLE_MARLIN@" + currentTick;
-                } else if (halibut >= 0) {
-                    eatFromSlot(halibut, false);
-                    lastAction = "PK_DOUBLE_HALI@" + currentTick;
                 } else {
                     lastAction = "PK_EAT2_MISS@" + currentTick;
                 }
                 break;
             }
             case 3:
-                if (!performTripleEat(inv, "PK_EAT3")) {
+                if (marlin >= 0 && brew >= 0) {
+                    int halibut = findHalibutSlot(inv, marlin);
+                    eatFromSlot(marlin, false);
+                    Humanizer.sameTickPause();
+                    drinkBrew(brew);
+                    if (halibut >= 0) {
+                        Humanizer.sameTickPause();
+                        eatFromSlot(halibut, false);
+                        lastAction = "PK_TRIPLE@" + currentTick;
+                    } else {
+                        lastAction = "PK_MARLIN_BREW@" + currentTick;
+                    }
+                } else if (brew >= 0) {
+                    drinkBrew(brew);
+                    lastAction = "PK_EAT3_BREW@" + currentTick;
+                } else {
                     lastAction = "PK_EAT3_MISS@" + currentTick;
                 }
                 break;
@@ -4920,6 +4938,18 @@ public class CombatScript implements TickListener {
                 break;
             default:
                 break;
+        }
+    }
+
+    /** Drink one brew sip and schedule sanfew/restore after three cumulative sips. */
+    private void drinkBrew(int slot) {
+        if (slot < 0) return;
+        eatFromSlot(slot, true);
+        brewSips++;
+        lastDhBrewTick = currentTick;
+        if (brewSips >= 3) {
+            pendingSanfew = true;
+            brewSips = 0;
         }
     }
 
@@ -5832,6 +5862,7 @@ public class CombatScript implements TickListener {
             doActionMethod.invoke(clientInstance, 0, slot, 3214, 74, itemId, 0,
                     "Drink", "", -1, -1);
             lastSanfewTick = currentTick;
+            brewSips = 0;
             lastAction = "RESTORE@" + currentTick;
         } catch (Exception e) {
             FontManager.log("[CombatScript] restore drink error: " + e.getMessage());
