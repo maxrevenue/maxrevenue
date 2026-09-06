@@ -36,13 +36,21 @@ public final class PrayerController {
         if (style == AnimationDb.AttackStyle.MAGIC) {
             if (isPrayerActive("AUGURY") || isPrayerActive("MYSTIC_MIGHT")) return;
             ensurePrayerTab();
+            // Prefer Augury, but only settle on it if the client actually turns it
+            // on — a locked prayer is silently rejected by the server, so trusting
+            // the send (not the activation) loops forever on accounts without Augury.
             if (trySendPrayerEnumByName("AUGURY") || trySendPrayerPacket(AnimationDb.AUGURY_PRAYER_ID)) {
+                if (isPrayerActive("AUGURY")) {
+                    setPrayerActive("AUGURY", true);
+                    return;
+                }
+            }
+            clickOffensivePrayerWidget(AnimationDb.AUGURY_WIDGET, "Augury");
+            if (isPrayerActive("AUGURY")) {
                 setPrayerActive("AUGURY", true);
                 return;
             }
-            clickOffensivePrayerWidget(AnimationDb.AUGURY_WIDGET, "Augury");
-            setPrayerActive("AUGURY", true);
-            if (isPrayerActive("AUGURY")) return;
+            // Augury not unlocked → Mystic Might fallback.
             if (trySendPrayerEnumByName("MYSTIC_MIGHT") || trySendPrayerPacket(AnimationDb.MYSTIC_MIGHT_PRAYER_ID)) {
                 setPrayerActive("MYSTIC_MIGHT", true);
                 return;
