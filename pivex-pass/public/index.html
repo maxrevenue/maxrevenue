@@ -111,6 +111,7 @@
       <div class="rule"><b>6% static</b><span>Never below $94,000</span></div>
       <div class="rule"><b>50% consistency</b><span>No day &gt; half of profit</span></div>
       <div class="rule"><b>One ticket</b><span>Then wait 00:00 UTC</span></div>
+      <div class="rule"><b>Session mode</b><span>Strict overlap or anytime (settings)</span></div>
     </div>
     <div id="ruleChecks"></div>
   </section>
@@ -144,9 +145,16 @@
       </div>
       <div class="row2">
         <div><label class="field-label" for="setSprint">Sprint days</label><input type="number" id="setSprint" value="14" step="1"></div>
-        <div><label class="field-label" for="setImport">Import v1 JSON</label><input type="file" id="setImport" accept="application/json,.json"></div>
+        <div>
+          <label class="field-label" for="setSessionMode">Session mode</label>
+          <select id="setSessionMode">
+            <option value="strict">Strict — overlap + news blackout</option>
+            <option value="anytime">Anytime — time filters off</option>
+          </select>
+        </div>
       </div>
-      <p class="note">Default risk is 0.75% with a 20% buffer — safer for a two-week push than 1% flat. Buffer keeps the last slice of room unused so slippage cannot print the exact floor.</p>
+      <div><label class="field-label" for="setImport">Import v1 JSON</label><input type="file" id="setImport" accept="application/json,.json"></div>
+      <p class="note">Strict keeps 12:00–16:00 UTC, news blackout, and the late-float lock. Anytime drops those time filters. Both modes still enforce one ticket per UTC day, floor-safe size, and loss-streak cuts. Buffer keeps the last slice of room unused so slippage cannot print the exact floor.</p>
       <button class="btn primary" id="saveSettings" type="button">Save settings</button>
     </div>
   </section>

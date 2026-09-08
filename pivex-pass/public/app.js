@@ -118,6 +118,7 @@ function hydrateSettings() {
   $("setBuffer").value = state.settings.buffer;
   $("setReward").value = state.settings.rewardR;
   $("setSprint").value = state.settings.sprintDays;
+  $("setSessionMode").value = state.settings.sessionMode === "anytime" ? "anytime" : "strict";
 }
 
 function render() {
@@ -125,7 +126,7 @@ function render() {
   const snap = snapNow();
   const sized = sizedNow();
   const plan = planNow();
-  const session = R.sessionClock();
+  const session = R.sessionClock(new Date(), state.settings);
 
   $("equityVal").textContent = fmt(snap.equity);
   $("dailyRoom").textContent = fmt(snap.roomDaily);
@@ -169,7 +170,10 @@ function renderSprint(plan, session) {
     "pill " + (plan.paceLabel.includes("Comfortable") || plan.paceLabel.includes("Done") ? "ok" : "warn");
 
   const chip = $("sessionChip");
-  if (session.phase === "open") {
+  if (session.anytime && session.phase === "open") {
+    chip.textContent = "Anytime open";
+    chip.className = "chip open";
+  } else if (session.phase === "open") {
     chip.textContent = "Overlap open";
     chip.className = "chip open";
   } else if (session.phase === "news") {
@@ -182,7 +186,7 @@ function renderSprint(plan, session) {
     chip.textContent = "Pre-overlap";
     chip.className = "chip news";
   } else {
-    chip.textContent = "Session closed";
+    chip.textContent = session.anytime ? "Session closed" : "Session closed";
     chip.className = "chip closed";
   }
   const pct = Math.max(0, Math.min(100, session.progress * 100));
@@ -536,6 +540,7 @@ $("saveSettings").addEventListener("click", async () => {
     buffer: parseFloat($("setBuffer").value),
     rewardR: parseFloat($("setReward").value) || DEFAULTS.rewardR,
     sprintDays: parseInt($("setSprint").value, 10) || DEFAULTS.sprintDays,
+    sessionMode: $("setSessionMode").value === "anytime" ? "anytime" : "strict",
   };
   if (!isFinite(state.settings.buffer)) state.settings.buffer = DEFAULTS.buffer;
   await persist();
@@ -749,7 +754,7 @@ $("setImport").addEventListener("change", async (e) => {
 setInterval(() => {
   if (!loaded) return;
   renderClock(snapNow());
-  renderSprint(planNow(), R.sessionClock());
+  renderSprint(planNow(), R.sessionClock(new Date(), state.settings));
 }, 30000);
 
 setInterval(() => {

@@ -274,7 +274,7 @@ export async function scanPicks({
   const sized = maxSafeRisk(settings, trades, floatingPnl, now);
   const guard = passGuard(settings, trades, floatingPnl, now);
   const plan = sprintPlan(settings, trades, floatingPnl, now);
-  const window = passWindow(now);
+  const window = passWindow(now, settings);
 
   const passPlan = {
     summary: plan.summary,
