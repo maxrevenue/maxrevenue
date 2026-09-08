@@ -319,9 +319,12 @@ input:focus, select:focus { outline: none; border-color: var(--copper-dim); }
   font-size: 12px;
   line-height: 1.5;
   font-weight: 600;
+  color: var(--paper);
 }
-.note { background: rgba(224,164,90,0.1); border: 1px solid rgba(224,164,90,0.35); }
-.warn { background: rgba(229,115,108,0.12); border: 1px solid rgba(229,115,108,0.4); color: #F0B0AB; }
+.note { background: rgba(224,164,90,0.12); border: 1px solid rgba(224,164,90,0.4); }
+.warn { background: rgba(229,115,108,0.14); border: 1px solid rgba(229,115,108,0.45); color: #F5C4BF; }
+input::placeholder { color: #6E7F99; opacity: 1; }
+.result .r-sub { color: #A8B6CC; }
 
 .toggle-row {
   display: flex;
