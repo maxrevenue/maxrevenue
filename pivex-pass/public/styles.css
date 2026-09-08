@@ -299,8 +299,16 @@ input:focus, select:focus { outline: none; border-color: var(--copper-dim); }
   background: transparent;
   color: var(--coral);
   border: 1px solid rgba(229,115,108,0.35);
+  margin-top: 12px;
+  margin-bottom: 2px;
 }
-.btn-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.btn-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 10px;
+}
+.btn-row .btn { margin-top: 0; }
 
 .result {
   margin-top: 12px;
