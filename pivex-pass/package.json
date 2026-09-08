@@ -1,0 +1,22 @@
+{
+  "name": "pivex-pass",
+  "version": "1.0.0",
+  "description": "Pivex $100K challenge command center — pass-mode ticket scanner, risk guard, sprint planner",
+  "main": "index.js",
+  "directories": {
+    "test": "test"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node src/server.js",
+    "test": "node --test test/*.test.js",
+    "deploy": "wrangler deploy"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  }
+}
