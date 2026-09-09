@@ -32,6 +32,10 @@ export const DEFAULTS = {
    * "anytime" — time filters off; still one ticket/day + floor-safe size + loss-streak cuts
    */
   sessionMode: "strict",
+  /** Hard cap so leftover Pivex volume like 10.03 lots can never be a "valid" pass size. */
+  maxLots: 2,
+  /** Stops tighter than this are spread/noise — reject for pass mode. */
+  minStopPips: 10,
 };
 
 export function money(n) {

@@ -51,14 +51,19 @@ export function priceDistanceToPips(instrument, distance) {
 /**
  * Size FX lots so a full stop ≈ riskAmount USD.
  * Rounds down to 0.01 lot, minimum 0.01 if affordable.
+ * Pass-mode caps: minStopPips (default 10) and maxLots (default 2).
  */
-export function sizeLots(instrument, entry, stop, riskAmount, mid = entry) {
+export function sizeLots(instrument, entry, stop, riskAmount, mid = entry, opts = {}) {
   const p = pairInfo(instrument);
   if (!p) return { ok: false, error: "Unsupported instrument" };
   entry = Number(entry);
   stop = Number(stop);
   riskAmount = Number(riskAmount);
   mid = Number(mid) || entry;
+  const minStopPips = Number(opts.minStopPips);
+  const maxLots = Number(opts.maxLots);
+  const minPips = isFinite(minStopPips) && minStopPips > 0 ? minStopPips : 10;
+  const lotCap = isFinite(maxLots) && maxLots > 0 ? maxLots : 2;
   if (!isFinite(entry) || !isFinite(stop) || entry === stop) {
     return { ok: false, error: "Invalid entry/stop" };
   }
@@ -67,7 +72,18 @@ export function sizeLots(instrument, entry, stop, riskAmount, mid = entry) {
   }
   const distance = Math.abs(entry - stop);
   const pips = priceDistanceToPips(instrument, distance);
-  if (pips < 1) return { ok: false, error: "Stop is under 1 pip — too tight for pass mode" };
+  if (pips < minPips) {
+    return {
+      ok: false,
+      error:
+        "Stop is only " +
+        (Math.round(pips * 10) / 10) +
+        " pips — pass mode needs ≥ " +
+        minPips +
+        " pips (your 3-pip GBPUSD stop is how 10-lot tickets die)",
+      pips,
+    };
+  }
   const pv1 = pipValueUsd(instrument, mid, 1);
   if (pv1 <= 0) return { ok: false, error: "Could not price pip value" };
   const rawLots = riskAmount / (pips * pv1);
@@ -81,8 +97,11 @@ export function sizeLots(instrument, entry, stop, riskAmount, mid = entry) {
       pipValue: pv1,
     };
   }
-  // Cap extreme size
-  if (lots > 50) lots = 50;
+  let capped = false;
+  if (lots > lotCap) {
+    lots = Math.floor(lotCap * 100) / 100;
+    capped = true;
+  }
   const actualRisk = Math.round(lots * pips * pv1 * 100) / 100;
   const direction = entry > stop ? "Long" : "Short";
   const action = direction === "Long" ? "BUY" : "SELL";
@@ -99,6 +118,8 @@ export function sizeLots(instrument, entry, stop, riskAmount, mid = entry) {
     distance,
     entry,
     stop,
+    cappedByMaxLots: capped,
+    maxLots: lotCap,
   };
 }
 

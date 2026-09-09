@@ -137,12 +137,63 @@ h2 {
   font-size: 14px;
   font-weight: 600;
 }
-.sprint-copy {
-  margin: 12px 0 0;
+.day-lock {
+  margin-bottom: 14px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 1px solid rgba(229,115,108,0.55);
+  background: rgba(229,115,108,0.16);
+  box-shadow: var(--shadow);
+  animation: rise 0.45s ease both;
+}
+.day-lock b {
+  display: block;
+  font-size: 18px;
+  letter-spacing: -0.02em;
+  margin-bottom: 4px;
+  color: #F5C4BF;
+}
+.day-lock span {
   font-size: 13px;
-  line-height: 1.5;
-  color: var(--paper);
   font-weight: 600;
+  line-height: 1.45;
+  color: var(--paper);
+}
+.day-lock.ok {
+  border-color: rgba(111,207,176,0.45);
+  background: rgba(111,207,176,0.12);
+}
+.day-lock.ok b { color: var(--mint); }
+.sync-copy {
+  margin: 0 0 10px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.sync-copy b { color: var(--paper); }
+.lots-hero {
+  margin: 0;
+  padding: 16px 14px 8px;
+  font-size: clamp(28px, 6vw, 36px);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1;
+}
+.lots-hero .lots-num {
+  color: var(--copper);
+  font-family: var(--font-mono);
+}
+.volume-warn {
+  margin: 0 14px 12px;
+  padding: 10px 12px;
+  border-radius: 9px;
+  background: rgba(229,115,108,0.14);
+  border: 1px solid rgba(229,115,108,0.45);
+  color: #F5C4BF;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.45;
 }
 
 .session-track {

@@ -153,10 +153,39 @@ function render() {
   drawCurve();
   renderRules(snap);
   renderBot(sized, snap, plan);
+  renderDayLock(snap, sized);
   $("calcRisk").value =
     state.guardOn && sized.allowed ? Math.round(sized.riskPct * 100) / 100 : state.settings.risk;
   renderJournal();
   renderClock(snap);
+}
+
+function renderDayLock(snap, sized) {
+  const box = $("dayLockBanner");
+  const today = R.todayTrades(state.trades);
+  if (today.length > 0) {
+    const pnl = today.reduce((a, t) => a + (Number(t.pnl) || 0), 0);
+    box.hidden = false;
+    box.className = "day-lock" + (pnl >= 0 ? " ok" : "");
+    box.innerHTML =
+      `<b>Day locked — one ticket used</b>` +
+      `<span>Today’s closed P&amp;L ${fmt(pnl)}. Do not send a second order on Pivex. Wait for 00:00 UTC. ` +
+      `Daily room left ${fmt(snap.roomDaily)} · overall ${fmt(snap.roomOverall)}.</span>`;
+    return;
+  }
+  if (!sized.allowed && /already has a fill|one ticket/i.test(sized.reason || "")) {
+    box.hidden = false;
+    box.className = "day-lock";
+    box.innerHTML = `<b>Day locked</b><span>${escapeHtml(sized.reason)}</span>`;
+    return;
+  }
+  // Soft reminder until the first log of the day
+  box.hidden = false;
+  box.className = "day-lock ok";
+  box.innerHTML =
+    `<b>Before any new ticket</b>` +
+    `<span>If you already closed on Pivex today, sync equity or log that P&amp;L now — otherwise this app will still offer a second ticket. ` +
+    `Max pass size is <b>2.00 lots</b> with stop ≥ <b>10 pips</b>. Never leave Volume at 10.xx.</span>`;
 }
 
 function renderSprint(plan, session) {
@@ -457,20 +486,26 @@ function renderPick() {
     )}</b> — do not type that into SL/TP.</p>` +
     `<div class="ticket">` +
     `<div class="ticket-action${p.action === "SELL" ? " sell" : ""}">${escapeHtml(
-      p.action + " " + p.lotsLabel + " " + p.instrument
+      p.action + " " + p.instrument
     )}</div>` +
+    `<p class="lots-hero">Volume <span class="lots-num">${escapeHtml(p.lotsLabel)}</span> lots</p>` +
+    `<div class="volume-warn">Overwrite Volume on Pivex. If it still says 10.xx from a prior order, change it to <b>${escapeHtml(
+      p.lotsLabel
+    )}</b> before you tap ${escapeHtml(p.action)}.</div>` +
     renderFields(p.fields) +
     `<ol class="steps">` +
     `<li>Search <b>${escapeHtml(p.instrument)}</b> and open that chart.</li>` +
-    `<li>Tab = <b>Market</b>. Volume = <b>${escapeHtml(p.lotsLabel)}</b> lots.</li>` +
+    `<li>Tab = <b>Market</b>. Set Volume to <b>${escapeHtml(
+      p.lotsLabel
+    )}</b> lots — never leave leftover 10.xx.</li>` +
     `<li>Risk Mode <b>OFF</b>. Trailing Stop <b>unchecked</b>.</li>` +
-    `<li>Stop Loss <b>ON</b>, dropdown <b>Price</b>, type <b>${escapeHtml(p.stopLabel)}</b> (${slSide}).</li>` +
+    `<li>Stop Loss <b>ON</b>, dropdown <b>Price</b>, type <b>${escapeHtml(p.stopLabel)}</b> (${slSide}). Stop must be ≥ 10 pips.</li>` +
     `<li>Take Profit <b>ON</b>, dropdown <b>Price</b>, type <b>${escapeHtml(p.tpLabel)}</b> (${tpSide}).</li>` +
     `<li>If SL and TP both match the chart price, you typed it wrong — do not tap yet.</li>` +
-    `<li>Confirm a full stop loses about <b>${fmt(p.riskAmount)}</b>. Then tap <b>${escapeHtml(
-      p.action
-    )}</b> once.</li>` +
-    `<li>Do not move the stop wider. Do not add a second order. After close, log P&amp;L here so today locks.</li>` +
+    `<li>Confirm a full stop loses about <b>${fmt(p.riskAmount)}</b> and volume is <b>${escapeHtml(
+      p.lotsLabel
+    )}</b>. Then tap <b>${escapeHtml(p.action)}</b> once.</li>` +
+    `<li>Do not move the stop wider. Do not add a second order. After close, sync equity / log P&amp;L here so today locks.</li>` +
     `</ol>` +
     `<p class="note">${escapeHtml(p.why)} ${escapeHtml(p.session || "")}</p>` +
     `</div>` +
@@ -588,17 +623,23 @@ $("calcBtn").addEventListener("click", () => {
 
   let html = "";
   if (pairInfo(instr)) {
-    const lots = sizeLots(instr, entry, stop, riskAmount, entry);
+    const lots = sizeLots(instr, entry, stop, riskAmount, entry, {
+      minStopPips: state.settings.minStopPips ?? 10,
+      maxLots: state.settings.maxLots ?? 2,
+    });
     if (!lots.ok) {
       resultBox.hidden = false;
       resultBox.innerHTML = `<div class="warn">${escapeHtml(lots.error)}</div>`;
       return;
     }
+    const capNote = lots.cappedByMaxLots
+      ? `<div class="warn">Capped at ${lots.maxLots} lots (pass-mode hard max). Do not type 10.xx on Pivex.</div>`
+      : `<div class="note">Pass max is ${lots.maxLots} lots. Overwrite any leftover volume on Pivex.</div>`;
     html = `<div class="r-main">${lots.lotsLabel} lots · ${lots.action} ${lots.instrument}</div>
       <div class="r-sub">Risking ${fmt(lots.actualRisk)} across ${lots.pips} pips (pip ≈ $${lots.pipValue}). SL ${formatPrice(
       instr,
       stop
-    )}. Max leverage 1:${state.settings.leverage}. One trade only.</div>${warn}`;
+    )}. Max leverage 1:${state.settings.leverage}. One trade only.</div>${capNote}${warn}`;
     $("jRisk").value = Math.round(lots.actualRisk);
     $("jDir").value = lots.direction;
   } else {
@@ -629,6 +670,15 @@ $("addTrade").addEventListener("click", async () => {
     alert("Enter a P&L amount for this trade.");
     return;
   }
+  const ok = await commitTrade({ instrument, direction, pnl, risk, notes });
+  if (!ok) return;
+  $("jInstr").value = "";
+  $("jPnl").value = "";
+  $("jRisk").value = "";
+  $("jNotes").value = "";
+});
+
+async function commitTrade({ instrument, direction, pnl, risk = null, notes = "" }) {
   const preview = R.previewTrade(state.settings, state.trades, pnl, state.floatingPnl);
   if (preview.failed) {
     const go = confirm(
@@ -642,24 +692,76 @@ $("addTrade").addEventListener("click", async () => {
         fmt(preview.floorOverall) +
         ".\n\nLog it anyway?"
     );
-    if (!go) return;
+    if (!go) return false;
+  }
+  const todayCount = R.todayTrades(state.trades).length;
+  if (todayCount >= (state.settings.maxTradesPerDay || 1)) {
+    const go = confirm(
+      "You already logged a fill today. Logging another keeps history accurate but you must NOT send another order on Pivex.\n\nLog it anyway?"
+    );
+    if (!go) return false;
   }
   state.trades.push({
     id: Date.now(),
     date: R.utcDateStr(),
     instrument: instrument || "Unnamed",
-    direction,
-    pnl,
+    direction: direction || "Long",
+    pnl: Number(pnl),
     risk,
     notes,
   });
-  $("jInstr").value = "";
-  $("jPnl").value = "";
-  $("jRisk").value = "";
-  $("jNotes").value = "";
+  state.floatingPnl = 0;
+  if ($("floatingPnl")) $("floatingPnl").value = 0;
   await persist();
   render();
   fetchPicks({ force: true });
+  return true;
+}
+
+$("quickLogBtn").addEventListener("click", async () => {
+  const pnl = parseFloat($("quickPnl").value);
+  if (isNaN(pnl)) {
+    alert("Enter the closed P&L from Pivex (e.g. -441.32).");
+    return;
+  }
+  const ok = await commitTrade({
+    instrument: ($("quickInstr").value || "GBPUSD").trim(),
+    direction: $("quickDir").value,
+    pnl,
+    risk: Math.abs(pnl),
+    notes: "quick log",
+  });
+  if (ok) {
+    $("quickPnl").value = "";
+    $("pivexEquity").value = "";
+    $("syncPill").textContent = "Logged";
+  }
+});
+
+$("syncEquityBtn").addEventListener("click", async () => {
+  const equity = parseFloat($("pivexEquity").value);
+  if (!isFinite(equity) || equity <= 0) {
+    alert("Paste closed equity from Pivex (header Equity with no open positions).");
+    return;
+  }
+  const current = R.closedEquity(state.settings, state.trades);
+  const delta = R.money(equity - current);
+  if (Math.abs(delta) < 0.01) {
+    $("syncPill").textContent = "Already matched";
+    alert("Ledger already matches that equity.");
+    return;
+  }
+  const ok = await commitTrade({
+    instrument: ($("quickInstr").value || "SYNC").trim(),
+    direction: delta >= 0 ? "Long" : "Short",
+    pnl: delta,
+    risk: Math.abs(delta),
+    notes: "synced from Pivex equity " + equity,
+  });
+  if (ok) {
+    $("syncPill").textContent = "Synced " + fmt(delta);
+    $("quickPnl").value = "";
+  }
 });
 
 $("scanBtn").addEventListener("click", () => fetchPicks({ refresh: true, force: true }));

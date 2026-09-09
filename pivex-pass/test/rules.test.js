@@ -105,7 +105,22 @@ describe("fx sizing", () => {
     const lots = sizeLots("EURUSD", 1.1, 1.095, 750, 1.1);
     assert.equal(lots.ok, true);
     assert.ok(lots.lots >= 0.01);
+    assert.ok(lots.lots <= 2);
     assert.equal(priceDistanceToPips("EURUSD", 0.005), 50);
+  });
+
+  it("rejects noise-tight stops under 10 pips", () => {
+    const lots = sizeLots("GBPUSD", 1.35525, 1.35491, 750, 1.35525);
+    assert.equal(lots.ok, false);
+    assert.match(lots.error, /10 pips/i);
+  });
+
+  it("caps lots at pass-mode max of 2.00", () => {
+    // Huge risk + tiny-but-legal 10pip stop would otherwise size >> 2 lots
+    const lots = sizeLots("EURUSD", 1.1, 1.099, 5000, 1.1, { maxLots: 2, minStopPips: 10 });
+    assert.equal(lots.ok, true);
+    assert.equal(lots.lots, 2);
+    assert.equal(lots.cappedByMaxLots, true);
   });
 
   it("sizes USDJPY with JPY quote conversion", () => {

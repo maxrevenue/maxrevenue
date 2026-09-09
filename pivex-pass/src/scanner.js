@@ -156,18 +156,20 @@ function scoreSetup(pair, m15, h1) {
   }
 
   const entry = live.c;
-  const stopPad = atrNow * 1.15;
+  const stopPad = atrNow * 1.25;
+  const minStopDist = pair.pip * 10; // ≥ 10 pips — never a 3-pip noise stop
   let stop;
   let tp;
   if (action === "BUY") {
     const swing = Math.min(bar.l, m15[i - 1]?.l ?? bar.l, m15[i - 2]?.l ?? bar.l);
     stop = Math.min(swing, entry - stopPad * 0.85);
-    // Ensure stop is below entry by at least 0.6 ATR
-    if (entry - stop < atrNow * 0.6) stop = entry - atrNow * 0.85;
+    if (entry - stop < atrNow * 0.7) stop = entry - atrNow * 0.9;
+    if (entry - stop < minStopDist) stop = entry - minStopDist;
   } else {
     const swing = Math.max(bar.h, m15[i - 1]?.h ?? bar.h, m15[i - 2]?.h ?? bar.h);
     stop = Math.max(swing, entry + stopPad * 0.85);
-    if (stop - entry < atrNow * 0.6) stop = entry + atrNow * 0.85;
+    if (stop - entry < atrNow * 0.7) stop = entry + atrNow * 0.9;
+    if (stop - entry < minStopDist) stop = entry + minStopDist;
   }
 
   const riskDist = Math.abs(entry - stop);
@@ -204,7 +206,10 @@ function scoreSetup(pair, m15, h1) {
 }
 
 function buildTicket(setup, sized, settings) {
-  const sizedLots = sizeLots(setup.instrument, setup.entry, setup.stop, sized.riskAmount, setup.entry);
+  const sizedLots = sizeLots(setup.instrument, setup.entry, setup.stop, sized.riskAmount, setup.entry, {
+    minStopPips: settings.minStopPips ?? 10,
+    maxLots: settings.maxLots ?? 2,
+  });
   if (!sizedLots.ok) {
     return { ok: false, reason: sizedLots.error };
   }
@@ -215,11 +220,11 @@ function buildTicket(setup, sized, settings) {
   const fields = [
     { label: "Instrument", value: setup.instrument },
     { label: "Then tap", value: setup.action },
-    { label: "Volume (lots)", value: sizedLots.lotsLabel },
+    { label: "Volume (lots) — OVERWRITE", value: sizedLots.lotsLabel },
     { label: "Stop Loss (Price)", value: stopLabel },
     { label: "Take Profit (Price)", value: tpLabel },
     { label: "Full-stop $ risk", value: "$" + Math.round(sizedLots.actualRisk).toLocaleString() },
-    { label: "Stop distance", value: sizedLots.pips + " pips" },
+    { label: "Stop distance", value: sizedLots.pips + " pips (≥10)" },
   ];
 
   const copyText = [
@@ -227,6 +232,7 @@ function buildTicket(setup, sized, settings) {
     `${setup.action} ${sizedLots.lotsLabel} ${setup.instrument}`,
     `SL ${stopLabel} · TP ${tpLabel}`,
     `Risk ~$${Math.round(sizedLots.actualRisk)} (${sized.riskPct.toFixed(2)}%)`,
+    `OVERWRITE volume — do NOT leave 10.xx from a prior order.`,
     `One ticket today. Do not move SL wider. Log fill after close.`,
   ].join("\n");
 
@@ -243,12 +249,12 @@ function buildTicket(setup, sized, settings) {
     tpLabel,
     lots: sizedLots.lots,
     lotsLabel: sizedLots.lotsLabel,
-    volumeHint: "standard lots",
+    volumeHint: "overwrite leftover volume — never keep 10.xx lots",
     riskAmount: sizedLots.actualRisk,
     riskPct: sized.riskPct,
     pips: sizedLots.pips,
     fields,
-    why: setup.why,
+    why: setup.why + (sizedLots.cappedByMaxLots ? ` · capped at ${sizedLots.maxLots} lots` : ""),
     session: setup.session,
     score: setup.score,
     copyText,
