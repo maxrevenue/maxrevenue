@@ -154,10 +154,113 @@ function render() {
   renderRules(snap);
   renderBot(sized, snap, plan);
   renderDayLock(snap, sized);
+  renderCoach(snap, sized, plan, session);
   $("calcRisk").value =
     state.guardOn && sized.allowed ? Math.round(sized.riskPct * 100) / 100 : state.settings.risk;
   renderJournal();
   renderClock(snap);
+}
+
+function renderCoach(snap, sized, plan, session) {
+  const step = $("coachStep");
+  const title = $("coachTitle");
+  const text = $("coachText");
+  const stats = $("coachStats");
+  const today = R.todayTrades(state.trades);
+  const updateEl = $("stepUpdate");
+  const tradeEl = $("stepTrade");
+
+  const statHtml = (label, val) =>
+    `<div class="stat"><span class="stat-label">${label}</span><span class="stat-val">${val}</span></div>`;
+
+  if (snap.failed) {
+    step.textContent = "Stopped";
+    title.textContent = "Challenge failed";
+    text.textContent = snap.statusLabel + ". Do not keep trading this account.";
+    stats.innerHTML = statHtml("Equity", fmt(snap.equity)) + statHtml("Floor", fmt(snap.floorOverall));
+    return;
+  }
+  if (snap.passed) {
+    step.textContent = "Done";
+    title.textContent = "You passed";
+    text.textContent = "Target and min days are met. Stop trading this challenge account.";
+    stats.innerHTML = statHtml("Balance", fmt(snap.closed)) + statHtml("Days", snap.tradingDays + " / " + snap.minTradingDays);
+    return;
+  }
+  if (today.length > 0) {
+    const pnl = today.reduce((a, t) => a + (Number(t.pnl) || 0), 0);
+    step.textContent = "Done for today";
+    title.textContent = pnl < 0 ? "Take the L — stop" : "Win banked — stop";
+    text.textContent =
+      "You already used today’s one trade (" +
+      fmt(pnl) +
+      "). Do not open another order on Pivex. Come back after 00:00 UTC.";
+    stats.innerHTML =
+      statHtml("Today", fmt(pnl)) +
+      statHtml("Still need", fmt(snap.toTarget)) +
+      statHtml("Safe today", fmt(snap.roomDaily)) +
+      statHtml("Days", snap.tradingDays + " / " + snap.minTradingDays);
+    if (updateEl) updateEl.style.opacity = "0.55";
+    if (tradeEl) tradeEl.style.opacity = "0.55";
+    return;
+  }
+
+  if (updateEl) updateEl.style.opacity = "1";
+  if (tradeEl) tradeEl.style.opacity = "1";
+
+  if (!sized.allowed) {
+    step.textContent = "Wait";
+    title.textContent = "Do not trade right now";
+    text.textContent = plainReason(sized.reason) + " If you already closed a trade today, save it in step 1 first.";
+    stats.innerHTML =
+      statHtml("Still need", fmt(snap.toTarget)) +
+      statHtml("Weekdays left", String(plan.tradingDaysLeft));
+    return;
+  }
+
+  if (lastPick && !lastPick.sitOut && lastPick.pick) {
+    const p = lastPick.pick;
+    step.textContent = "Trade now";
+    title.textContent = p.action + " " + p.lotsLabel + " " + p.instrument;
+    text.textContent =
+      "On Pivex: set Volume to " +
+      p.lotsLabel +
+      " lots (not 10). Type SL " +
+      p.stopLabel +
+      " and TP " +
+      p.tpLabel +
+      ". Tap " +
+      p.action +
+      " once. Then come back and save the result.";
+    stats.innerHTML =
+      statHtml("Volume", p.lotsLabel + " lots") +
+      statHtml("Risk", fmt(p.riskAmount)) +
+      statHtml("Stop", p.stopLabel) +
+      statHtml("Take profit", p.tpLabel);
+    return;
+  }
+
+  step.textContent = "Wait for a setup";
+  title.textContent = "No good trade yet";
+  text.textContent =
+    "Keep Pivex open, but do not force a trade. Tap “Check for a trade” every 30–60 minutes. " +
+    (session.anytime ? "Anytime mode is on." : "Best window is 12:00–16:00 UTC.");
+  stats.innerHTML =
+    statHtml("Still need", fmt(snap.toTarget)) +
+    statHtml("Ready risk", sized.allowed ? fmt(sized.riskAmount) : "$0") +
+    statHtml("Weekdays left", String(plan.tradingDaysLeft)) +
+    statHtml("Wins needed", isFinite(plan.winsNeeded) ? String(plan.winsNeeded) : "—");
+}
+
+function plainReason(reason) {
+  const r = String(reason || "");
+  if (/US data window/i.test(r)) return "News time — sit out for a few minutes.";
+  if (/12:00–16:00|Strict mode only/i.test(r)) return "Outside the safe trading hours.";
+  if (/Weekend/i.test(r)) return "Markets are closed for the weekend.";
+  if (/already has a fill|one ticket/i.test(r)) return "You already traded today.";
+  if (/losses in a row/i.test(r)) return "Too many losses in a row — take a break today.";
+  if (/daily reset|00:00/i.test(r)) return "Too close to the daily reset — don’t hold a trade overnight into the reset.";
+  return r || "Safety lock is on.";
 }
 
 function renderDayLock(snap, sized) {
@@ -168,24 +271,11 @@ function renderDayLock(snap, sized) {
     box.hidden = false;
     box.className = "day-lock" + (pnl >= 0 ? " ok" : "");
     box.innerHTML =
-      `<b>Day locked — one ticket used</b>` +
-      `<span>Today’s closed P&amp;L ${fmt(pnl)}. Do not send a second order on Pivex. Wait for 00:00 UTC. ` +
-      `Daily room left ${fmt(snap.roomDaily)} · overall ${fmt(snap.roomOverall)}.</span>`;
+      `<b>Stop trading for today</b>` +
+      `<span>Saved result: ${fmt(pnl)}. Wait until tomorrow (after 00:00 UTC).</span>`;
     return;
   }
-  if (!sized.allowed && /already has a fill|one ticket/i.test(sized.reason || "")) {
-    box.hidden = false;
-    box.className = "day-lock";
-    box.innerHTML = `<b>Day locked</b><span>${escapeHtml(sized.reason)}</span>`;
-    return;
-  }
-  // Soft reminder until the first log of the day
-  box.hidden = false;
-  box.className = "day-lock ok";
-  box.innerHTML =
-    `<b>Before any new ticket</b>` +
-    `<span>If you already closed on Pivex today, sync equity or log that P&amp;L now — otherwise this app will still offer a second ticket. ` +
-    `Max pass size is <b>2.00 lots</b> with stop ≥ <b>10 pips</b>. Never leave Volume at 10.xx.</span>`;
+  box.hidden = true;
 }
 
 function renderSprint(plan, session) {
@@ -455,62 +545,52 @@ function renderPick() {
   const body = $("pickBody");
   if (!lastPick) return;
   if (lastPick.sitOut) {
-    pill.textContent = lastPick.status === "passed" ? "Passed" : "Sit out";
+    pill.textContent = lastPick.status === "passed" ? "Passed" : "Wait";
     pill.className = "pill " + (lastPick.status === "passed" ? "passed" : "need-days");
-    const skips = (lastPick.skipped || [])
-      .slice(0, 8)
-      .map(
-        (s) =>
-          `<div class="alt-row"><span>${escapeHtml(s.instrument)}</span><span class="j-meta">${escapeHtml(
-            s.reason
-          )}</span></div>`
-      )
-      .join("");
     body.innerHTML =
       `<div class="result" style="margin-top:0"><div class="r-main">${escapeHtml(
-        lastPick.headline
-      )}</div><div class="r-sub">${escapeHtml(lastPick.detail)}</div></div>` +
-      renderPassPlan(lastPick.passPlan) +
-      renderFields(lastPick.fields) +
-      (skips ? `<div style="margin-top:10px">${skips}</div>` : "");
+        lastPick.status === "passed" ? "You passed" : "No trade — wait"
+      )}</div><div class="r-sub">${escapeHtml(
+        plainReason(lastPick.detail) || lastPick.detail || ""
+      )}</div></div>` +
+      `<p class="note">Do not force a setup. Check again in 30–60 minutes. If you already closed a Pivex trade today, save it in step 1.</p>`;
+    renderCoach(snapNow(), sizedNow(), planNow(), R.sessionClock(new Date(), state.settings));
     return;
   }
   const p = lastPick.pick;
-  pill.textContent = "Take this — then stop";
+  pill.textContent = "Take this";
   pill.className = "pill passed";
   const slSide = p.action === "BUY" ? "below the live price" : "above the live price";
   const tpSide = p.action === "BUY" ? "above the live price" : "below the live price";
   body.innerHTML =
-    `<p class="j-meta" style="margin:0 0 8px">If Pivex says <b>Not signed in? Reconnect</b>, fix that first. Live price ≈ <b>${escapeHtml(
-      p.entryLabel
-    )}</b> — do not type that into SL/TP.</p>` +
     `<div class="ticket">` +
-    `<div class="ticket-action${p.action === "SELL" ? " sell" : ""}">${escapeHtml(
-      p.action + " " + p.instrument
+    `<div class="ticket-action${p.action === "SELL" ? " sell" : ""}">${escapeHtml(p.action)} ${escapeHtml(
+      p.instrument
     )}</div>` +
-    `<p class="lots-hero">Volume <span class="lots-num">${escapeHtml(p.lotsLabel)}</span> lots</p>` +
-    `<div class="volume-warn">Overwrite Volume on Pivex. If it still says 10.xx from a prior order, change it to <b>${escapeHtml(
+    `<p class="lots-hero">Type volume <span class="lots-num">${escapeHtml(p.lotsLabel)}</span></p>` +
+    `<div class="volume-warn">On Pivex, change Volume to <b>${escapeHtml(
       p.lotsLabel
-    )}</b> before you tap ${escapeHtml(p.action)}.</div>` +
-    renderFields(p.fields) +
-    `<ol class="steps">` +
-    `<li>Search <b>${escapeHtml(p.instrument)}</b> and open that chart.</li>` +
-    `<li>Tab = <b>Market</b>. Set Volume to <b>${escapeHtml(
-      p.lotsLabel
-    )}</b> lots — never leave leftover 10.xx.</li>` +
-    `<li>Risk Mode <b>OFF</b>. Trailing Stop <b>unchecked</b>.</li>` +
-    `<li>Stop Loss <b>ON</b>, dropdown <b>Price</b>, type <b>${escapeHtml(p.stopLabel)}</b> (${slSide}). Stop must be ≥ 10 pips.</li>` +
-    `<li>Take Profit <b>ON</b>, dropdown <b>Price</b>, type <b>${escapeHtml(p.tpLabel)}</b> (${tpSide}).</li>` +
-    `<li>If SL and TP both match the chart price, you typed it wrong — do not tap yet.</li>` +
-    `<li>Confirm a full stop loses about <b>${fmt(p.riskAmount)}</b> and volume is <b>${escapeHtml(
-      p.lotsLabel
-    )}</b>. Then tap <b>${escapeHtml(p.action)}</b> once.</li>` +
-    `<li>Do not move the stop wider. Do not add a second order. After close, sync equity / log P&amp;L here so today locks.</li>` +
-    `</ol>` +
-    `<p class="note">${escapeHtml(p.why)} ${escapeHtml(p.session || "")}</p>` +
+    )}</b>. If you still see 10.xx, change it before you tap.</div>` +
+    `<div class="field-list">` +
+    `<div class="field"><div class="flabel">1. Pair</div><div class="fval">${escapeHtml(p.instrument)}</div></div>` +
+    `<div class="field"><div class="flabel">2. Volume</div><div class="fval">${escapeHtml(p.lotsLabel)} lots</div></div>` +
+    `<div class="field"><div class="flabel">3. Stop Loss price</div><div class="fval">${escapeHtml(p.stopLabel)}</div></div>` +
+    `<div class="field"><div class="flabel">4. Take Profit price</div><div class="fval">${escapeHtml(p.tpLabel)}</div></div>` +
+    `<div class="field"><div class="flabel">5. Then tap</div><div class="fval ${
+      p.action === "BUY" ? "tap-buy" : "tap-sell"
+    }">${escapeHtml(p.action)} once</div></div>` +
     `</div>` +
-    renderPassPlan(lastPick.passPlan);
+    `<ol class="steps">` +
+    `<li>Open <b>${escapeHtml(p.instrument)}</b> on Pivex.</li>` +
+    `<li>Choose <b>Market</b>.</li>` +
+    `<li>Set Volume to <b>${escapeHtml(p.lotsLabel)}</b> (not 10).</li>` +
+    `<li>Turn Stop Loss <b>ON</b> → Price → type <b>${escapeHtml(p.stopLabel)}</b> (${slSide}).</li>` +
+    `<li>Turn Take Profit <b>ON</b> → Price → type <b>${escapeHtml(p.tpLabel)}</b> (${tpSide}).</li>` +
+    `<li>Check risk is about <b>${fmt(p.riskAmount)}</b>, then tap <b>${escapeHtml(p.action)}</b> once.</li>` +
+    `<li>When it closes, come back here and save the profit/loss in step 1.</li>` +
+    `</ol></div>`;
   applyTicketToForm(p);
+  renderCoach(snapNow(), sizedNow(), planNow(), R.sessionClock(new Date(), state.settings));
 }
 
 function applyTicketToForm(p) {
@@ -562,6 +642,15 @@ $("settingsToggle").addEventListener("click", () => {
   else body.setAttribute("hidden", "");
   $("settingsToggle").setAttribute("aria-expanded", open ? "true" : "false");
   $("settingsToggle").querySelector(".arrow").style.transform = open ? "rotate(180deg)" : "";
+});
+
+$("moreToggle").addEventListener("click", () => {
+  const body = $("moreBody");
+  const open = body.hasAttribute("hidden");
+  if (open) body.removeAttribute("hidden");
+  else body.setAttribute("hidden", "");
+  $("moreToggle").setAttribute("aria-expanded", open ? "true" : "false");
+  $("moreToggle").querySelector(".arrow").style.transform = open ? "rotate(180deg)" : "";
 });
 
 $("saveSettings").addEventListener("click", async () => {
@@ -734,7 +823,8 @@ $("quickLogBtn").addEventListener("click", async () => {
   if (ok) {
     $("quickPnl").value = "";
     $("pivexEquity").value = "";
-    $("syncPill").textContent = "Logged";
+    $("syncPill").textContent = "Saved";
+    alert("Saved. Do not take another trade today.");
   }
 });
 

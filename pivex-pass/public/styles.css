@@ -164,9 +164,61 @@ h2 {
   background: rgba(111,207,176,0.12);
 }
 .day-lock.ok b { color: var(--mint); }
+.coach-panel {
+  border-color: rgba(224,164,90,0.45);
+  background: linear-gradient(180deg, rgba(224,164,90,0.14), rgba(22,32,48,0.82));
+}
+.coach-step {
+  margin: 0 0 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--copper);
+}
+.coach-title {
+  margin: 0 0 8px !important;
+  font-size: clamp(26px, 6vw, 34px);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.05;
+}
+.coach-text {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.5;
+  color: var(--paper);
+}
+.coach-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 14px;
+}
+.easy-balance {
+  font-family: var(--font-mono);
+  font-size: clamp(28px, 7vw, 40px);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  margin: 4px 0 12px;
+}
+.easy-details {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.easy-details summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+.easy-secondary { margin-top: 8px; }
 .sync-copy {
   margin: 0 0 10px;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   line-height: 1.5;
   color: var(--muted);
