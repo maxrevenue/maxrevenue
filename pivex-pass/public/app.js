@@ -824,7 +824,37 @@ $("quickLogBtn").addEventListener("click", async () => {
     $("quickPnl").value = "";
     $("pivexEquity").value = "";
     $("syncPill").textContent = "Saved";
+    const btn = $("saveTodayLossBtn");
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = "Saved — stop for today";
+    }
     alert("Saved. Do not take another trade today.");
+  }
+});
+
+$("saveTodayLossBtn")?.addEventListener("click", async () => {
+  const already = R.todayTrades(state.trades).some(
+    (t) => Math.abs((Number(t.pnl) || 0) + 441.32) < 0.02
+  );
+  if (already) {
+    alert("That loss is already saved. Do not trade again today.");
+    return;
+  }
+  const ok = await commitTrade({
+    instrument: "GBPUSD",
+    direction: "Long",
+    pnl: -441.32,
+    risk: 441.32,
+    notes: "closed 2026-09-09 13:23 UTC · open 1.35525 · close 1.35491",
+  });
+  if (ok) {
+    const btn = $("saveTodayLossBtn");
+    btn.disabled = true;
+    btn.textContent = "Saved — stop for today";
+    $("syncPill").textContent = "Saved −$441.32";
+    $("quickPnl").value = "";
+    alert("Saved GBPUSD −$441.32. Do not take another trade today.");
   }
 });
 

@@ -34,25 +34,30 @@
 
   <section class="panel sync-panel" id="stepUpdate">
     <h2>1 · Update after a close</h2>
-    <p class="sync-copy">Look at Pivex. Copy the <b>profit number</b> from your closed trade (example: <b>-441.32</b>). Paste it here and tap Save.</p>
-    <label class="field-label" for="quickPnl">Profit or loss from Pivex ($)</label>
-    <input type="number" id="quickPnl" placeholder="-441.32" step="any" inputmode="decimal">
-    <div class="row2">
-      <div>
-        <label class="field-label" for="quickInstr">Pair</label>
-        <input type="text" id="quickInstr" value="GBPUSD" placeholder="GBPUSD">
+    <p class="sync-copy">You already closed <b>GBPUSD −$441.32</b> today. Tap the big button once — then stop trading until tomorrow.</p>
+    <button class="btn primary" id="saveTodayLossBtn" type="button">Save today’s GBPUSD −$441.32</button>
+
+    <details class="easy-details">
+      <summary>Or type a different profit / loss</summary>
+      <label class="field-label" for="quickPnl">Profit or loss from Pivex ($)</label>
+      <input type="number" id="quickPnl" placeholder="-441.32" value="-441.32" step="any" inputmode="decimal">
+      <div class="row2">
+        <div>
+          <label class="field-label" for="quickInstr">Pair</label>
+          <input type="text" id="quickInstr" value="GBPUSD" placeholder="GBPUSD">
+        </div>
+        <div>
+          <label class="field-label" for="quickDir">Buy or Sell?</label>
+          <select id="quickDir"><option value="Long" selected>Buy / Long</option><option value="Short">Sell / Short</option></select>
+        </div>
       </div>
-      <div>
-        <label class="field-label" for="quickDir">Buy or Sell?</label>
-        <select id="quickDir"><option value="Long">Buy / Long</option><option value="Short">Sell / Short</option></select>
-      </div>
-    </div>
-    <button class="btn primary" id="quickLogBtn" type="button">Save my result</button>
+      <button class="btn ghost" id="quickLogBtn" type="button">Save my result</button>
+    </details>
 
     <details class="easy-details">
       <summary>Or paste total Equity instead</summary>
       <label class="field-label" for="pivexEquity">Pivex Equity with no open trades ($)</label>
-      <input type="number" id="pivexEquity" placeholder="99558.68" step="any" inputmode="decimal">
+      <input type="number" id="pivexEquity" placeholder="99558.68" value="99558.68" step="any" inputmode="decimal">
       <button class="btn ghost" id="syncEquityBtn" type="button">Sync equity</button>
       <span class="pill" id="syncPill" style="display:inline-block;margin-top:10px;">Optional</span>
     </details>
