@@ -93,12 +93,35 @@ async function loadState() {
       state.sprintStarted = parsed.sprintStarted || R.utcDateStr();
     }
   } catch (_) {}
+  const repaired = repairMisdatedSep9Loss();
   loaded = true;
   hydrateSettings();
   $("floatingPnl").value = state.floatingPnl || 0;
   $("guardOn").checked = state.guardOn;
+  if (repaired) await persist();
   render();
   fetchPicks();
+}
+
+/** The Sep 9 GBPUSD -441.32 was often saved with "today" when clicked on Sep 10. */
+function repairMisdatedSep9Loss() {
+  const REAL_DATE = "2026-09-09";
+  const today = R.utcDateStr();
+  let changed = false;
+  for (const t of state.trades) {
+    const pnl = Number(t.pnl) || 0;
+    const isThatLoss =
+      Math.abs(pnl + 441.32) < 0.02 &&
+      String(t.instrument || "").toUpperCase().includes("GBP");
+    if (!isThatLoss) continue;
+    if (t.date !== REAL_DATE) {
+      t.date = REAL_DATE;
+      t.notes = (t.notes || "") + (t.notes ? " · " : "") + "date fixed to 2026-09-09 (trade was yesterday)";
+      changed = true;
+    }
+  }
+  // Also clear accidental "today lock" if the only today fill is that misdated loss (already moved)
+  return changed;
 }
 
 async function persist() {
@@ -202,6 +225,11 @@ function renderCoach(snap, sized, plan, session) {
       statHtml("Days", snap.tradingDays + " / " + snap.minTradingDays);
     if (updateEl) updateEl.style.opacity = "0.55";
     if (tradeEl) tradeEl.style.opacity = "0.55";
+    const saveBtn = $("saveTodayLossBtn");
+    if (saveBtn) {
+      saveBtn.disabled = true;
+      saveBtn.textContent = "Already saved — stop for today";
+    }
     return;
   }
 
@@ -767,7 +795,8 @@ $("addTrade").addEventListener("click", async () => {
   $("jNotes").value = "";
 });
 
-async function commitTrade({ instrument, direction, pnl, risk = null, notes = "" }) {
+async function commitTrade({ instrument, direction, pnl, risk = null, notes = "", date = null }) {
+  const tradeDate = date || R.utcDateStr();
   const preview = R.previewTrade(state.settings, state.trades, pnl, state.floatingPnl);
   if (preview.failed) {
     const go = confirm(
@@ -783,16 +812,18 @@ async function commitTrade({ instrument, direction, pnl, risk = null, notes = ""
     );
     if (!go) return false;
   }
-  const todayCount = R.todayTrades(state.trades).length;
-  if (todayCount >= (state.settings.maxTradesPerDay || 1)) {
-    const go = confirm(
-      "You already logged a fill today. Logging another keeps history accurate but you must NOT send another order on Pivex.\n\nLog it anyway?"
-    );
-    if (!go) return false;
+  if (tradeDate === R.utcDateStr()) {
+    const todayCount = R.todayTrades(state.trades).length;
+    if (todayCount >= (state.settings.maxTradesPerDay || 1)) {
+      const go = confirm(
+        "You already logged a fill today. Logging another keeps history accurate but you must NOT send another order on Pivex.\n\nLog it anyway?"
+      );
+      if (!go) return false;
+    }
   }
   state.trades.push({
     id: Date.now(),
-    date: R.utcDateStr(),
+    date: tradeDate,
     instrument: instrument || "Unnamed",
     direction: direction || "Long",
     pnl: Number(pnl),
@@ -834,11 +865,22 @@ $("quickLogBtn").addEventListener("click", async () => {
 });
 
 $("saveTodayLossBtn")?.addEventListener("click", async () => {
-  const already = R.todayTrades(state.trades).some(
-    (t) => Math.abs((Number(t.pnl) || 0) + 441.32) < 0.02
+  const already = state.trades.some(
+    (t) =>
+      Math.abs((Number(t.pnl) || 0) + 441.32) < 0.02 &&
+      String(t.instrument || "").toUpperCase().includes("GBP")
   );
   if (already) {
-    alert("That loss is already saved. Do not trade again today.");
+    // If it exists but on the wrong day, repair and unlock
+    const repaired = repairMisdatedSep9Loss();
+    if (repaired) {
+      await persist();
+      render();
+      fetchPicks({ force: true });
+      alert("Fixed: that −$441.32 is now dated Sep 9 (yesterday). Today is unlocked — one new ticket allowed.");
+      return;
+    }
+    alert("That Sep 9 loss is already saved. Today is a new day — tap Check for a trade.");
     return;
   }
   const ok = await commitTrade({
@@ -846,16 +888,38 @@ $("saveTodayLossBtn")?.addEventListener("click", async () => {
     direction: "Long",
     pnl: -441.32,
     risk: 441.32,
+    date: "2026-09-09",
     notes: "closed 2026-09-09 13:23 UTC · open 1.35525 · close 1.35491",
   });
   if (ok) {
     const btn = $("saveTodayLossBtn");
     btn.disabled = true;
-    btn.textContent = "Saved — stop for today";
-    $("syncPill").textContent = "Saved −$441.32";
+    btn.textContent = "Sep 9 loss saved";
+    $("syncPill").textContent = "Saved −$441.32 on Sep 9";
     $("quickPnl").value = "";
-    alert("Saved GBPUSD −$441.32. Do not take another trade today.");
+    alert("Saved as yesterday (Sep 9). Today is unlocked — one new ticket allowed.");
   }
+});
+
+$("fixYesterdayBtn")?.addEventListener("click", async () => {
+  const repaired = repairMisdatedSep9Loss();
+  // Also: if today has any -441.32 alone, force to Sep 9
+  let moved = repaired;
+  const today = R.utcDateStr();
+  for (const t of state.trades) {
+    if (t.date === today && Math.abs((Number(t.pnl) || 0) + 441.32) < 0.02) {
+      t.date = "2026-09-09";
+      moved = true;
+    }
+  }
+  if (!moved) {
+    alert("Nothing to fix — or add the −$441.32 with the button above first.");
+    return;
+  }
+  await persist();
+  render();
+  fetchPicks({ force: true });
+  alert("Fixed. Yesterday’s loss is on Sep 9. You can take one trade today.");
 });
 
 $("syncEquityBtn").addEventListener("click", async () => {
