@@ -16,7 +16,22 @@ public class StateReader {
     private Method getInteractingEntity;
     private Method getBoostedSkillLevelsMethod, getRealSkillLevelsMethod;
     private Field currentSkillLevelField, maxSkillLevelField;
-    private Field actorCurrentHealthField, actorMaxHealthField, playerEquipmentField;
+    /**
+     * Per-concrete-class handles, keyed by target class. A single cached handle
+     * resolved for a Player throws IllegalArgumentException when the target is
+     * an NPC (and vice versa), which silently blanked the published target
+     * vitals and equipment. {@code Optional.empty()} records "resolved, absent"
+     * so a miss is not re-walked on every tick. ConcurrentHashMap forbids null
+     * values, hence the Optional.
+     */
+    private final java.util.Map<Class<?>, java.util.Optional<Field>> actorHealthHandles =
+            new java.util.concurrent.ConcurrentHashMap<>();
+    private final java.util.Map<Class<?>, java.util.Optional<Field>> actorMaxHealthHandles =
+            new java.util.concurrent.ConcurrentHashMap<>();
+    private final java.util.Map<Class<?>, java.util.Optional<Field>> equipmentHandles =
+            new java.util.concurrent.ConcurrentHashMap<>();
+    private final java.util.Map<Class<?>, java.util.Optional<Method>> equipmentIdsHandles =
+            new java.util.concurrent.ConcurrentHashMap<>();
     private Object cachedLocalPlayer;
     private long   lastLocalPlayerRefresh = 0;
 
@@ -268,16 +283,44 @@ public class StateReader {
         } catch (Exception ignored) {}
     }
 
+    /** Cached per-class field lookup by the first candidate name that exists. */
+    private static Field cachedField(java.util.Map<Class<?>, java.util.Optional<Field>> cache,
+                                     Class<?> type, String... candidates) {
+        if (type == null) return null;
+        java.util.Optional<Field> cached = cache.get(type);
+        if (cached == null) {
+            Field found = null;
+            for (String name : candidates) {
+                found = findField(type, name);
+                if (found != null) break;
+            }
+            cached = java.util.Optional.ofNullable(found);
+            cache.put(type, cached);
+        }
+        return cached.orElse(null);
+    }
+
+    /** Cached per-class method lookup by name and arity. */
+    private static Method cachedMethod(java.util.Map<Class<?>, java.util.Optional<Method>> cache,
+                                       Class<?> type, String name, int paramCount) {
+        if (type == null) return null;
+        java.util.Optional<Method> cached = cache.get(type);
+        if (cached == null) {
+            cached = java.util.Optional.ofNullable(findMethod(type, name, paramCount));
+            cache.put(type, cached);
+        }
+        return cached.orElse(null);
+    }
+
     private void readTargetVitals(GameState gs, Object target) {
         gs.targetHp = gs.targetMaxHp = -1;
         if (target == null) return;
         try {
-            if (actorCurrentHealthField == null) {
-                actorCurrentHealthField = findField(target.getClass(), "currentHealth");
-                actorMaxHealthField     = findField(target.getClass(), "maxHealth");
-            }
-            if (actorCurrentHealthField != null) gs.targetHp = actorCurrentHealthField.getInt(target);
-            if (actorMaxHealthField != null) gs.targetMaxHp = actorMaxHealthField.getInt(target);
+            Class<?> type = target.getClass();
+            Field hpField  = cachedField(actorHealthHandles, type, "currentHealth");
+            Field maxField = cachedField(actorMaxHealthHandles, type, "maxHealth");
+            if (hpField != null) gs.targetHp = hpField.getInt(target);
+            if (maxField != null) gs.targetMaxHp = maxField.getInt(target);
             if (gs.targetMaxHp <= 0 && gs.targetHp > 0) gs.targetMaxHp = Math.max(gs.targetHp, 99);
         } catch (Exception ignored) {}
     }
@@ -285,12 +328,12 @@ public class StateReader {
     private void readTargetEquipment(GameState gs, Object target) {
         if (target == null) return;
         try {
-            if (playerEquipmentField == null)
-                playerEquipmentField = findField(target.getClass(), "equipmentItemId");
+            Class<?> type = target.getClass();
+            Field eqField = cachedField(equipmentHandles, type, "equipmentItemId");
             int[] eq = null;
-            if (playerEquipmentField != null) eq = (int[]) playerEquipmentField.get(target);
+            if (eqField != null) eq = (int[]) eqField.get(target);
             if (eq == null) {
-                Method getEq = findMethod(target.getClass(), "getEquipmentIds", 0);
+                Method getEq = cachedMethod(equipmentIdsHandles, type, "getEquipmentIds", 0);
                 if (getEq != null) eq = (int[]) getEq.invoke(target);
             }
             if (eq == null) return;

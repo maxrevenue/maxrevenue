@@ -22,8 +22,14 @@ public final class Stealth {
         return Boolean.getBoolean("fontmgr.attach.verbose");
     }
 
+    /**
+     * Whether STATUS replies and the debug state string include live target /
+     * spec / animation values. On by default (useful, and the socket is off by
+     * default); disable with {@code -Dfontmgr.overlay.detail=false} when you
+     * want the terse form.
+     */
     public static boolean showOverlayDetail() {
-        return true;
+        return !"false".equalsIgnoreCase(System.getProperty("fontmgr.overlay.detail", "true"));
     }
 
     public static Path cacheDir() {

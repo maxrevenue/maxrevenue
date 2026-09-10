@@ -1,429 +1,274 @@
 package com.sun.java.fontmgr;
 
-import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.List;
+
+import org.objectweb.asm.ClassReader;
+import org.objectweb.asm.ClassVisitor;
+import org.objectweb.asm.ClassWriter;
+import org.objectweb.asm.MethodVisitor;
+import org.objectweb.asm.Opcodes;
+import org.objectweb.asm.Type;
 
 /**
- * Tiny classfile rewriter. Used to neutralize client telemetry methods
- * without shipping ASM. Only understands enough of the format to replace
- * a method body and append constant-pool strings.
+ * Classfile rewriter used to neutralize client telemetry and to hook client
+ * input handlers.
+ *
+ * <p><b>Why ASM.</b> The previous hand-rolled implementation rebuilt the
+ * {@code Code} attribute by hand, which silently discarded the method's
+ * exception table and {@code StackMapTable}. For classfiles at major version 51
+ * or later (this client is 55) the verifier <em>requires</em> stack map frames
+ * at every branch target, so every patched method failed to load with
+ * {@code VerifyError: Expecting a stackmap frame at branch target N} — and the
+ * failure was swallowed by the caller's {@code catch (Throwable ignored)},
+ * leaving the mouse hooks permanently dead.
+ *
+ * <p>ASM keeps instructions label-based, so prepending a call rewrites all
+ * branch offsets, switch padding and frame offsets correctly, and preserves the
+ * exception table verbatim. ASM is bundled into the agent JAR (see
+ * {@code build.gradle.kts}); it is not present anywhere on the client's
+ * classpath, so these references cannot be shadowed by an older copy.
+ *
+ * <p>Every edit below preserves the original method's frames and {@code maxs}
+ * where the code is only extended, and sets them explicitly where the body is
+ * replaced wholesale.
  */
 final class ClassFilePatcher {
 
     private ClassFilePatcher() {}
 
-    static byte[] nopVoidMethod(byte[] classFile, String name, String descriptor) throws Exception {
-        return replaceCode(classFile, name, descriptor, new byte[]{(byte) 0xB1}, 0);
+    /**
+     * Highest {@code ASMx} api level this JVM's resolved ASM supports. ASM's
+     * version constants are compile-time ints, so probing them cannot raise
+     * {@code NoSuchFieldError} even if a different ASM is on the classpath;
+     * an older ASM rejects an api level it does not know with
+     * {@link IllegalArgumentException}, which we catch and step down.
+     */
+    private static final int API = resolveApi();
+
+    private static int resolveApi() {
+        int[] candidates = {Opcodes.ASM9, Opcodes.ASM8, Opcodes.ASM7, Opcodes.ASM6, Opcodes.ASM5};
+        for (int api : candidates) {
+            try {
+                //noinspection ResultOfObjectAllocationIgnored
+                new ClassVisitor(api) {};
+                return api;
+            } catch (IllegalArgumentException unsupported) {
+                // Try the next level down.
+            }
+        }
+        return Opcodes.ASM5;
     }
 
+    // ════════════════════════════════════════════════════════════════════════
+    //  Public operations
+    // ════════════════════════════════════════════════════════════════════════
+
+    /** Replaces a {@code void} method body with a bare {@code return}. */
+    static byte[] nopVoidMethod(byte[] classFile, String name, String descriptor) throws Exception {
+        return replaceBody(classFile, name, descriptor, mv -> mv.visitInsn(Opcodes.RETURN), 0);
+    }
+
+    /** Replaces a method body with {@code return "<value>";}. */
     static byte[] replaceMethodWithStringReturn(byte[] classFile, String name, String descriptor, String value)
             throws Exception {
-        Parsed cf = Parsed.parse(classFile);
-        int stringIndex = cf.addString(value);
-        byte[] code;
-        if (stringIndex <= 255) {
-            code = new byte[]{0x12, (byte) stringIndex, (byte) 0xB0}; // ldc, areturn
-        } else {
-            code = new byte[]{0x13, (byte) (stringIndex >> 8), (byte) stringIndex, (byte) 0xB0}; // ldc_w, areturn
-        }
-        cf.replaceMethodCode(name, descriptor, code, 1);
-        return cf.write();
+        return replaceBody(classFile, name, descriptor, mv -> {
+            mv.visitLdcInsn(value);
+            mv.visitInsn(Opcodes.ARETURN);
+        }, 1);
     }
 
-    static byte[] replaceCode(byte[] classFile, String name, String descriptor, byte[] newCode, int maxStack)
+    /**
+     * Prepends {@code invokestatic owner.hookName(hookDesc)} at the entry of an
+     * existing method. Exception table, stack map frames and branch/switch
+     * offsets are all rewritten correctly by ASM.
+     *
+     * <p>Idempotent: when the method already starts with that exact call, the
+     * input is returned unmodified.
+     */
+    static byte[] prependInvokeStatic(byte[] classFile, String methodName, String methodDescriptor,
+                                      String ownerInternalName, String hookName, String hookDescriptor)
             throws Exception {
-        Parsed cf = Parsed.parse(classFile);
-        cf.replaceMethodCode(name, descriptor, newCode, maxStack);
-        return cf.write();
+        if (startsWithInvokeStatic(classFile, methodName, methodDescriptor,
+                ownerInternalName, hookName, hookDescriptor)) {
+            return classFile;
+        }
+
+        ClassReader cr = new ClassReader(classFile);
+        ClassWriter cw = new ClassWriter(cr, 0);
+        final boolean[] found = {false};
+
+        ClassVisitor cv = new ClassVisitor(API, cw) {
+            @Override
+            public MethodVisitor visitMethod(int access, String name, String descriptor,
+                                             String signature, String[] exceptions) {
+                MethodVisitor mv = super.visitMethod(access, name, descriptor, signature, exceptions);
+                if (!methodName.equals(name) || !methodDescriptor.equals(descriptor)) return mv;
+                if ((access & (Opcodes.ACC_ABSTRACT | Opcodes.ACC_NATIVE)) != 0) return mv;
+                found[0] = true;
+                return new MethodVisitor(API, mv) {
+                    @Override
+                    public void visitCode() {
+                        super.visitCode();
+                        // Emitted before any original instruction/label, so this
+                        // lands at bytecode offset 0. Stack effect is zero, which
+                        // keeps the original max_stack/max_locals valid.
+                        super.visitMethodInsn(Opcodes.INVOKESTATIC,
+                                ownerInternalName, hookName, hookDescriptor, false);
+                    }
+                };
+            }
+        };
+        cr.accept(cv, 0);
+
+        if (!found[0]) {
+            throw new IllegalArgumentException("method not found: " + methodName + methodDescriptor);
+        }
+        return cw.toByteArray();
     }
 
+    /**
+     * True when {@code needle} appears anywhere in the classfile's bytes. Used
+     * for idempotency checks ("is this class already patched?"). The needles
+     * used for that are ASCII method names, which are stored verbatim in the
+     * modified-UTF-8 constant pool, so a byte search is exact for them.
+     */
     static boolean containsUtf8(byte[] classFile, String needle) {
         if (classFile == null || needle == null || needle.isEmpty()) return false;
+        byte[] n = needle.getBytes(StandardCharsets.UTF_8);
+        if (n.length == 0 || n.length > classFile.length) return false;
+        byte first = n[0];
+        int last = classFile.length - n.length;
+        for (int i = 0; i <= last; i++) {
+            if (classFile[i] != first) continue;
+            int j = 1;
+            while (j < n.length && classFile[i + j] == n[j]) j++;
+            if (j == n.length) return true;
+        }
+        return false;
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  Internals
+    // ════════════════════════════════════════════════════════════════════════
+
+    /** Callback that emits a replacement instruction sequence. */
+    private interface BodyEmitter {
+        void emit(MethodVisitor mv);
+    }
+
+    /**
+     * Replaces the body of every non-abstract method matching {@code name} +
+     * {@code descriptor}, dropping the original frames/exception table (safe,
+     * because the replacement code is straight-line and cannot throw).
+     */
+    private static byte[] replaceBody(byte[] classFile, String name, String descriptor,
+                                      BodyEmitter emitter, int maxStack) throws Exception {
+        ClassReader cr = new ClassReader(classFile);
+        ClassWriter cw = new ClassWriter(cr, 0);
+        final boolean[] found = {false};
+
+        ClassVisitor cv = new ClassVisitor(API, cw) {
+            @Override
+            public MethodVisitor visitMethod(int access, String methodName, String methodDesc,
+                                             String signature, String[] exceptions) {
+                MethodVisitor mv = super.visitMethod(access, methodName, methodDesc, signature, exceptions);
+                if (!name.equals(methodName) || !descriptor.equals(methodDesc)) return mv;
+                if ((access & (Opcodes.ACC_ABSTRACT | Opcodes.ACC_NATIVE)) != 0) return mv;
+                found[0] = true;
+
+                // Local slots required by the signature (includes the implicit
+                // `this` for instance methods); larger than strictly necessary
+                // for static methods, which the verifier accepts.
+                final int maxLocals = Math.max(1, Type.getArgumentsAndReturnSizes(descriptor) >> 2);
+                return new MethodVisitor(API, mv) {
+                    @Override
+                    public void visitCode() {
+                        super.visitCode();
+                        emitter.emit(mv);
+                    }
+
+                    // Discard the original body entirely.
+                    @Override public void visitFrame(int type, int nLocal, Object[] l, int nStack, Object[] s) {}
+                    @Override public void visitInsn(int opcode) {}
+                    @Override public void visitIntInsn(int opcode, int operand) {}
+                    @Override public void visitVarInsn(int opcode, int varIndex) {}
+                    @Override public void visitTypeInsn(int opcode, String type) {}
+                    @Override public void visitFieldInsn(int opcode, String owner, String n, String d) {}
+                    @Override public void visitMethodInsn(int opcode, String owner, String n, String d, boolean itf) {}
+                    @Override public void visitInvokeDynamicInsn(String n, String d, org.objectweb.asm.Handle bsm,
+                                                                 Object... args) {}
+                    @Override public void visitJumpInsn(int opcode, org.objectweb.asm.Label label) {}
+                    @Override public void visitLabel(org.objectweb.asm.Label label) {}
+                    @Override public void visitLdcInsn(Object value) {}
+                    @Override public void visitIincInsn(int varIndex, int increment) {}
+                    @Override public void visitTableSwitchInsn(int min, int max, org.objectweb.asm.Label d,
+                                                               org.objectweb.asm.Label... labels) {}
+                    @Override public void visitLookupSwitchInsn(org.objectweb.asm.Label d, int[] keys,
+                                                                org.objectweb.asm.Label[] labels) {}
+                    @Override public void visitMultiANewArrayInsn(String descriptor, int numDimensions) {}
+                    @Override public void visitTryCatchBlock(org.objectweb.asm.Label start, org.objectweb.asm.Label end,
+                                                             org.objectweb.asm.Label handler, String type) {}
+                    @Override public void visitLocalVariable(String n, String d, String s,
+                                                             org.objectweb.asm.Label start, org.objectweb.asm.Label end,
+                                                             int index) {}
+                    @Override public void visitLineNumber(int line, org.objectweb.asm.Label start) {}
+
+                    @Override
+                    public void visitMaxs(int ignoredMaxStack, int ignoredMaxLocals) {
+                        super.visitMaxs(maxStack, maxLocals);
+                    }
+                };
+            }
+        };
+        cr.accept(cv, 0);
+
+        if (!found[0]) {
+            throw new IllegalArgumentException("method not found: " + name + descriptor);
+        }
+        return cw.toByteArray();
+    }
+
+    /** Cheap pre-pass: does the target method begin with the given call? */
+    private static boolean startsWithInvokeStatic(byte[] classFile, String methodName, String methodDescriptor,
+                                                  String owner, String hook, String hookDescriptor) {
         try {
-            Parsed cf = Parsed.parse(classFile);
-            return cf.anyUtf8Contains(needle);
+            ClassReader cr = new ClassReader(classFile);
+            final boolean[] hit = {false};
+            cr.accept(new ClassVisitor(API) {
+                @Override
+                public MethodVisitor visitMethod(int access, String name, String descriptor,
+                                                 String signature, String[] exceptions) {
+                    if (!methodName.equals(name) || !methodDescriptor.equals(descriptor)) return null;
+                    if ((access & (Opcodes.ACC_ABSTRACT | Opcodes.ACC_NATIVE)) != 0) return null;
+                    return new MethodVisitor(API) {
+                        private boolean first = true;
+
+                        @Override
+                        public void visitMethodInsn(int opcode, String o, String n, String d, boolean itf) {
+                            if (first && opcode == Opcodes.INVOKESTATIC && owner.equals(o)
+                                    && hook.equals(n) && hookDescriptor.equals(d)) {
+                                hit[0] = true;
+                            }
+                            first = false;
+                        }
+
+                        // A frame/label does not count as an instruction, so keep
+                        // `first` set until real code is seen.
+                        @Override public void visitInsn(int opcode) { first = false; }
+                        @Override public void visitIntInsn(int opcode, int operand) { first = false; }
+                        @Override public void visitVarInsn(int opcode, int varIndex) { first = false; }
+                        @Override public void visitTypeInsn(int opcode, String type) { first = false; }
+                        @Override public void visitFieldInsn(int opcode, String o, String n, String d) { first = false; }
+                        @Override public void visitLdcInsn(Object value) { first = false; }
+                        @Override public void visitJumpInsn(int opcode, org.objectweb.asm.Label label) { first = false; }
+                        @Override public void visitIincInsn(int varIndex, int increment) { first = false; }
+                    };
+                }
+            }, ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+            return hit[0];
         } catch (Exception e) {
+            // Unparseable class: fall through and let the real pass report it.
             return false;
         }
-    }
-
-    /** Nop every method with this descriptor except &lt;init&gt; / &lt;clinit&gt;. */
-    static byte[] nopMethodsByDescriptor(byte[] classFile, String descriptor) throws Exception {
-        Parsed cf = Parsed.parse(classFile);
-        cf.replaceMethodsByDescriptor(descriptor, new byte[]{(byte) 0xB1}, 0, true);
-        return cf.write();
-    }
-
-    /** Replace the first method whose bytecode references this UTF-8 string. */
-    static byte[] replaceMethodReferencingUtf8(byte[] classFile, String needle, byte[] newCode, int maxStack)
-            throws Exception {
-        Parsed cf = Parsed.parse(classFile);
-        if (!cf.replaceMethodReferencingUtf8(needle, newCode, maxStack)) {
-            throw new IllegalArgumentException("no method refs " + needle);
-        }
-        return cf.write();
-    }
-
-    static byte[] replaceStringReturnReferencingUtf8(byte[] classFile, String needle, String value)
-            throws Exception {
-        Parsed cf = Parsed.parse(classFile);
-        int stringIndex = cf.addString(value);
-        byte[] code;
-        if (stringIndex <= 255) {
-            code = new byte[]{0x12, (byte) stringIndex, (byte) 0xB0};
-        } else {
-            code = new byte[]{0x13, (byte) (stringIndex >> 8), (byte) stringIndex, (byte) 0xB0};
-        }
-        if (!cf.replaceMethodReferencingUtf8(needle, code, 1)) {
-            throw new IllegalArgumentException("no method refs " + needle);
-        }
-        return cf.write();
-    }
-
-    private static final class Parsed {
-        private int minor;
-        private int major;
-        private final List<byte[]> pool = new ArrayList<>();
-        private byte[] afterPoolBeforeMethods;
-        private final List<FieldOrMethod> methods = new ArrayList<>();
-        private byte[] classAttributes;
-
-        static Parsed parse(byte[] data) throws Exception {
-            Cursor c = new Cursor(data);
-            int magic = c.u4();
-            if (magic != 0xCAFEBABE) throw new IllegalArgumentException("not a class file");
-            Parsed p = new Parsed();
-            p.minor = c.u2();
-            p.major = c.u2();
-            int cpCount = c.u2();
-            p.pool.add(null); // index 0
-            for (int i = 1; i < cpCount; i++) {
-                int start = c.pos;
-                int tag = c.u1();
-                skipCpInfo(c, tag);
-                p.pool.add(slice(data, start, c.pos));
-                if (tag == 5 || tag == 6) {
-                    p.pool.add(null);
-                    i++;
-                }
-            }
-            int afterCp = c.pos;
-            c.u2(); // access
-            c.u2(); // this
-            c.u2(); // super
-            int ifaceCount = c.u2();
-            c.skip(ifaceCount * 2);
-            int fieldCount = c.u2();
-            for (int i = 0; i < fieldCount; i++) skipFieldOrMethod(c);
-            int methodsStart = c.pos;
-            p.afterPoolBeforeMethods = slice(data, afterCp, methodsStart);
-            int methodCount = c.u2();
-            for (int i = 0; i < methodCount; i++) {
-                p.methods.add(readFieldOrMethod(c, data));
-            }
-            p.classAttributes = slice(data, c.pos, data.length);
-            return p;
-        }
-
-        boolean anyUtf8Contains(String needle) {
-            for (int i = 1; i < pool.size(); i++) {
-                if (utf8(i).contains(needle)) return true;
-            }
-            return false;
-        }
-
-        void replaceMethodsByDescriptor(String descriptor, byte[] newCode, int maxStack, boolean skipInit)
-                throws Exception {
-            boolean found = false;
-            for (FieldOrMethod m : methods) {
-                String n = utf8(m.nameIndex);
-                if (skipInit && ("<init>".equals(n) || "<clinit>".equals(n))) continue;
-                if (!descriptor.equals(utf8(m.descIndex))) continue;
-                found = true;
-                writeMethodCode(m, newCode, maxStack);
-            }
-            if (!found) throw new IllegalArgumentException("no method desc " + descriptor);
-        }
-
-        boolean replaceMethodReferencingUtf8(String needle, byte[] newCode, int maxStack) throws Exception {
-            for (FieldOrMethod m : methods) {
-                String n = utf8(m.nameIndex);
-                if ("<init>".equals(n) || "<clinit>".equals(n)) continue;
-                if (!methodCodeRefsUtf8(m, needle)) continue;
-                writeMethodCode(m, newCode, maxStack);
-                return true;
-            }
-            return false;
-        }
-
-        private boolean methodCodeRefsUtf8(FieldOrMethod m, String needle) {
-            for (Attr a : m.attributes) {
-                if (!"Code".equals(utf8(a.nameIndex))) continue;
-                byte[] info = a.info;
-                if (info == null || info.length < 8) continue;
-                int codeLen = ((info[4] & 0xFF) << 24) | ((info[5] & 0xFF) << 16)
-                        | ((info[6] & 0xFF) << 8) | (info[7] & 0xFF);
-                int start = 8;
-                int end = Math.min(info.length, start + codeLen);
-                for (int i = start; i < end; i++) {
-                    int op = info[i] & 0xFF;
-                    if (op == 0x12 && i + 1 < end) {
-                        if (cpStringContains(info[i + 1] & 0xFF, needle)) return true;
-                    } else if (op == 0x13 && i + 2 < end) {
-                        int idx = ((info[i + 1] & 0xFF) << 8) | (info[i + 2] & 0xFF);
-                        if (cpStringContains(idx, needle)) return true;
-                    }
-                }
-            }
-            return false;
-        }
-
-        private boolean cpStringContains(int index, String needle) {
-            if (index <= 0 || index >= pool.size()) return false;
-            byte[] e = pool.get(index);
-            if (e == null || e[0] != 8 || e.length < 3) return false;
-            int utf = ((e[1] & 0xFF) << 8) | (e[2] & 0xFF);
-            return utf8(utf).contains(needle);
-        }
-
-        private void writeMethodCode(FieldOrMethod m, byte[] newCode, int maxStack) {
-            int maxLocals = Math.max(1, inferMaxLocals(m));
-            List<byte[]> kept = new ArrayList<>();
-            for (Attr a : m.attributes) {
-                if ("Code".equals(utf8(a.nameIndex))) {
-                    kept.add(writeCodeAttribute(a.nameIndex, newCode, maxStack, maxLocals));
-                } else {
-                    kept.add(a.raw);
-                }
-            }
-            m.attributesRaw = kept;
-        }
-
-        void replaceMethodCode(String name, String descriptor, byte[] newCode, int maxStack) throws Exception {
-            boolean found = false;
-            for (FieldOrMethod m : methods) {
-                if (!name.equals(utf8(m.nameIndex)) || !descriptor.equals(utf8(m.descIndex))) continue;
-                found = true;
-                int maxLocals = Math.max(1, inferMaxLocals(m));
-                List<byte[]> kept = new ArrayList<>();
-                for (Attr a : m.attributes) {
-                    if ("Code".equals(utf8(a.nameIndex))) {
-                        kept.add(writeCodeAttribute(a.nameIndex, newCode, maxStack, maxLocals));
-                    } else {
-                        kept.add(a.raw);
-                    }
-                }
-                m.attributesRaw = kept;
-            }
-            if (!found) throw new IllegalArgumentException("method not found: " + name + descriptor);
-        }
-
-        int addString(String value) {
-            byte[] utf8 = value.getBytes(StandardCharsets.UTF_8);
-            byte[] utfInfo = new byte[3 + utf8.length];
-            utfInfo[0] = 1;
-            utfInfo[1] = (byte) (utf8.length >> 8);
-            utfInfo[2] = (byte) utf8.length;
-            System.arraycopy(utf8, 0, utfInfo, 3, utf8.length);
-            pool.add(utfInfo);
-            int utfIndex = pool.size() - 1;
-
-            byte[] strInfo = new byte[3];
-            strInfo[0] = 8;
-            strInfo[1] = (byte) (utfIndex >> 8);
-            strInfo[2] = (byte) utfIndex;
-            pool.add(strInfo);
-            return pool.size() - 1;
-        }
-
-        byte[] write() throws Exception {
-            ByteArrayOutputStream out = new ByteArrayOutputStream();
-            writeU4(out, 0xCAFEBABE);
-            writeU2(out, minor);
-            writeU2(out, major);
-            writeU2(out, pool.size());
-            for (int i = 1; i < pool.size(); i++) {
-                byte[] e = pool.get(i);
-                if (e == null) continue;
-                out.write(e);
-            }
-            out.write(afterPoolBeforeMethods);
-            writeU2(out, methods.size());
-            for (FieldOrMethod m : methods) {
-                writeU2(out, m.access);
-                writeU2(out, m.nameIndex);
-                writeU2(out, m.descIndex);
-                writeU2(out, m.attributesRaw.size());
-                for (byte[] a : m.attributesRaw) out.write(a);
-            }
-            out.write(classAttributes);
-            return out.toByteArray();
-        }
-
-        private String utf8(int index) {
-            byte[] e = pool.get(index);
-            if (e == null || e[0] != 1) return "";
-            int len = ((e[1] & 0xFF) << 8) | (e[2] & 0xFF);
-            return new String(e, 3, len, StandardCharsets.UTF_8);
-        }
-
-        private int inferMaxLocals(FieldOrMethod m) {
-            for (Attr a : m.attributes) {
-                if (!"Code".equals(utf8(a.nameIndex))) continue;
-                if (a.info.length >= 4) {
-                    return ((a.info[2] & 0xFF) << 8) | (a.info[3] & 0xFF);
-                }
-            }
-            return 4;
-        }
-
-        private static byte[] writeCodeAttribute(int nameIndex, byte[] code, int maxStack, int maxLocals) {
-            // Code attr info: max_stack u2, max_locals u2, code_length u4, code, ex_table_len u2, attrs u2
-            int infoLen = 2 + 2 + 4 + code.length + 2 + 2;
-            byte[] raw = new byte[6 + infoLen];
-            raw[0] = (byte) (nameIndex >> 8);
-            raw[1] = (byte) nameIndex;
-            raw[2] = (byte) (infoLen >> 24);
-            raw[3] = (byte) (infoLen >> 16);
-            raw[4] = (byte) (infoLen >> 8);
-            raw[5] = (byte) infoLen;
-            int i = 6;
-            raw[i++] = (byte) (maxStack >> 8);
-            raw[i++] = (byte) maxStack;
-            raw[i++] = (byte) (maxLocals >> 8);
-            raw[i++] = (byte) maxLocals;
-            raw[i++] = (byte) (code.length >> 24);
-            raw[i++] = (byte) (code.length >> 16);
-            raw[i++] = (byte) (code.length >> 8);
-            raw[i++] = (byte) code.length;
-            System.arraycopy(code, 0, raw, i, code.length);
-            // exception_table_length and attributes_count already zero
-            return raw;
-        }
-
-        private static void skipCpInfo(Cursor c, int tag) throws Exception {
-            switch (tag) {
-                case 1:
-                    c.skip(c.u2());
-                    break;
-                case 7:
-                case 8:
-                case 16:
-                case 19:
-                case 20:
-                    c.skip(2);
-                    break;
-                case 15:
-                    c.skip(3);
-                    break;
-                case 3:
-                case 4:
-                case 9:
-                case 10:
-                case 11:
-                case 12:
-                case 17:
-                case 18:
-                    c.skip(4);
-                    break;
-                case 5:
-                case 6:
-                    c.skip(8);
-                    break;
-                default:
-                    throw new IllegalArgumentException("unknown cp tag " + tag);
-            }
-        }
-
-        private static void skipFieldOrMethod(Cursor c) {
-            c.skip(6);
-            int ac = c.u2();
-            for (int i = 0; i < ac; i++) {
-                c.skip(2);
-                c.skip(c.u4());
-            }
-        }
-
-        private static FieldOrMethod readFieldOrMethod(Cursor c, byte[] data) {
-            FieldOrMethod m = new FieldOrMethod();
-            m.access = c.u2();
-            m.nameIndex = c.u2();
-            m.descIndex = c.u2();
-            int ac = c.u2();
-            m.attributes = new ArrayList<>();
-            m.attributesRaw = new ArrayList<>();
-            for (int i = 0; i < ac; i++) {
-                int start = c.pos;
-                int name = c.u2();
-                int len = c.u4();
-                int infoStart = c.pos;
-                c.skip(len);
-                Attr a = new Attr();
-                a.nameIndex = name;
-                a.info = slice(data, infoStart, infoStart + len);
-                a.raw = slice(data, start, c.pos);
-                m.attributes.add(a);
-                m.attributesRaw.add(a.raw);
-            }
-            return m;
-        }
-
-        private static byte[] slice(byte[] src, int from, int to) {
-            byte[] out = new byte[to - from];
-            System.arraycopy(src, from, out, 0, out.length);
-            return out;
-        }
-
-        private static void writeU2(ByteArrayOutputStream out, int v) {
-            out.write((v >> 8) & 0xFF);
-            out.write(v & 0xFF);
-        }
-
-        private static void writeU4(ByteArrayOutputStream out, int v) {
-            out.write((v >> 24) & 0xFF);
-            out.write((v >> 16) & 0xFF);
-            out.write((v >> 8) & 0xFF);
-            out.write(v & 0xFF);
-        }
-    }
-
-    private static final class FieldOrMethod {
-        int access;
-        int nameIndex;
-        int descIndex;
-        List<Attr> attributes;
-        List<byte[]> attributesRaw;
-    }
-
-    private static final class Attr {
-        int nameIndex;
-        byte[] info;
-        byte[] raw;
-    }
-
-    private static final class Cursor {
-        final byte[] d;
-        int pos;
-
-        Cursor(byte[] d) { this.d = d; }
-
-        int u1() { return d[pos++] & 0xFF; }
-
-        int u2() {
-            int v = ((d[pos] & 0xFF) << 8) | (d[pos + 1] & 0xFF);
-            pos += 2;
-            return v;
-        }
-
-        int u4() {
-            int v = ((d[pos] & 0xFF) << 24) | ((d[pos + 1] & 0xFF) << 16)
-                    | ((d[pos + 2] & 0xFF) << 8) | (d[pos + 3] & 0xFF);
-            pos += 4;
-            return v;
-        }
-
-        void skip(int n) { pos += n; }
     }
 }

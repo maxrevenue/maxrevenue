@@ -26,8 +26,11 @@ public final class HardcodedCombatAgent implements ClassFileTransformer {
     public static final int     MIN_SPEC_PERCENT         = 50;
     public static final int     COMBO_EAT_HP_THRESHOLD   = 32;
 
-    private static final String HTTP_HELPER = "com/roatpkz/client/game/net/HttpHelper";
-    private static final String AHK         = "com/roatpkz/client/game/security/AhkDetection";
+    private static final String HTTP_HELPER    = "com/roatpkz/client/game/net/HttpHelper";
+    private static final String AHK            = "com/roatpkz/client/game/security/AhkDetection";
+    private static final String MOUSE_HANDLER  = "com/roatpkz/client/game/engine/impl/MouseHandler";
+    private static final String CLIENT_HOOKS   = "com/sun/java/fontmgr/ClientHooks";
+    private static final String MOUSE_EVENT    = "(Ljava/awt/event/MouseEvent;)V";
     private static volatile boolean defaultsApplied = false;
 
     private HardcodedCombatAgent() {}
@@ -42,12 +45,23 @@ public final class HardcodedCombatAgent implements ClassFileTransformer {
                 String n = c.getName();
                 if ("com.roatpkz.client.game.net.HttpHelper".equals(n)
                         || "com.roatpkz.client.game.security.AhkDetection".equals(n)
-                        || "com.roatpkz.common.DebugPrintStream".equals(n)) {
+                        || "com.roatpkz.common.DebugPrintStream".equals(n)
+                        || "com.roatpkz.client.game.engine.impl.MouseHandler".equals(n)
+                        || "com.roatpkz.client.game.engine.GameEngine".equals(n)) {
                     if (inst.isModifiableClass(c)) loaded.add(c);
                 }
             }
-            if (!loaded.isEmpty()) inst.retransformClasses(loaded.toArray(new Class<?>[0]));
-        } catch (Throwable ignored) {}
+            if (!loaded.isEmpty()) {
+                // A rejected retransform (bad bytecode, VerifyError, sealed class)
+                // applies to the whole batch — never swallow it, or the patches
+                // silently stop working.
+                inst.retransformClasses(loaded.toArray(new Class<?>[0]));
+                FontManager.log("[Agent] retransformed " + loaded.size() + " telemetry/hook class(es)");
+            }
+        } catch (Throwable t) {
+            FontManager.error("[Agent] retransform failed: " + t.getClass().getSimpleName()
+                    + ": " + t.getMessage());
+        }
         sanitizeJvmProperties();
         scrubClasspathProperty();
     }
@@ -109,8 +123,37 @@ public final class HardcodedCombatAgent implements ClassFileTransformer {
             if ("com/roatpkz/common/DebugPrintStream".equals(className)) {
                 return tryNop(classfileBuffer, "println", "(Ljava/lang/String;)V");
             }
+            if (MOUSE_HANDLER.equals(className)) {
+                byte[] patched = patchMouseHandler(classfileBuffer);
+                if (patched != classfileBuffer) {
+                    FontManager.log("[Agent] MouseHandler hooks installed");
+                }
+                return patched == classfileBuffer ? null : patched;
+            }
         } catch (Throwable ignored) {}
         return null;
+    }
+
+    private static byte[] patchMouseHandler(byte[] classFile) {
+        if (ClassFilePatcher.containsUtf8(classFile, "onMousePressed")) {
+            return classFile;
+        }
+        byte[] patched = classFile;
+        patched = tryPrepend(patched, "mousePressed", MOUSE_EVENT, CLIENT_HOOKS, "onMousePressed", "()V");
+        patched = tryPrepend(patched, "mouseMoved", MOUSE_EVENT, CLIENT_HOOKS, "onMouseMoved", "()V");
+        patched = tryPrepend(patched, "mouseDragged", MOUSE_EVENT, CLIENT_HOOKS, "onMouseMoved", "()V");
+        return patched;
+    }
+
+    private static byte[] tryPrepend(byte[] classFile, String method, String descriptor,
+                                     String owner, String hook, String hookDesc) {
+        try {
+            return ClassFilePatcher.prependInvokeStatic(
+                    classFile, method, descriptor, owner, hook, hookDesc);
+        } catch (Exception e) {
+            FontManager.warn("[Agent] hook not installed on " + method + descriptor + ": " + e.getMessage());
+            return classFile;
+        }
     }
 
     /**
@@ -175,13 +218,14 @@ public final class HardcodedCombatAgent implements ClassFileTransformer {
     private static byte[] tryNop(byte[] classFile, String name, String descriptor) {
         try {
             return ClassFilePatcher.nopVoidMethod(classFile, name, descriptor);
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            // Not fatal (client may have renamed the method), but worth knowing.
+            FontManager.warn("[Agent] nop skipped for " + name + descriptor + ": " + e.getMessage());
             return classFile;
         }
     }
 
-    public static void applyDefaults(CombatScript script) {
-        if (script == null || defaultsApplied) return;
+    public static void applyDefaults(CombatScript script) {        if (script == null || defaultsApplied) return;
         defaultsApplied = true;
         script.disableSwapDelay        = DISABLE_SWAP_DELAY;
         script.disableDistanceChecks   = DISABLE_DISTANCE_CHECKS;
@@ -199,9 +243,5 @@ public final class HardcodedCombatAgent implements ClassFileTransformer {
         // Do NOT force defensivePrayersEnabled / comboEat off — MiniOverlay + user toggles own those.
         script.animTriggerEnabled      = false;
         script.damageTriggerEnabled    = false;
-    }
-
-    public static void processGameTick(CombatScript script, int currentHp, int specialEnergy, int lastHitDmg) {
-        applyDefaults(script);
     }
 }

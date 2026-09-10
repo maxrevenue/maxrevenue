@@ -146,6 +146,31 @@ public final class ClientThreadGuard {
     }
 
     /**
+     * Enqueue with a <em>fixed</em> delay (no extra Gaussian). Use this when
+     * the caller already chose the gap — e.g. swap lines that must stay in
+     * order and above Roat's 70ms inventory-click detector.
+     */
+    public void invokeAfter(long delayMs, Runnable action) {
+        Objects.requireNonNull(action, "action");
+        enqueue(System.currentTimeMillis() + Math.max(0L, delayMs), action);
+    }
+
+    /** Inter-equip gap; always {@code > 70} so {@code AhkDetection} stays quiet. */
+    public static long ahkSafeInvGapMs() {
+        return Humanizer.invGapMs();
+    }
+
+    /** First inventory click of a swap chain. */
+    public static long firstInvClickDelayMs() {
+        return Humanizer.firstEquipDelayMs();
+    }
+
+    /** Tiny ordered gap for prayers/spec/attack that can share a game tick. */
+    public static long sameTickGapMs() {
+        return Humanizer.sameTickClickGapMs();
+    }
+
+    /**
      * Drain due tasks. <b>Must</b> be called from the client's execution thread
      * (tick listener, combat drain, or host invoke-later loop).
      *
