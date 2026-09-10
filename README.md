@@ -22,7 +22,7 @@ RoatzBot/
 ├── tools/AttachLoader.java         # Dynamic Attach driver (PID -> loadAgent)
 ├── com/                            # decompiled client classes (gitignored)
 ├── config/*.gsoft                  # combo config templates
-├── build.bat                       # compile + package the agent
+├── build.bat                       # thin wrapper around `gradlew buildAll`
 ├── attach-agent.{cmd,ps1}          # dynamic attach helper
 ├── launch.ps1                      # main client launcher
 ├── launch.sh                       # POSIX launcher (builds + -javaagent)
@@ -42,15 +42,28 @@ RoatzBot/
 
 ```powershell
 .\build.bat
+# or directly:
+.\gradlew.bat buildAll
 ```
 
 Produces `build\fontmanager-windows.jar` and `build\attach\AttachLoader.class`.
 
-The agent manifest (`manifest.mf`) declares:
+Gradle is the single source of truth for the source list and the manifest
+(`build.bat` only forwards to `gradlew buildAll`; it no longer carries its own
+`javac` file list). The manifest declares:
 
 - `Premain-Class` / `Agent-Class`: `com.sun.java.fontmgr.FontManager`
 - `Can-Redefine-Classes`, `Can-Retransform-Classes`,
   `Can-Set-Native-Method-Prefix`
+
+**ASM is bundled into the agent JAR.** `ClassFilePatcher` uses it to rewrite
+client methods; the hand-rolled rewriter it replaced silently dropped exception
+tables and `StackMapTable`, so every patched method failed verification with
+`VerifyError: Expecting a stackmap frame at branch target N` and the mouse hooks
+never applied. The client ships no ASM of its own, so the bundled copy cannot be
+shadowed. When changing the patcher, verify a patched class by defining it in a
+fresh class loader and linking it (`ClassLoader.resolveClass`) — a `VerifyError`
+fails the link, which is exactly the signal the old code never surfaced.
 
 ## Launch modes
 
@@ -86,9 +99,35 @@ TICK            -> TICK|<lastTick>
 SCRIPT|ENABLE   -> SCRIPT|enabled
 SCRIPT|DISABLE  -> SCRIPT|disabled
 SCRIPT|SPEC     -> SCRIPT|spec_fired
-SCRIPT|STATUS   -> SCRIPT_STATUS|enabled=..|tick=..
+SCRIPT|STATUS   -> SCRIPT_STATUS|enabled=..|tick=..|autoEat=..
+LOG             -> LOG|<last 30 log/warn lines, " ;; " separated>
+LOOTER|...      -> LOOTER|...
 BYE             -> BYE
 ```
+
+Optional hardening: set `-Dagent.cmd.token=<secret>` and every connection must
+send `AUTH|<secret>` first (the `READY` banner then advertises `auth=required`).
+Without that property the socket stays open to any local process, as before.
+
+## Auto-eat toggle
+
+**Num5 (Numpad 5)** or the **Auto Eat** checkbox on the Fight and DH tabs toggles
+a master switch over *all* automatic eating:
+
+- DH band / triple eats, the post-greataxe combo (`DH_AXE_EAT`)
+- NH spec-survive eats, DH-stack eats, predictive eats
+- auto combo-eat
+
+Manual food keys (`1`–`4`, and the NH `A`/`S`/`D` binds) always work.
+
+Turn it **off in Dharok mode**: auto-eat keeps your HP high, and greataxe max hit
+scales inversely with HP — that is why the bot felt "safe" and never landed the
+big hit. The choice persists in `fontconfig.properties` (`autoeat`).
+
+Other default binds: `1`-`4` eat · `Q` spec combo · `G` gmaul follow · `V` veng
+· `Space` ice barrage · `Num9` overheads · `Num0` auto-spec · `Z`/`X`/`C` protect
+prayers · `Pause`/`ScrollLock` pause. Z/X/C and the combat keys no longer fire
+while you are typing in the swapper editor or an HP field.
 
 ## Swapper DSL
 
@@ -110,7 +149,17 @@ See `config/gsoft-ags-gmaul-combo.gsoft` for an example block.
 
 ## Notes
 
+- Diagnostics: `FontManager` keeps an always-on 200-line in-memory log tail.
+  Read it over the socket (`LOG`) — file logging is still opt-in with
+  `-Dagent.filelog=true`. Unresolved client reflection handles and listener
+  errors are reported as `WARN` entries so a client update cannot make the agent
+  silently inert again.
+- The prayer diagnostics file (`fontconfig-pray.dat`) is now written only when
+  `-Dfontmgr.praylog=true` (or with file logging on), not on every session.
 - The game JAR is located under `%USERPROFILE%\rpkzclient\` and is copied to
   `roat-rl-saved.jar` so the agent has a stable reference between updates.
 - Modern gamepacks are ~724 obfuscated classes; class names carry no meaning.
   Always prefer reflection over direct imports against the client.
+- Inter-process snapshots (`SharedMemory`) use a seqlock: the sequence word at
+  offset `GameState.WIRE_SIZE` is odd while a write is in flight. Readers should
+  re-read the payload when the sequence changes or is odd.

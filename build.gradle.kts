@@ -12,6 +12,16 @@ plugins {
 group = "com.sun.java.fontmgr"
 version = "1.0"
 
+repositories {
+    mavenCentral()
+}
+
+// ASM is bundled into the agent JAR (see `agentJar` below). It is not present
+// anywhere on the client's classpath, so these classes cannot be shadowed.
+dependencies {
+    implementation("org.ow2.asm:asm:9.4")
+}
+
 java {
     // Agent bytecode must run on the client's embedded JRE (~JDK 8-11 era),
     // so compile to release 11 even though we build with a newer toolchain.
@@ -20,12 +30,12 @@ java {
 
 }
 
-// Agent source lives directly under src/ (not the default src/main/java),
-// and only the fontmgr agent classes belong in the JAR (AttachLoader is separate).
+// Agent source lives directly under src/ (not the default src/main/java).
+// AttachLoader is compiled separately (it lives in tools/ and is not part of
+// this source set), so no exclude is needed here.
 sourceSets {
     main {
         java.setSrcDirs(listOf("src"))
-        java.exclude("com/sun/java/fontmgr/**/AttachLoader.java")
     }
 }
 
@@ -34,7 +44,15 @@ val agentJar by tasks.registering(Jar::class) {
     archiveFileName.set("fontmanager-windows.jar")
     destinationDirectory.set(layout.buildDirectory)
 
+    // Self-contained agent: main classes plus the bundled ASM used by
+    // ClassFilePatcher (the client ships no ASM of its own).
     from(sourceSets.main.get().output)
+    from(configurations.runtimeClasspath.map { cfg ->
+        cfg.map { dep -> if (dep.isDirectory) dep else zipTree(dep) }
+    })
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    exclude("META-INF/*.SF", "META-INF/*.DSA", "META-INF/*.RSA", "META-INF/MANIFEST.MF",
+            "module-info.class", "META-INF/versions/**")
 
     manifest {
         attributes(
@@ -79,4 +97,45 @@ tasks.build {
 
 tasks.clean {
     delete(layout.buildDirectory)
+}
+
+// ── Verification harness (verify/) ──────────────────────────────────────────
+// Deliberately NOT under tools/: everything in tools/ is compiled into the
+// attach driver, and the harness must stay out of the shipped agent. Own
+// source sets, own output dirs, own task: `gradlew verify`.
+val verifyStubs by tasks.registering(JavaCompile::class) {
+    source(fileTree("verify/stubs"))
+    classpath = files()
+    options.release.set(11)
+    destinationDirectory.set(layout.buildDirectory.dir("verify/stubs"))
+}
+
+val verifyHarness by tasks.registering(JavaCompile::class) {
+    source(fileTree("verify/harness"))
+    classpath = sourceSets.main.get().output + configurations.runtimeClasspath.get()
+    options.release.set(11)
+    destinationDirectory.set(layout.buildDirectory.dir("verify/harness"))
+}
+
+// Patches the four real client classes out of game.jar, defines them in a fresh
+// class loader, force-links them with resolveClass (a VerifyError fails the
+// link), then re-runs the agent via -javaagent and via Dynamic Attach against
+// stubs that carry branches/switch/try-catch.
+tasks.register<JavaExec>("verify") {
+    group = "verification"
+    description = "Patch/link/verify the real client classes and both agent entry points"
+    dependsOn(agentJar, attach, verifyStubs, verifyHarness)
+    classpath = files(
+        layout.buildDirectory.dir("verify/harness"),
+        sourceSets.main.get().output,
+        configurations.runtimeClasspath.get()
+    )
+    mainClass.set("com.sun.java.fontmgr.VerifyHarness")
+    setArgs(listOf(
+        file("game.jar").absolutePath,
+        layout.buildDirectory.file("fontmanager-windows.jar").get().asFile.absolutePath,
+        layout.buildDirectory.dir("verify/stubs").get().asFile.absolutePath,
+        layout.buildDirectory.dir("verify/harness").get().asFile.absolutePath,
+        layout.buildDirectory.dir("attach").get().asFile.absolutePath
+    ))
 }
