@@ -47,20 +47,26 @@ public class OverlayUI {
 
     private final com.sun.java.fontmgr.swap.SwapManager swapManager;
     private final com.sun.java.fontmgr.swap.SwapDispatcher swapDispatcher;
+    private com.sun.java.fontmgr.swap.SwapperPanel swapperPanel;
 
-    // Tabs
-    private JLabel tabPk, tabNh, tabDh, tabSwap, tabSet;
+    // Tabs — built around the Swapper: Swapper (hub) · Fight · DH
+    private static final String[] TAB_KEYS   = { "SWAP", "FIGHT", "DH" };
+    private static final String[] TAB_NAMES  = { "Swapper", "Fight", "DH" };
+    private final JLabel[] tabLabels = new JLabel[TAB_KEYS.length];
     private final CardLayout cards = new CardLayout();
     private final JPanel body;
 
     // PK toggles
     private JToggleButton pkAutoSpecBtn, pkPunishToggle, pkVengToggle, pkDefPrayToggle;
     private JToggleButton pkComboEatToggle, pkProtectItemToggle;
+    private JToggleButton pkAutoEatToggle, dhAutoEatToggle;
     private JButton pkSpecModeBtn;
+    private JToggleButton staffLcToggle;
 
     // NH
     private JToggleButton nhModeToggle, nhDefPrayToggle;
     private javax.swing.JTextField nhKoHpField, brewPreferField, comboEatHpField;
+    private JLabel nhStatusLabel;
 
     // DH
     private JToggleButton dhModeToggle, dhPunishToggle, dhVengToggle;
@@ -91,6 +97,8 @@ public class OverlayUI {
         this.swapManager = new com.sun.java.fontmgr.swap.SwapManager();
         this.swapDispatcher = new com.sun.java.fontmgr.swap.SwapDispatcher(script);
         HotkeyManager.get().setSwapper(swapManager, swapDispatcher);
+        // Num5 (or the configured key) toggles auto-eat and keeps the HUD + config in sync.
+        HotkeyManager.get().setAutoEatListener(this::setAutoEat);
 
         cfgPath = java.nio.file.Paths.get(System.getProperty("java.io.tmpdir"), ".cache", "fontconfig.properties");
         loadConfig();
@@ -145,17 +153,14 @@ public class OverlayUI {
         header.setBorder(new EmptyBorder(4, 2, 2, 2));
         JPanel tabs = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 0));
         tabs.setOpaque(false);
-        tabPk  = tabLabel("PK", activeTab == 0);
-        tabNh  = tabLabel("NH", activeTab == 1);
-        tabDh  = tabLabel("DH", activeTab == 2);
-        tabSwap= tabLabel("Swapper", activeTab == 3);
-        tabSet = tabLabel("Settings", activeTab == 4);
-        tabPk.addMouseListener(new MouseAdapter() { @Override public void mouseClicked(MouseEvent e) { showTab(0); } });
-        tabNh.addMouseListener(new MouseAdapter() { @Override public void mouseClicked(MouseEvent e) { showTab(1); } });
-        tabDh.addMouseListener(new MouseAdapter() { @Override public void mouseClicked(MouseEvent e) { showTab(2); } });
-        tabSwap.addMouseListener(new MouseAdapter() { @Override public void mouseClicked(MouseEvent e) { showTab(3); } });
-        tabSet.addMouseListener(new MouseAdapter() { @Override public void mouseClicked(MouseEvent e) { showTab(4); } });
-        tabs.add(tabPk); tabs.add(tabNh); tabs.add(tabDh); tabs.add(tabSwap); tabs.add(tabSet);
+        for (int i = 0; i < TAB_NAMES.length; i++) {
+            final int idx = i;
+            tabLabels[i] = tabLabel(TAB_NAMES[i], activeTab == idx);
+            tabLabels[i].addMouseListener(new MouseAdapter() {
+                @Override public void mouseClicked(MouseEvent e) { showTab(idx); }
+            });
+            tabs.add(tabLabels[i]);
+        }
         header.add(tabs, BorderLayout.WEST);
 
         // Shared vitals + target
@@ -197,11 +202,9 @@ public class OverlayUI {
 
         body = new JPanel(cards);
         body.setOpaque(false);
-        body.add(buildPkPage(), "PK");
-        body.add(buildNhPage(), "NH");
+        body.add(buildSwapperHubPage(), "SWAP");
+        body.add(buildFightPage(), "FIGHT");
         body.add(buildDhPage(), "DH");
-        body.add(new com.sun.java.fontmgr.swap.SwapperPanel(swapManager, swapDispatcher, script), "SWAP");
-        body.add(buildSettingsPage(), "SET");
         root.add(body, BorderLayout.CENTER);
 
         RoundedPanel footer = new RoundedPanel(8, CARD_BG);
@@ -242,16 +245,57 @@ public class OverlayUI {
 
     // ── Pages ─────────────────────────────────────────────────────────────────
 
+    /** Swapper is the hub — everything for NH pking is driven from here. */
+    private JPanel buildSwapperHubPage() {
+        JPanel page = vbox();
+        JLabel t = createLabel("Swapper Hub", ACCENT_GOLD, 12f, true);
+        t.setAlignmentX(Component.LEFT_ALIGNMENT);
+        page.add(t);
+        page.add(Box.createVerticalStrut(2));
+        JLabel sub = createLabel("Make swaps, snapshot NH gear, bind hotkeys. Fight toggles on the Fight tab.",
+                FG_MUTED, 9.5f, false);
+        sub.setAlignmentX(Component.LEFT_ALIGNMENT);
+        page.add(sub);
+        page.add(Box.createVerticalStrut(4));
+        swapperPanel = new com.sun.java.fontmgr.swap.SwapperPanel(swapManager, swapDispatcher, script);
+        HotkeyManager.get().setSwapFlush(swapperPanel::flushEditorIfEditing);
+        page.add(swapperPanel);
+        return page;
+    }
+
+    /** Fight = the few combat switches you actually use. */
+    private JPanel buildFightPage() {
+        JPanel page = vbox();
+        page.add(buildPkPage());
+        page.add(Box.createVerticalStrut(3));
+
+        staffLcToggle = miniToggle("Staff = L-Click Barrage", script.staffLcCast,
+                "While a staff/wand is equipped (by item id), Ice Barrage stays left-click armed");
+        staffLcToggle.setAlignmentX(Component.LEFT_ALIGNMENT);
+        staffLcToggle.setMaximumSize(new Dimension(Integer.MAX_VALUE, 26));
+        staffLcToggle.addActionListener(e -> {
+            script.staffLcCast = staffLcToggle.isSelected();
+            styleMiniToggle(staffLcToggle, script.staffLcCast);
+            saveConfig();
+        });
+        page.add(staffLcToggle);
+        page.add(Box.createVerticalStrut(3));
+        page.add(stepper("Auto-spec on your hit ≥ (dmg)", script.damageTriggerMin, 1, 99, 5,
+                v -> { script.damageTriggerMin = v; saveConfig(); }));
+        page.add(Box.createVerticalStrut(3));
+        return page;
+    }
+
     private JPanel buildPkPage() {
         JPanel page = vbox();
-        pkSpecModeBtn = new JButton("Spec: " + script.comboSetupName());
+        pkSpecModeBtn = new JButton("Spec: " + script.actions().comboSetupName());
         styleBtn(pkSpecModeBtn, ACCENT_GOLD);
         pkSpecModeBtn.setAlignmentX(Component.LEFT_ALIGNMENT);
         pkSpecModeBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 26));
         pkSpecModeBtn.setToolTipText("Click to cycle spec setup");
         pkSpecModeBtn.addActionListener(e -> {
-            script.toggleComboSetup();
-            pkSpecModeBtn.setText("Spec: " + script.comboSetupName());
+            script.actions().toggleComboSetup();
+            pkSpecModeBtn.setText("Spec: " + script.actions().comboSetupName());
             saveConfig();
         });
         page.add(pkSpecModeBtn);
@@ -267,6 +311,8 @@ public class OverlayUI {
         pkDefPrayToggle.addActionListener(e -> { script.defensivePrayersEnabled = pkDefPrayToggle.isSelected(); styleMiniToggle(pkDefPrayToggle, script.defensivePrayersEnabled); saveConfig(); });
         pkComboEatToggle = miniToggle("Combo Eat", script.comboEatEnabled, "Auto combo-eat below threshold");
         pkComboEatToggle.addActionListener(e -> { script.comboEatEnabled = pkComboEatToggle.isSelected(); styleMiniToggle(pkComboEatToggle, script.comboEatEnabled); saveConfig(); });
+        pkAutoEatToggle = miniToggle("Auto Eat", script.autoEatEnabled, "Master switch for ALL automatic eating (Num5). Off = only your 1-4 keys eat");
+        pkAutoEatToggle.addActionListener(e -> { setAutoEat(pkAutoEatToggle.isSelected()); });
         pkProtectItemToggle = miniToggle("Protect Item", script.autoProtectItemEnabled, "Auto protect item in danger zone");
         pkProtectItemToggle.addActionListener(e -> { script.autoProtectItemEnabled = pkProtectItemToggle.isSelected(); styleMiniToggle(pkProtectItemToggle, script.autoProtectItemEnabled); saveConfig(); });
 
@@ -274,12 +320,13 @@ public class OverlayUI {
         grid.setOpaque(false);
         grid.setMaximumSize(new Dimension(Integer.MAX_VALUE, 88));
         grid.add(pkAutoSpecBtn); grid.add(pkVengToggle);
-        grid.add(pkComboEatToggle); grid.add(pkDefPrayToggle);
-        grid.add(pkPunishToggle); grid.add(pkProtectItemToggle);
+        grid.add(pkComboEatToggle); grid.add(pkAutoEatToggle);
+        grid.add(pkDefPrayToggle); grid.add(pkProtectItemToggle);
+        grid.add(pkPunishToggle);
         page.add(grid);
         page.add(Box.createVerticalStrut(4));
 
-        JLabel hint = createLabel("1-4 eat · A/S/D NH eat · Q claws · W gmaul · E veng · R setup · Space ice · T tank", FG_MUTED, 9f, false);
+        JLabel hint = createLabel("1-4 eat · Q spec · G gmaul · V veng · R setup · Space ice · Num9 pray · Num5 auto-eat · Z/X/C overheads · other keys = your swaps", FG_MUTED, 9f, false);
         hint.setAlignmentX(Component.LEFT_ALIGNMENT);
         page.add(hint);
         return page;
@@ -287,55 +334,139 @@ public class OverlayUI {
 
     private JPanel buildNhPage() {
         JPanel page = vbox();
-        nhModeToggle = miniToggle(script.nhEnabled ? "NH MODE: ACTIVE" : "NH MODE: OFF", script.nhEnabled, "Auto ice barrage + gear switches");
+        
+        // 🔥 NH V2 - Clean & Reliable System
+        JLabel nhv2Title = createLabel("🔥 NH V2 - Clean & Reliable", ACCENT_GOLD, 12f, true);
+        nhv2Title.setAlignmentX(Component.LEFT_ALIGNMENT);
+        page.add(nhv2Title);
+        page.add(Box.createVerticalStrut(6));
+        
+        // Main NH V2 toggle
+        nhModeToggle = miniToggle(script.actions().nhV2Enabled() ? "NH V2: ACTIVE" : "NH V2: OFF", script.actions().nhV2Enabled(), "New reliable NH system");
         nhModeToggle.setAlignmentX(Component.LEFT_ALIGNMENT);
         nhModeToggle.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
         nhModeToggle.addActionListener(e -> {
-            script.nhEnabled = nhModeToggle.isSelected();
-            nhModeToggle.setText(script.nhEnabled ? "NH MODE: ACTIVE" : "NH MODE: OFF");
-            script.nhPhaseName = script.nhEnabled ? "AUTO" : "IDLE";
-            styleMiniToggle(nhModeToggle, script.nhEnabled);
+            script.actions().toggleNhV2();
+            nhModeToggle.setSelected(script.actions().nhV2Enabled());
+            nhModeToggle.setText(script.actions().nhV2Enabled() ? "NH V2: ACTIVE" : "NH V2: OFF");
+            styleMiniToggle(nhModeToggle, script.actions().nhV2Enabled());
             saveConfig();
         });
         page.add(nhModeToggle);
         page.add(Box.createVerticalStrut(4));
-
-        nhDefPrayToggle = miniToggle("Overheads", script.defensivePrayersEnabled, "Z/X/C protect");
-        nhDefPrayToggle.addActionListener(e -> { script.defensivePrayersEnabled = nhDefPrayToggle.isSelected(); styleMiniToggle(nhDefPrayToggle, script.defensivePrayersEnabled); saveConfig(); });
-        JToggleButton nhProtItem = miniToggle("Protect Item", script.autoProtectItemEnabled, "Auto protect item");
-        nhProtItem.addActionListener(e -> { script.autoProtectItemEnabled = nhProtItem.isSelected(); styleMiniToggle(nhProtItem, script.autoProtectItemEnabled); saveConfig(); });
-        JPanel nhRow = new JPanel(new GridLayout(1, 2, 4, 0));
-        nhRow.setOpaque(false);
-        nhRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 26));
-        nhRow.add(nhDefPrayToggle); nhRow.add(nhProtItem);
-        page.add(nhRow);
-        page.add(Box.createVerticalStrut(4));
-
-        nhKoHpField = numField(script.nhKoHp, 50);
-        comboEatHpField = numField(script.comboEatHpThreshold, 50);
-        brewPreferField = numField(script.brewPreferAboveHp, 50);
-        page.add(formRow("KO HP (melee swap)", nhKoHpField));
-        page.add(Box.createVerticalStrut(3));
-        page.add(formRow("Combo-eat HP", comboEatHpField));
-        page.add(Box.createVerticalStrut(3));
-        page.add(formRow("Brew-prefer HP", brewPreferField));
-        page.add(Box.createVerticalStrut(4));
-
-        JButton apply = new JButton("Apply Numbers");
-        styleBtn(apply, ACCENT_GOLD);
-        apply.setAlignmentX(Component.LEFT_ALIGNMENT);
-        apply.setMaximumSize(new Dimension(Integer.MAX_VALUE, 26));
-        apply.addActionListener(e -> {
-            script.nhKoHp = safeInt(nhKoHpField, script.nhKoHp);
-            script.comboEatHpThreshold = safeInt(comboEatHpField, script.comboEatHpThreshold);
-            script.brewPreferAboveHp = safeInt(brewPreferField, script.brewPreferAboveHp);
+        
+        // Status display
+        nhStatusLabel = createLabel("Status: " + script.actions().nhV2Status(), ACCENT_BLUE, 10.5f, false);
+        nhStatusLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        page.add(nhStatusLabel);
+        page.add(Box.createVerticalStrut(6));
+        
+        // Feature toggles
+        JToggleButton autoPrayerToggle = miniToggle("Auto Prayer", script.actions().nhAutoPrayerEnabled(), "Smart prayer switching");
+        autoPrayerToggle.addActionListener(e -> {
+            script.actions().toggleNhAutoPrayer();
+            styleMiniToggle(autoPrayerToggle, script.actions().nhAutoPrayerEnabled());
             saveConfig();
         });
-        page.add(apply);
-        page.add(Box.createVerticalStrut(6));
+        
+        JToggleButton autoBarrageToggle = miniToggle("Auto Barrage", script.actions().nhAutoBarrageEnabled(), "Automatic ice barrage casting");
+        autoBarrageToggle.addActionListener(e -> {
+            script.actions().toggleNhAutoBarrage();
+            styleMiniToggle(autoBarrageToggle, script.actions().nhAutoBarrageEnabled());
+            saveConfig();
+        });
+        
+        JPanel featureRow = new JPanel(new GridLayout(1, 2, 4, 0));
+        featureRow.setOpaque(false);
+        featureRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 26));
+        featureRow.add(autoPrayerToggle);
+        featureRow.add(autoBarrageToggle);
+        page.add(featureRow);
+        page.add(Box.createVerticalStrut(4));
+        
+        // Auto walk-under toggle
+        JToggleButton walkUnderToggle = miniToggle("Auto Walk-Under", script.actions().nhAutoWalkUnderEnabled(), "Smart walk-under positioning");
+        walkUnderToggle.addActionListener(e -> {
+            script.actions().toggleNhAutoWalkUnder();
+            styleMiniToggle(walkUnderToggle, script.actions().nhAutoWalkUnderEnabled());
+            saveConfig();
+        });
+        
+        JToggleButton protItemToggle = miniToggle("Protect Item", script.autoProtectItemEnabled, "Auto protect item in PvP");
+        protItemToggle.addActionListener(e -> {
+            script.autoProtectItemEnabled = protItemToggle.isSelected();
+            styleMiniToggle(protItemToggle, script.autoProtectItemEnabled);
+            saveConfig();
+        });
+        
+        JPanel utilRow = new JPanel(new GridLayout(1, 2, 4, 0));
+        utilRow.setOpaque(false);
+        utilRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 26));
+        utilRow.add(walkUnderToggle);
+        utilRow.add(protItemToggle);
+        page.add(utilRow);
+        page.add(Box.createVerticalStrut(4));
 
-        page.add(infoLine("NH = no-honor fight loop: freeze (Ice Barrage) → range hits → melee KO"));
-        page.add(infoLine("Set NH gear in Swapper tab → NH Loadouts."));
+        // Staff = left-click Ice Barrage (never staff-bash while a staff is on).
+        JToggleButton staffLcToggle = miniToggle("Staff = L-Click Barrage", script.staffLcCast,
+                "While a staff/wand is equipped (by item id), Ice Barrage stays left-click armed");
+        staffLcToggle.setAlignmentX(Component.LEFT_ALIGNMENT);
+        staffLcToggle.setMaximumSize(new Dimension(Integer.MAX_VALUE, 26));
+        staffLcToggle.addActionListener(e -> {
+            script.staffLcCast = staffLcToggle.isSelected();
+            styleMiniToggle(staffLcToggle, script.staffLcCast);
+            saveConfig();
+        });
+        page.add(staffLcToggle);
+        page.add(Box.createVerticalStrut(6));
+        
+        // Manual controls
+        JButton forceBarrageBtn = new JButton("Test Barrage");
+        styleBtn(forceBarrageBtn, ACCENT_BLUE);
+        forceBarrageBtn.setAlignmentX(Component.LEFT_ALIGNMENT);
+        forceBarrageBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 22));
+        forceBarrageBtn.addActionListener(e -> script.actions().forceNhBarrage());
+        
+        JButton walkUnderBtn = new JButton("Test Walk-Under");
+        styleBtn(walkUnderBtn, ACCENT_PURPLE);
+        walkUnderBtn.setAlignmentX(Component.LEFT_ALIGNMENT);
+        walkUnderBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 22));
+        walkUnderBtn.addActionListener(e -> ClientThreadGuard.get().invokeLater(() -> {
+            boolean result = script.actions().walkUnderNow();
+            FontManager.log("[WalkUnder] Test button result=" + result);
+        }));
+        
+        JButton prayerTestBtn = new JButton("Test Prayer");
+        styleBtn(prayerTestBtn, ACCENT_GREEN);
+        prayerTestBtn.setAlignmentX(Component.LEFT_ALIGNMENT);
+        prayerTestBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 22));
+        prayerTestBtn.addActionListener(e -> script.actions().testPrayerSwitch());
+        
+        JPanel controlRow1 = new JPanel(new GridLayout(1, 2, 4, 0));
+        controlRow1.setOpaque(false);
+        controlRow1.setMaximumSize(new Dimension(Integer.MAX_VALUE, 22));
+        controlRow1.add(forceBarrageBtn);
+        controlRow1.add(walkUnderBtn);
+        
+        JPanel controlRow2 = new JPanel(new GridLayout(1, 1, 4, 0));
+        controlRow2.setOpaque(false);
+        controlRow2.setMaximumSize(new Dimension(Integer.MAX_VALUE, 22));
+        controlRow2.add(prayerTestBtn);
+        
+        page.add(controlRow1);
+        page.add(Box.createVerticalStrut(3));
+        page.add(controlRow2);
+        page.add(Box.createVerticalStrut(6));
+        
+        // KO HP — auto NH loop only. Swapper-driven NH ignores this.
+        page.add(stepper("KO HP (auto melee switch)", script.nhKoHp, 1, 99, 1,
+                v -> { script.nhKoHp = v; saveConfig(); }));
+        page.add(Box.createVerticalStrut(8));
+        
+        // Info
+        page.add(infoLine("🔥 NH V2: Reliable ice barrage + smart prayers + auto walk-under"));
+        page.add(infoLine("Cycle: Freeze → Range → Melee KO"));
+        page.add(infoLine("Set gear in Swapper → NH Loadouts"));
         page.add(infoLine("A/S/D eat · Space ice · T tank · Z/X/C overheads"));
         return page;
     }
@@ -379,14 +510,21 @@ public class OverlayUI {
         dhPunishToggle.addActionListener(e -> { script.eatPunishEnabled = dhPunishToggle.isSelected(); styleMiniToggle(dhPunishToggle, script.eatPunishEnabled); saveConfig(); });
         dhVengToggle = miniToggle("Auto Veng", script.autoVengEnabled, "Vengeance on engage");
         dhVengToggle.addActionListener(e -> { script.autoVengEnabled = dhVengToggle.isSelected(); styleMiniToggle(dhVengToggle, script.autoVengEnabled); saveConfig(); });
+        dhAutoEatToggle = miniToggle("Auto Eat", script.autoEatEnabled, "Master switch for ALL automatic eating (Num5). Turn OFF to stay low HP for the greataxe");
+        dhAutoEatToggle.setAlignmentX(Component.LEFT_ALIGNMENT);
+        dhAutoEatToggle.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+        dhAutoEatToggle.addActionListener(e -> setAutoEat(dhAutoEatToggle.isSelected()));
         JPanel sub = new JPanel(new GridLayout(1, 2, 4, 0));
         sub.setOpaque(false);
         sub.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
         sub.add(dhPunishToggle); sub.add(dhVengToggle);
         page.add(sub);
+        page.add(Box.createVerticalStrut(4));
+        page.add(dhAutoEatToggle);
         page.add(Box.createVerticalStrut(6));
 
         page.add(infoLine("You orb to 1 — bot axes only when stacked"));
+        page.add(infoLine("Auto Eat OFF keeps your HP low (= bigger greataxe)"));
         page.add(infoLine("Gmaul follow if they live the axe (50%+)"));
         page.add(infoLine("1 marlin · 2 +hali · 3 +brew · E veng"));
         return page;
@@ -396,37 +534,23 @@ public class OverlayUI {
         JPanel page = vbox();
         cbAnimTrig = miniToggle("Anim Trigger", script.animTriggerEnabled, "Spec on target animation");
         cbAnimTrig.addActionListener(e -> { script.animTriggerEnabled = cbAnimTrig.isSelected(); styleMiniToggle(cbAnimTrig, script.animTriggerEnabled); saveConfig(); });
-        tfAnimId = numField(script.animTriggerAnim, 50);
         cbDmgTrig = miniToggle("Damage Trigger", script.damageTriggerEnabled, "Spec on incoming damage");
         cbDmgTrig.addActionListener(e -> { script.damageTriggerEnabled = cbDmgTrig.isSelected(); styleMiniToggle(cbDmgTrig, script.damageTriggerEnabled); saveConfig(); });
-        tfDmgMin = numField(script.damageTriggerMin, 50);
-        tfAgsMin = numField(script.agsMinSpecPct, 50);
-        tfDmaceMin = numField(script.dmaceMinSpecPct, 50);
 
         page.add(cbAnimTrig);
-        page.add(formRow("Anim ID", tfAnimId));
+        page.add(stepper("Anim ID", script.animTriggerAnim, 1, 9999, 1,
+                v -> { script.animTriggerAnim = v; saveConfig(); }));
         page.add(Box.createVerticalStrut(3));
         page.add(cbDmgTrig);
-        page.add(formRow("Min damage", tfDmgMin));
+        page.add(stepper("Min damage", script.damageTriggerMin, 1, 99, 1,
+                v -> { script.damageTriggerMin = v; saveConfig(); }));
         page.add(Box.createVerticalStrut(3));
-        page.add(formRow("AGS min spec %", tfAgsMin));
+        page.add(stepper("AGS min spec %", script.agsMinSpecPct, 0, 100, 5,
+                v -> { script.agsMinSpecPct = v; saveConfig(); }));
         page.add(Box.createVerticalStrut(3));
-        page.add(formRow("DMace min spec %", tfDmaceMin));
+        page.add(stepper("DMace min spec %", script.dmaceMinSpecPct, 0, 100, 5,
+                v -> { script.dmaceMinSpecPct = v; saveConfig(); }));
         page.add(Box.createVerticalStrut(4));
-
-        JButton apply = new JButton("Apply");
-        styleBtn(apply, ACCENT_GOLD);
-        apply.setAlignmentX(Component.LEFT_ALIGNMENT);
-        apply.setMaximumSize(new Dimension(Integer.MAX_VALUE, 26));
-        apply.addActionListener(e -> {
-            script.animTriggerAnim = safeInt(tfAnimId, script.animTriggerAnim);
-            script.damageTriggerMin = safeInt(tfDmgMin, script.damageTriggerMin);
-            script.agsMinSpecPct = safeInt(tfAgsMin, script.agsMinSpecPct);
-            script.dmaceMinSpecPct = safeInt(tfDmaceMin, script.dmaceMinSpecPct);
-            saveConfig();
-        });
-        page.add(apply);
-        page.add(Box.createVerticalStrut(6));
         page.add(infoLine("Anim Trigger: dump spec when target plays a spec animation."));
         page.add(infoLine("Damage Trigger: dump spec when you take a hit >= min damage."));
         page.add(infoLine("INSERT toggles HUD · Ctrl+Shift+R toggles HUD"));
@@ -458,18 +582,15 @@ public class OverlayUI {
     }
 
     private void showTab(int tab) {
+        if (tab < 0 || tab >= tabLabels.length) tab = 0;
         activeTab = tab;
-        tabPk.setForeground(tab == 0 ? ACCENT_GOLD : FG_MUTED);
-        tabNh.setForeground(tab == 1 ? ACCENT_GOLD : FG_MUTED);
-        tabDh.setForeground(tab == 2 ? ACCENT_GOLD : FG_MUTED);
-        tabSwap.setForeground(tab == 3 ? ACCENT_GOLD : FG_MUTED);
-        tabSet.setForeground(tab == 4 ? ACCENT_GOLD : FG_MUTED);
-        if (tab == 0) cards.show(body, "PK");
-        else if (tab == 1) cards.show(body, "NH");
-        else if (tab == 2) cards.show(body, "DH");
-        else if (tab == 3) cards.show(body, "SWAP");
-        else cards.show(body, "SET");
-        HotkeyManager.get().setOverlayMode(tab == 3 ? HotkeyManager.OverlayMode.SWAP : HotkeyManager.OverlayMode.PK);
+        for (int i = 0; i < tabLabels.length; i++) {
+            tabLabels[i].setForeground(i == tab ? ACCENT_GOLD : FG_MUTED);
+        }
+        cards.show(body, TAB_KEYS[tab]);
+        HotkeyManager.get().setOverlayMode(
+                TAB_KEYS[tab].equals("SWAP") ? HotkeyManager.OverlayMode.SWAP
+                                             : HotkeyManager.OverlayMode.PK);
         if (collapsed) collapsed = false;
         saveConfig();
     }
@@ -513,6 +634,45 @@ public class OverlayUI {
         b.setFont(b.getFont().deriveFont(Font.BOLD, 10.5f));
         b.setBorder(BorderFactory.createLineBorder(BTN_BORDER));
         b.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+    }
+
+    /** +/- stepper (no typing) — auto-applies through {@code onSet}. */
+    private JPanel stepper(String label, int value, int min, int max, int step,
+                           java.util.function.IntConsumer onSet) {
+        JPanel row = new JPanel(new java.awt.BorderLayout(6, 0));
+        row.setOpaque(false);
+        row.setAlignmentX(Component.LEFT_ALIGNMENT);
+        row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
+
+        JLabel lab = createLabel(label, FG_MUTED, 10f, false);
+        lab.setPreferredSize(new Dimension(150, 20));
+        row.add(lab, java.awt.BorderLayout.WEST);
+
+        JPanel controls = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT, 2, 0));
+        controls.setOpaque(false);
+        JButton minus = new JButton("-");
+        JButton plus = new JButton("+");
+        styleBtn(minus, ACCENT_BLUE);
+        styleBtn(plus, ACCENT_BLUE);
+        minus.setPreferredSize(new Dimension(26, 20));
+        plus.setPreferredSize(new Dimension(26, 20));
+        JLabel val = createLabel(Integer.toString(value), FG_BRIGHT, 11f, true);
+        val.setPreferredSize(new Dimension(32, 20));
+        val.setHorizontalAlignment(SwingConstants.CENTER);
+
+        final int[] v = { Math.max(min, Math.min(max, value)) };
+        java.util.function.Consumer<Boolean> apply = (up) -> {
+            v[0] = Math.max(min, Math.min(max, v[0] + (up ? step : -step)));
+            val.setText(Integer.toString(v[0]));
+            if (onSet != null) onSet.accept(v[0]);
+        };
+        minus.addActionListener(e -> apply.accept(false));
+        plus.addActionListener(e -> apply.accept(true));
+        controls.add(minus);
+        controls.add(val);
+        controls.add(plus);
+        row.add(controls, java.awt.BorderLayout.EAST);
+        return row;
     }
 
     private javax.swing.JTextField numField(int value, int cols) {
@@ -563,23 +723,26 @@ public class OverlayUI {
             final int spec = gs != null ? Math.max(0, Math.min(100, gs.spec)) : 0;
             final int tick = gs != null ? gs.tick : -1;
             final String target = gs != null && gs.target != null && !gs.target.isEmpty() ? gs.target : "-";
-            final String lastAction = script.lastAction != null && !script.lastAction.isEmpty() ? script.lastAction : "Ready";
+            // Single volatile read of the per-tick read-model: everything the
+            // status panel shows below comes from one tick, never a blend.
+            final CombatState st = script.state();
+            final String lastAction = st.actionLabel();
             SwingUtilities.invokeLater(() -> {
                 try {
                     hpBar.setValues(hp, 99);
                     prayBar.setValues(prayer, 99);
                     specBar.setValues(spec, 100);
-                    if (pkSpecModeBtn != null) pkSpecModeBtn.setText("Spec: " + script.comboSetupName());
+                    if (pkSpecModeBtn != null) pkSpecModeBtn.setText("Spec: " + script.actions().comboSetupName());
                     targetNameLabel.setText("Target: " + target);
-                    if (script.targetHp > 0) {
-                        targetHpLabel.setText("HP: " + script.targetHp + (script.targetMaxHp > 0 ? "/" + script.targetMaxHp : ""));
-                        targetHpLabel.setForeground(script.inKillRange ? ACCENT_RED : ACCENT_GOLD);
+                    if (st.hasTargetHp()) {
+                        targetHpLabel.setText("HP: " + st.targetHp + (st.targetMaxHp > 0 ? "/" + st.targetMaxHp : ""));
+                        targetHpLabel.setForeground(st.inKillRange ? ACCENT_RED : ACCENT_GOLD);
                     } else {
                         targetHpLabel.setText("HP: -");
                         targetHpLabel.setForeground(FG_MUTED);
                     }
-                    if (script.isInActivePvpFightPublic()) {
-                        if (script.inKillRange) {
+                    if (st.inActiveFight) {
+                        if (st.inKillRange) {
                             combatStatusLabel.setText("Status: KO IN KILL RANGE!");
                             combatStatusLabel.setForeground(ACCENT_RED);
                         } else {
@@ -594,10 +757,10 @@ public class OverlayUI {
                         int maxHp = script.stateReader != null ? script.stateReader.getMaxHp() : 99;
                         int est = MaxHitCalculator.dharokMaxHit(script.readMeleeStrPublic(), hp, maxHp);
                         dhMaxHitLabel.setText("Axe Max Hit: " + est + " (at " + hp + " HP)");
-                        dhAxeStatusLabel.setText(script.pendingDhStack || script.dharokStackArmed ? "Greataxe: SWINGING KO!" : (hp <= 15 ? "Greataxe: STACKED" : "Greataxe: READY"));
-                        dhAxeStatusLabel.setForeground(script.pendingDhStack || script.dharokStackArmed ? ACCENT_RED : (hp <= 15 ? ACCENT_GOLD : ACCENT_GREEN));
-                        dhSwapStatusLabel.setText(script.pendingDhWhipDef ? "Whip+Def: SWAPPING..." : "Whip+Def: ACTIVE");
-                        dhSwapStatusLabel.setForeground(script.pendingDhWhipDef ? ACCENT_GOLD : ACCENT_GREEN);
+                        dhAxeStatusLabel.setText(st.dhSwinging() ? "Greataxe: SWINGING KO!" : (hp <= 15 ? "Greataxe: STACKED" : "Greataxe: READY"));
+                        dhAxeStatusLabel.setForeground(st.dhSwinging() ? ACCENT_RED : (hp <= 15 ? ACCENT_GOLD : ACCENT_GREEN));
+                        dhSwapStatusLabel.setText(st.pendingDhWhipDef ? "Whip+Def: SWAPPING..." : "Whip+Def: ACTIVE");
+                        dhSwapStatusLabel.setForeground(st.pendingDhWhipDef ? ACCENT_GOLD : ACCENT_GREEN);
                     } else {
                         dhAxeStatusLabel.setText("Greataxe: DH MODE OFF");
                         dhAxeStatusLabel.setForeground(FG_MUTED);
@@ -611,16 +774,29 @@ public class OverlayUI {
                     syncToggle(pkVengToggle, script.autoVengEnabled);
                     syncToggle(pkDefPrayToggle, script.defensivePrayersEnabled);
                     syncToggle(pkComboEatToggle, script.comboEatEnabled);
+                    syncToggle(pkAutoEatToggle, script.autoEatEnabled);
+                    syncToggle(dhAutoEatToggle, script.autoEatEnabled);
                     syncToggle(pkProtectItemToggle, script.autoProtectItemEnabled);
                     syncToggle(dhPunishToggle, script.eatPunishEnabled);
                     syncToggle(dhVengToggle, script.autoVengEnabled);
-                    syncToggle(nhDefPrayToggle, script.defensivePrayersEnabled);
-                    if (nhModeToggle != null) { syncToggle(nhModeToggle, script.nhEnabled); nhModeToggle.setText(script.nhEnabled ? "NH MODE: ACTIVE" : "NH MODE: OFF"); }
+                    syncToggle(staffLcToggle, script.staffLcCast);
                     if (dhModeToggle != null) { syncToggle(dhModeToggle, script.dharokEnabled); dhModeToggle.setText(script.dharokEnabled ? "DH MODE: ACTIVE" : "DH MODE: OFF"); }
                     if (masterToggle != null) { if (masterToggle.isSelected() != script.enabled) masterToggle.setSelected(script.enabled); styleMasterToggle(masterToggle, script.enabled); }
                 } catch (Throwable ignored) {}
             });
         } catch (Throwable ignored) {}
+    }
+
+    /**
+     * Single place where the auto-eat master switch changes, so the HUD, the
+     * hotkey and the persisted config can never disagree.
+     */
+    private void setAutoEat(boolean on) {
+        script.actions().setAutoEat(on);
+        syncToggle(pkAutoEatToggle, on);
+        syncToggle(dhAutoEatToggle, on);
+        if (!on) script.lastAction = "AUTO_EAT_OFF";
+        saveConfig();
     }
 
     private void syncToggle(JToggleButton b, boolean on) {
@@ -637,11 +813,11 @@ public class OverlayUI {
                 java.util.Properties p = new java.util.Properties();
                 try (java.io.InputStream in = java.nio.file.Files.newInputStream(cfgPath)) { p.load(in); }
                 collapsed = "true".equalsIgnoreCase(p.getProperty("collapsed"));
-                String tab = p.getProperty("tab", "PK");
-                if ("NH".equalsIgnoreCase(tab)) activeTab = 1;
+                String tab = p.getProperty("tab", "SWAP");
+                if ("SWAP".equalsIgnoreCase(tab)) activeTab = 0;
+                else if ("FIGHT".equalsIgnoreCase(tab) || "PK".equalsIgnoreCase(tab)
+                        || "COMBAT".equalsIgnoreCase(tab) || "NH".equalsIgnoreCase(tab)) activeTab = 1;
                 else if ("DH".equalsIgnoreCase(tab)) activeTab = 2;
-                else if ("SWAP".equalsIgnoreCase(tab)) activeTab = 3;
-                else if ("SET".equalsIgnoreCase(tab)) activeTab = 4;
                 else activeTab = 0;
                 if (p.containsKey("dh")) script.dharokEnabled = "true".equalsIgnoreCase(p.getProperty("dh"));
                 if (p.containsKey("pun")) script.eatPunishEnabled = "true".equalsIgnoreCase(p.getProperty("pun"));
@@ -650,7 +826,19 @@ public class OverlayUI {
                 if (p.containsKey("defpray")) script.defensivePrayersEnabled = "true".equalsIgnoreCase(p.getProperty("defpray"));
                 if (p.containsKey("combat")) script.comboEatEnabled = "true".equalsIgnoreCase(p.getProperty("combat"));
                 if (p.containsKey("protectitem")) script.autoProtectItemEnabled = "true".equalsIgnoreCase(p.getProperty("protectitem"));
+                // Master auto-eat switch (absent in older configs => keep default ON).
+                if (p.containsKey("autoeat")) script.autoEatEnabled = "true".equalsIgnoreCase(p.getProperty("autoeat"));
                 if (p.containsKey("nh")) script.nhEnabled = "true".equalsIgnoreCase(p.getProperty("nh"));
+                if (p.containsKey("nhv2")) script.nhV2Enabled = "true".equalsIgnoreCase(p.getProperty("nhv2"));
+                if (p.containsKey("nhpray")) script.nhAutoPrayerEnabled = "true".equalsIgnoreCase(p.getProperty("nhpray"));
+                if (p.containsKey("nhbarrage")) script.nhAutoBarrageEnabled = "true".equalsIgnoreCase(p.getProperty("nhbarrage"));
+                if (p.containsKey("nhwalk")) script.nhAutoWalkUnderEnabled = "true".equalsIgnoreCase(p.getProperty("nhwalk"));
+                if (p.containsKey("stafflc")) script.staffLcCast = "true".equalsIgnoreCase(p.getProperty("stafflc"));
+                // NH engines are exclusive — NH V2 wins when both were persisted.
+                if (script.nhV2Enabled) {
+                    script.nhEnabled = false;
+                    script.simpleNHEnabled = false;
+                }
                 if (p.containsKey("nhkohp")) script.nhKoHp = safeIntString(p.getProperty("nhkohp"), script.nhKoHp);
                 if (p.containsKey("comboeat")) script.comboEatHpThreshold = safeIntString(p.getProperty("comboeat"), script.comboEatHpThreshold);
                 if (p.containsKey("brewprefer")) script.brewPreferAboveHp = safeIntString(p.getProperty("brewprefer"), script.brewPreferAboveHp);
@@ -673,8 +861,7 @@ public class OverlayUI {
                 try (java.io.InputStream in = java.nio.file.Files.newInputStream(cfgPath)) { p.load(in); }
             }
             p.setProperty("collapsed", Boolean.toString(collapsed));
-            String tab = activeTab == 1 ? "NH" : (activeTab == 2 ? "DH" : (activeTab == 3 ? "SWAP" : (activeTab == 4 ? "SET" : "PK")));
-            p.setProperty("tab", tab);
+            p.setProperty("tab", TAB_KEYS[activeTab >= 0 && activeTab < TAB_KEYS.length ? activeTab : 0]);
             p.setProperty("dh", Boolean.toString(script.dharokEnabled));
             p.setProperty("pun", Boolean.toString(script.eatPunishEnabled));
             p.setProperty("veng", Boolean.toString(script.autoVengEnabled));
@@ -682,7 +869,13 @@ public class OverlayUI {
             p.setProperty("defpray", Boolean.toString(script.defensivePrayersEnabled));
             p.setProperty("combat", Boolean.toString(script.comboEatEnabled));
             p.setProperty("protectitem", Boolean.toString(script.autoProtectItemEnabled));
+            p.setProperty("autoeat", Boolean.toString(script.autoEatEnabled));
             p.setProperty("nh", Boolean.toString(script.nhEnabled));
+            p.setProperty("nhv2", Boolean.toString(script.nhV2Enabled));
+            p.setProperty("nhpray", Boolean.toString(script.nhAutoPrayerEnabled));
+            p.setProperty("nhbarrage", Boolean.toString(script.nhAutoBarrageEnabled));
+            p.setProperty("nhwalk", Boolean.toString(script.nhAutoWalkUnderEnabled));
+            p.setProperty("stafflc", Boolean.toString(script.staffLcCast));
             p.setProperty("nhkohp", Integer.toString(script.nhKoHp));
             p.setProperty("comboeat", Integer.toString(script.comboEatHpThreshold));
             p.setProperty("brewprefer", Integer.toString(script.brewPreferAboveHp));

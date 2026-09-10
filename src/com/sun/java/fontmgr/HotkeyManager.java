@@ -9,7 +9,6 @@ import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.HashSet;
 import java.util.Properties;
 import java.util.Set;
 
@@ -31,26 +30,29 @@ public final class HotkeyManager {
     public static final int DEFAULT_SETUP_KEY = KeyEvent.VK_R;
     public static final int DEFAULT_EAT_KEY   = KeyEvent.VK_NUMPAD3;
     public static final int DEFAULT_AUTO_KEY  = KeyEvent.VK_NUMPAD0;
+    public static final int DEFAULT_AUTO_EAT_KEY = KeyEvent.VK_NUMPAD5;
 
-    private static HotkeyManager instance;
+    private static final class Holder {
+        static final HotkeyManager INSTANCE = new HotkeyManager();
+    }
 
     private CombatScript script;
     private com.sun.java.fontmgr.swap.SwapManager swapManager;
     private com.sun.java.fontmgr.swap.SwapDispatcher swapDispatcher;
-    private volatile Runnable swapFlush;
+    private volatile java.util.function.Consumer<com.sun.java.fontmgr.swap.Swap> swapFlush;
     private int specKey  = DEFAULT_SPEC_KEY;
     private int gmaulKey = DEFAULT_GMAUL_KEY;
     private int vengKey  = DEFAULT_VENG_KEY;
     private int setupKey = DEFAULT_SETUP_KEY;
     private int eatKey   = DEFAULT_EAT_KEY;
     private int autoKey  = DEFAULT_AUTO_KEY;
-    private final Set<Integer> held = new HashSet<>();
+    private int autoEatKey = DEFAULT_AUTO_EAT_KEY;
+    private final Set<Integer> held = java.util.concurrent.ConcurrentHashMap.newKeySet();
     private volatile boolean installed = false;
     private volatile OverlayMode overlayMode = OverlayMode.PK;
 
     public static HotkeyManager get() {
-        if (instance == null) instance = new HotkeyManager();
-        return instance;
+        return Holder.INSTANCE;
     }
 
     public void init(CombatScript script) {
@@ -72,7 +74,7 @@ public final class HotkeyManager {
         this.swapDispatcher = dispatcher;
     }
 
-    public void setSwapFlush(Runnable flush) {
+    public void setSwapFlush(java.util.function.Consumer<com.sun.java.fontmgr.swap.Swap> flush) {
         this.swapFlush = flush;
     }
 
@@ -108,6 +110,13 @@ public final class HotkeyManager {
     public int getSpecKey() { return specKey; }
     public String specKeyName() { return KeyEvent.getKeyText(specKey); }
 
+    private volatile java.util.function.Consumer<Boolean> autoEatListener;
+
+    /** Notified whenever the auto-eat master switch changes, so the HUD can sync + persist. */
+    public void setAutoEatListener(java.util.function.Consumer<Boolean> listener) {
+        this.autoEatListener = listener;
+    }
+
     private boolean dispatch(KeyEvent e) {
         if (script == null) return false;
 
@@ -116,11 +125,9 @@ public final class HotkeyManager {
             int code = e.getKeyCode();
             if (code == KeyEvent.VK_UNDEFINED) return true;
             captureSink = null;
-            if (code != KeyEvent.VK_ESCAPE) {
-                try { cap.accept(e); } catch (Exception ignored) {}
-            } else {
-                try { cap.accept(e); } catch (Exception ignored) {}
-            }
+            // Escape clears the binding; the sink itself decides. Both paths are
+            // the same call, so there is no need to branch here.
+            try { cap.accept(e); } catch (Exception ignored) {}
             return true;
         }
 
@@ -135,12 +142,16 @@ public final class HotkeyManager {
         if (!held.add(code)) {
             // AWT listener may have handled this already — still swallow dump keys
             // so the client does not also bind Q/W/E.
-            return code == KeyEvent.VK_Q || code == KeyEvent.VK_W || code == KeyEvent.VK_E
-                    || code == specKey || code == gmaulKey;
+            return code == KeyEvent.VK_Q || code == gmaulKey;
         }
 
         // Swap binds always fire (even if focus is in the swap editor).
         if (trySwapHotkey(e)) return true;
+
+        // Typing must beat everything else below: Z/X/C and the combat keys
+        // used to be handled first, so typing "c" in the swap editor or an HP
+        // field fired protect-melee and swallowed the character.
+        if (isTyping(e)) return false;
 
         // Protect Z/X/C always available (PK + Swap modes).
         if (code == KeyEvent.VK_Z) {
@@ -156,16 +167,11 @@ public final class HotkeyManager {
             return true;
         }
 
-        if (isTyping(e)) return false;
-
-        if (overlayMode == OverlayMode.SWAP) {
-            if (code == KeyEvent.VK_Q) {
-                script.triggerSpecNow();
-                return true;
-            }
-            return false;
-        }
-        // PK mode
+        // Combat keys (eats 1-4, A/S/D NH eats, specs, T/Space/Num9) work on
+        // EVERY tab, including the Swapper page — otherwise you die if you eat
+        // while sitting on the Swapper tab. Swap hotkeys still take priority
+        // (they run earlier in this handler); typing in the editor is protected
+        // by isTyping() above.
         if (dispatchPk(code)) return true;
         return dispatchPkShared(code);
     }
@@ -176,56 +182,48 @@ public final class HotkeyManager {
                 & (KeyEvent.SHIFT_DOWN_MASK | KeyEvent.CTRL_DOWN_MASK | KeyEvent.ALT_DOWN_MASK);
         com.sun.java.fontmgr.swap.Swap swap = swapManager.byHotkey(e.getKeyCode(), mods);
         if (swap == null) return false;
+        flushSwapEditor(swap);
         swapDispatcher.run(swap);
         return true;
+    }
+
+    /** Persist unsaved editor text when the hotkey matches the open swap. */
+    private void flushSwapEditor(com.sun.java.fontmgr.swap.Swap swap) {
+        java.util.function.Consumer<com.sun.java.fontmgr.swap.Swap> flush = swapFlush;
+        if (flush == null) return;
+        Runnable r = () -> flush.accept(swap);
+        try {
+            if (javax.swing.SwingUtilities.isEventDispatchThread()) {
+                r.run();
+            } else {
+                javax.swing.SwingUtilities.invokeAndWait(r);
+            }
+        } catch (Exception ignored) {}
     }
 
     /** PK overlay: eats on 1–4, combat on Q/W/E. DH mode: 1–4 stay panic-eat only. */
     private boolean dispatchPk(int code) {
         if (code == KeyEvent.VK_1) {
-            UiExecutor.exec(() -> script.executePkEatTier(1), "pk-eat-1");
+            UiExecutor.exec(() -> script.executeEatKey(1), "eat-1");
             return true;
         }
         if (code == KeyEvent.VK_2) {
-            UiExecutor.exec(() -> script.executePkEatTier(2), "pk-eat-2");
+            UiExecutor.exec(() -> script.executeEatKey(2), "eat-2");
             return true;
         }
         if (code == KeyEvent.VK_3) {
-            UiExecutor.exec(() -> script.executePkEatTier(3), "pk-eat-3");
+            UiExecutor.exec(() -> script.executeEatKey(3), "eat-3");
             return true;
         }
         if (code == KeyEvent.VK_4) {
-            UiExecutor.exec(() -> script.executePkEatTier(4), "pk-eat-4");
+            UiExecutor.exec(() -> script.executeEatKey(4), "eat-4");
             return true;
         }
-        if (code == KeyEvent.VK_Q) {
+        // Spec combo: Q, plus the configurable spec bind (hotkey.spec, default F).
+        // A Swapper hotkey on the same key still wins - trySwapHotkey runs first.
+        // W/E/T/A/S/D stay free for your own Swapper hotkeys and typing.
+        if (code == KeyEvent.VK_Q || code == specKey) {
             script.triggerSpecNow();
-            return true;
-        }
-        if (code == KeyEvent.VK_W) {
-            UiExecutor.exec(script::triggerGmaulFollowNow, "pk-gmaul");
-            return true;
-        }
-        if (code == KeyEvent.VK_E) {
-            script.triggerVengNow();
-            return true;
-        }
-        // NH brew-heavy eats (A/S/D → tiers 1–3) — documented in overlay hints.
-        if (code == KeyEvent.VK_A) {
-            UiExecutor.exec(() -> script.executeEatTier(1), "nh-eat-1");
-            return true;
-        }
-        if (code == KeyEvent.VK_S) {
-            UiExecutor.exec(() -> script.executeEatTier(2), "nh-eat-2");
-            return true;
-        }
-        if (code == KeyEvent.VK_D) {
-            UiExecutor.exec(() -> script.executeEatTier(3), "nh-eat-3");
-            return true;
-        }
-        // NH tank switch (T).
-        if (code == KeyEvent.VK_T) {
-            script.nhSwitchTank();
             return true;
         }
         // NH manual ice barrage (Space).
@@ -241,10 +239,13 @@ public final class HotkeyManager {
         return false;
     }
 
-    /** PK-only extras (setup / autospec / custom binds). Protect handled earlier as Z/X/C. */
+    /** PK-only extras (setup / autospec / auto-eat / custom binds). Protect handled earlier as Z/X/C. */
     private boolean dispatchPkShared(int code) {
-        if (code == setupKey || code == KeyEvent.VK_R) {
-            script.toggleComboSetup();
+        if (code == autoEatKey || code == KeyEvent.VK_NUMPAD5) {
+            boolean on = !script.autoEatEnabled;
+            script.autoEatEnabled = on;
+            java.util.function.Consumer<Boolean> l = autoEatListener;
+            if (l != null) { try { l.accept(on); } catch (Exception ignored) {} }
             return true;
         }
         if (code == autoKey || code == KeyEvent.VK_NUMPAD0) {
@@ -253,16 +254,23 @@ public final class HotkeyManager {
             }
             return true;
         }
-        if (code == specKey) {
-            script.triggerSpecNow();
-            return true;
-        }
         if (code == gmaulKey || code == KeyEvent.VK_G) {
             UiExecutor.exec(script::triggerGmaulFollowNow, "hotkey-gmaul-follow");
             return true;
         }
         if (code == vengKey || code == KeyEvent.VK_V) {
             script.triggerVengNow();
+            return true;
+        }
+        // Configured binds that were parsed and persisted but never dispatched:
+        // setup cycles the spec setup (same as the HUD button), eat does one
+        // manual eat through the tier-1 path the "1" key uses.
+        if (code == setupKey || code == KeyEvent.VK_R) {
+            script.actions().toggleComboSetup();
+            return true;
+        }
+        if (code == eatKey || code == KeyEvent.VK_NUMPAD3) {
+            UiExecutor.exec(() -> script.executeEatKey(1), "hotkey-eat");
             return true;
         }
         return false;
@@ -288,6 +296,7 @@ public final class HotkeyManager {
             setupKey = parseKey(props.getProperty("hotkey.setup"), DEFAULT_SETUP_KEY);
             eatKey   = parseKey(props.getProperty("hotkey.eat"),   DEFAULT_EAT_KEY);
             autoKey  = parseKey(props.getProperty("hotkey.auto"),  DEFAULT_AUTO_KEY);
+            autoEatKey = parseKey(props.getProperty("hotkey.autoeat"), DEFAULT_AUTO_EAT_KEY);
             boolean migrated = false;
             // Z/X/C are protect prayers — migrate old default spec-on-C to F.
             if (specKey == KeyEvent.VK_C || specKey == KeyEvent.VK_F2
@@ -319,6 +328,7 @@ public final class HotkeyManager {
             props.setProperty("hotkey.setup", Integer.toString(setupKey));
             props.setProperty("hotkey.eat",   Integer.toString(eatKey));
             props.setProperty("hotkey.auto",  Integer.toString(autoKey));
+            props.setProperty("hotkey.autoeat", Integer.toString(autoEatKey));
             try (OutputStream out = Files.newOutputStream(p)) {
                 props.store(out, "cache");
             }

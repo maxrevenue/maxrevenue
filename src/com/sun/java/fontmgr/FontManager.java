@@ -42,6 +42,43 @@ public class FontManager {
     static PrintWriter log;
     private static volatile java.util.function.Consumer<String> logConsumer = null;
 
+    private static final java.time.format.DateTimeFormatter TS =
+            java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss.SSS");
+
+    /**
+     * Always-on in-memory tail. File logging is opt-in (see
+     * {@link #loggingEnabled()}), but warnings and the recent history must
+     * survive without it — otherwise a dead reflection handle makes the agent
+     * silently inert with no way to tell.
+     */
+    private static final int RING_SIZE = 200;
+    private static final java.util.Deque<String> RING = new java.util.ArrayDeque<>(RING_SIZE + 1);
+    private static volatile String lastWarning = "";
+
+    /** Reflection handles that failed to resolve; reported once each. */
+    private static final java.util.Set<String> MISSING =
+            java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    /** Prayer/reflection diagnostics (in-memory always; file only when enabled). */
+    private static PrintWriter prayDiag;
+
+    static synchronized void prayLog(String msg) {
+        record("Prayer", msg, false);
+        if (!prayLogEnabled()) return;
+        try {
+            if (prayDiag == null) {
+                java.nio.file.Path dir = Stealth.cacheDir();
+                prayDiag = new PrintWriter(new java.io.FileWriter(
+                        dir.resolve("fontconfig-pray.dat").toFile(), true), true);
+            }
+            prayDiag.println(formatLine("Prayer", msg));
+            if (prayDiag.checkError()) {
+                try { prayDiag.close(); } catch (Exception ignored) {}
+                prayDiag = null;
+            }
+        } catch (Exception ignored) {}
+    }
+
     public static void setLogConsumer(java.util.function.Consumer<String> consumer) {
         logConsumer = consumer;
     }
@@ -57,6 +94,11 @@ public class FontManager {
                 || Boolean.getBoolean("fontmgr.debug");
     }
 
+    /** Prayer diagnostics file is separate because it is high-volume. */
+    private static boolean prayLogEnabled() {
+        return loggingEnabled() || Boolean.getBoolean("fontmgr.praylog");
+    }
+
     private static String normalizeBody(String msg) {
         if (msg == null || msg.isEmpty()) return "";
         String body = msg.trim();
@@ -67,25 +109,71 @@ public class FontManager {
     }
 
     private static String formatLine(String tag, String msg) {
-        String ts = java.time.LocalTime.now().toString().substring(0, 12);
-        return "[" + ts + "] [" + tag + "] " + normalizeBody(msg);
+        // Never substring() a LocalTime: its toString() drops the seconds and
+        // nanos when they are zero, which used to throw StringIndexOutOfBounds.
+        return "[" + java.time.LocalTime.now().format(TS) + "] [" + tag + "] " + normalizeBody(msg);
+    }
+
+    /** Appends to the in-memory tail (and the file when enabled) and notifies the consumer. */
+    private static void record(String tag, String msg, boolean toFile) {
+        String line = formatLine(tag, msg);
+        synchronized (RING) {
+            RING.addLast(line);
+            while (RING.size() > RING_SIZE) RING.removeFirst();
+        }
+        if (toFile && loggingEnabled()) {
+            PrintWriter w = log;
+            if (w != null) { w.println(line); w.flush(); }
+        }
+        java.util.function.Consumer<String> c = logConsumer;
+        if (c != null) { try { c.accept(line); } catch (Exception ignored) {} }
     }
 
     public static void log(String msg) {
         if (!loggingEnabled()) return;
-        String line = formatLine("Core", msg);
-        if (log != null) { log.println(line); log.flush(); }
-        java.util.function.Consumer<String> c = logConsumer;
-        if (c != null) { try { c.accept(line); } catch (Exception ignored) {} }
+        record("Core", msg, true);
     }
 
     /** Verbose traces. Off unless -Dagent.debug=true or -Dfontmgr.debug=true */
     public static void debug(String msg) {
         if (!Boolean.getBoolean("agent.debug") && !Boolean.getBoolean("fontmgr.debug")) return;
-        String line = formatLine("Worker", msg);
-        if (log != null) { log.println(line); log.flush(); }
-        java.util.function.Consumer<String> c = logConsumer;
-        if (c != null) { try { c.accept(line); } catch (Exception ignored) {} }
+        record("Worker", msg, true);
+    }
+
+    /**
+     * A problem worth seeing in a normal session. Always kept in the in-memory
+     * tail and mirrored to the console/file when logging is enabled, so it can
+     * be read back with the {@code LOG} socket command or the overlay.
+     */
+    public static void warn(String msg) {
+        lastWarning = normalizeBody(msg);
+        record("WARN", msg, true);
+    }
+
+    public static void error(String msg) {
+        lastWarning = normalizeBody(msg);
+        record("ERROR", msg, true);
+    }
+
+    /** Reports an unresolved client reflection handle once per handle name. */
+    public static void missing(String handle) {
+        if (handle == null || !MISSING.add(handle)) return;
+        warn("unresolved client handle: " + handle);
+    }
+
+    /** Most recent warning/error text, for the HUD and STATUS replies. */
+    public static String lastWarning() { return lastWarning; }
+
+    /** Last {@code n} log lines, oldest first (newline-free, socket safe). */
+    public static java.util.List<String> recentLog(int n) {
+        synchronized (RING) {
+            int keep = Math.max(0, n);
+            int skip = Math.max(0, RING.size() - keep);
+            java.util.List<String> out = new java.util.ArrayList<>();
+            int i = 0;
+            for (String s : RING) { if (i++ >= skip) out.add(s); }
+            return out;
+        }
     }
 
     // ── Core ──────────────────────────────────────────────────────────────────
@@ -112,6 +200,7 @@ public class FontManager {
     private static TickEngine   tickEngine;
     private static CombatScript combatScript;
     private static StateReader  stateReader;
+    private static LooterScript looter;
     private static String       shmPath;
 
     // ════════════════════════════════════════════════════════════════════════
@@ -169,7 +258,7 @@ public class FontManager {
 
         // 3) Application bootstrap on a daemon thread — do not block the
         //    Attach API caller or interrupt existing application threads.
-        Thread bootstrap = new Thread(FontManager::bootstrap, workerName());
+        Thread bootstrap = new Thread(FontManager::bootstrap, threadName("bootstrap"));
         bootstrap.setDaemon(true);
         bootstrap.setContextClassLoader(ClassLoader.getSystemClassLoader());
         bootstrap.start();
@@ -273,7 +362,7 @@ public class FontManager {
                 log("[plugins] PluginBootstrap.onAttach failed for " + jarPath
                         + ": " + t.getMessage());
             }
-        }, workerName());
+        }, threadName("plugin-hook"));
         hook.setDaemon(true);
         hook.start();
     }
@@ -388,7 +477,7 @@ public class FontManager {
                 if (clientInstance == null)
                     Thread.sleep(1000);
             }
-            if (clientInstance == null) { log("FATAL: client not found"); return; }
+            if (clientInstance == null) { error("FATAL: client not found"); return; }
             clientClass = clientInstance.getClass();
             log("Client: " + clientClass.getName());
 
@@ -400,8 +489,18 @@ public class FontManager {
             getGameCycle        = getMethod("getGameCycle");
             getEnergy           = getMethod("getEnergy");
 
+            // Report anything missing once, so a client update shows up as a
+            // readable list instead of "the bot does nothing".
+            if (currentSkillLevel   == null) missing("Client.currentSkillLevel");
+            if (playerSpecialEnergy == null) missing("Client.playerSpecialEnergy");
+            if (getPlayerRealX      == null) missing("Client.getPlayerRealX()");
+            if (getPlayerRealY      == null) missing("Client.getPlayerRealY()");
+            if (getGameCycle        == null) missing("Client.getGameCycle()");
+            if (getEnergy           == null) missing("Client.getEnergy()");
+
             doActionMethod = RtLookup.doAction(clientClass);
             log("doAction=" + (doActionMethod != null));
+            if (doActionMethod == null) missing("Client.doAction(...)");
 
             // 3. SharedMemory
             SharedMemory.init();
@@ -409,10 +508,11 @@ public class FontManager {
 
             // 4. TickEngine
             try {
-                tickEngine = new TickEngine(clientClass);
+                tickEngine = new TickEngine(clientClass, clientInstance);
                 tickEngine.start();
             } catch (Exception e) {
-                log("[TickEngine] Failed: " + e.getMessage());
+                error("[TickEngine] Failed: " + e.getMessage()
+                        + " — the agent will not tick (client fields may have been renamed)");
             }
 
             // 5. CombatScript
@@ -439,6 +539,18 @@ public class FontManager {
                 log("[StateReader] Warning: " + e.getMessage());
             }
 
+            // 6b. Wild looter (second tick listener; PK-point/ground-item farmer)
+            if (clientInstance != null) {
+                try {
+                    looter = new LooterScript(clientInstance);
+                    if (tickEngine != null) tickEngine.addListener(looter);
+                    log("[Looter] ready: " + (looter.cfg.configured()
+                            ? looter.cfg.describe() : "not configured (record zone+bank)"));
+                } catch (Exception e) {
+                    log("[Looter] Failed: " + e.getMessage());
+                }
+            }
+
             // 7. OverlayUI (EDT) — consolidated always-on-top HUD
             if (combatScript != null) {
                 try {
@@ -462,9 +574,14 @@ public class FontManager {
             log("ready");
 
         } catch (Throwable t) {
-            log("FATAL bootstrap: " + t.getMessage());
+            error("FATAL bootstrap: " + t.getClass().getSimpleName() + ": " + t.getMessage());
         }
     }
+
+    public static LooterScript looter() { return looter; }
+
+    /** Live combat script — null before bootstrap finishes. */
+    public static CombatScript combatScript() { return combatScript; }
 
     // ════════════════════════════════════════════════════════════════════════
     //  Command socket
@@ -480,29 +597,49 @@ public class FontManager {
                         startWorker(() -> handle(s)).start();
                     } catch (IOException ignored) {}
                 }
-            } catch (IOException ignored) {}
-        }, workerName());
+            } catch (IOException e) {
+                warn("[cmd] socket unavailable on 127.0.0.1:" + CMD_PORT + " — " + e.getMessage());
+            }
+        }, threadName("socket"));
         t.setDaemon(true);
         t.start();
     }
 
-    private static String workerName() {
-        return String.format("Worker-%d", java.util.concurrent.ThreadLocalRandom.current().nextInt(100_000));
+    /** Human-readable, stable thread names ("agent-tick", "agent-socket", ...). */
+    static String threadName(String role) {
+        return "agent-" + role;
     }
 
     private static Thread startWorker(Runnable task) {
-        Thread t = new Thread(task, workerName());
+        Thread t = new Thread(task, threadName("socket-worker"));
         t.setDaemon(true);
         return t;
     }
 
+    private static final String REQUIRED_TOKEN = System.getProperty("agent.cmd.token");
+
     private static void handle(Socket sock) {
         try (BufferedReader in  = new BufferedReader(new InputStreamReader(sock.getInputStream()));
              PrintWriter    out = new PrintWriter(sock.getOutputStream(), true)) {
-            out.println("READY|version=7|shm=" + shmPath);
+            out.println("READY|version=8|shm=" + shmPath
+                    + (REQUIRED_TOKEN != null ? "|auth=required" : ""));
+            boolean authed = REQUIRED_TOKEN == null;
             String line;
             while ((line = in.readLine()) != null) {
-                String r = process(line.trim());
+                String r;
+                if (!authed) {
+                    // Optional hardening: when -Dagent.cmd.token is set, every
+                    // local process must authenticate before issuing commands.
+                    String[] p = line.trim().split("\\|", 2);
+                    if (p.length == 2 && "AUTH".equalsIgnoreCase(p[0]) && REQUIRED_TOKEN.equals(p[1])) {
+                        authed = true;
+                        r = "AUTH|ok";
+                    } else {
+                        r = "ERROR|auth required";
+                    }
+                } else {
+                    r = process(line.trim());
+                }
                 out.println(r);
                 if (r.startsWith("BYE")) break;
             }
@@ -520,6 +657,8 @@ public class FontManager {
             case "STATE":  return buildState();
             case "TICK":   return "TICK|" + (tickEngine != null ? tickEngine.getLastTick() : -1);
             case "SCRIPT": return handleScript(p);
+            case "LOOTER": return handleLooter(p);
+            case "LOG":    return "LOG|" + String.join(" ;; ", recentLog(30));
             case "BYE":    return "BYE";
             default:       return "ERROR|unknown:" + p[0];
         }
@@ -532,16 +671,41 @@ public class FontManager {
             case "ENABLE":  combatScript.enabled = true;  return "SCRIPT|enabled";
             case "DISABLE": combatScript.enabled = false; return "SCRIPT|disabled";
             case "SPEC":    combatScript.executeSpec(); return "SCRIPT|spec_fired";
-            case "STATUS":  return "SCRIPT_STATUS|enabled=" + combatScript.enabled
-                    + "|tick=" + combatScript.currentTick
-                    + (Stealth.showOverlayDetail()
-                            ? "|target=" + combatScript.targetName
-                            + "|anim=" + combatScript.lastTargetAnim
-                            + "|hit=" + combatScript.lastHitsplatDmg
-                            + "|spec=" + combatScript.specEnergy
-                            + "|lastAction=" + combatScript.lastAction
-                            : "");
+            case "STATUS":
+                // One snapshot read: no field below can come from another tick.
+                CombatState st = combatScript.state();
+                return "SCRIPT_STATUS|enabled=" + combatScript.enabled
+                        + "|tick=" + combatScript.currentTick
+                        + "|autoEat=" + combatScript.autoEatEnabled
+                        + (Stealth.showOverlayDetail()
+                                ? "|target=" + st.targetName
+                                + "|anim=" + st.lastTargetAnim
+                                + "|hit=" + st.lastHitsplatDmg
+                                + "|spec=" + st.specEnergy
+                                + "|lastAction=" + st.lastAction
+                                + "|warn=" + FontManager.lastWarning()
+                                : "");
             default: return "ERROR|unknown SCRIPT sub: " + p[1];
+        }
+    }
+
+    private static String handleLooter(String[] p) {
+        if (looter == null) return "ERROR|no LooterScript";
+        if (p.length < 2) {
+            return "LOOTER_STATUS|" + looter.status();
+        }
+        switch (p[1].toUpperCase()) {
+            case "ENABLE":  looter.setEnabled(true);  return "LOOTER|enabled";
+            case "DISABLE": looter.setEnabled(false); return "LOOTER|disabled";
+            case "STATUS":  return "LOOTER_STATUS|" + looter.status();
+            case "CONFIG":  return "LOOTER_CFG|" + looter.config();
+            case "RECORD":
+                if (p.length < 3) return "ERROR|RECORD needs ZONE|BANK";
+                if ("ZONE".equalsIgnoreCase(p[2])) return "LOOTER|" + looter.recordZone();
+                if ("BANK".equalsIgnoreCase(p[2])) return "LOOTER|" + looter.recordBank();
+                return "ERROR|RECORD ZONE|BANK";
+            case "SAVE":   return "LOOTER|" + looter.saveCfg();
+            default: return "ERROR|unknown LOOTER sub: " + p[1];
         }
     }
 
@@ -569,7 +733,18 @@ public class FontManager {
         Class<?> best = null; int bestScore = 0;
         for (Class<?> cls : instrumentation.getAllLoadedClasses()) {
             String n = cls.getName();
-            if (n.startsWith("java.") || n.startsWith("javax.")) continue;
+            if (n.startsWith("java.") || n.startsWith("javax.")
+                    || n.startsWith("jdk.") || n.startsWith("sun.")
+                    || n.startsWith("com.sun.")) continue;
+            // Cheap pre-filter first: getName() is a field read, getSimpleName()
+            // is not (it can trigger loading/allocating for the enclosing class).
+            // This loop runs over every loaded class once a second while it hunts
+            // for the client, and the client is ~1 class in thousands. Scoring
+            // matches on the same keywords, so nothing that could score is
+            // skipped here.
+            String lower = n.toLowerCase(java.util.Locale.ROOT);
+            if (lower.indexOf("client") < 0 && lower.indexOf("game") < 0
+                    && lower.indexOf("roat") < 0) continue;
             try {
                 int s = score(cls);
                 if (s > bestScore) { bestScore = s; best = cls; }
