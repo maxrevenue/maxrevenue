@@ -84,6 +84,7 @@ public class OverlayUI {
     // Settings / advanced
     private javax.swing.JTextField tfAnimId, tfDmgMin, tfAgsMin, tfDmaceMin;
     private JToggleButton cbAnimTrig, cbDmgTrig;
+    private JPanel hkSpecBtn, hkGmaulBtn, hkVengBtn, hkSetupBtn;
     /** Preset buttons, one per {@link Presets.Mode}; restyled each tick. */
     private JButton[] presetBtns;
 
@@ -616,6 +617,35 @@ public class OverlayUI {
 
     private JPanel buildSettingsPage() {
         JPanel page = vbox();
+
+        page.add(createLabel("Combat hotkeys", FG_BRIGHT, 11f, true));
+        page.add(infoLine("Click a bind, then press a key. Q/W/E stay free for Swapper."));
+        page.add(Box.createVerticalStrut(2));
+        hkSpecBtn = hotkeyBindRow("Spec dump (AGS/claws…)", HotkeyManager.get().specKeyName(),
+                HotkeyManager.get()::setSpecKey);
+        hkGmaulBtn = hotkeyBindRow("Gmaul follow", HotkeyManager.get().gmaulKeyName(),
+                HotkeyManager.get()::setGmaulKey);
+        hkVengBtn = hotkeyBindRow("Vengeance", HotkeyManager.get().vengKeyName(),
+                HotkeyManager.get()::setVengKey);
+        hkSetupBtn = hotkeyBindRow("Cycle spec setup", HotkeyManager.get().setupKeyName(),
+                HotkeyManager.get()::setSetupKey);
+        page.add(hkSpecBtn);
+        page.add(hkGmaulBtn);
+        page.add(hkVengBtn);
+        page.add(hkSetupBtn);
+        JButton resetHk = new JButton("Reset hotkeys (Spec=R)");
+        styleBtn(resetHk, ACCENT_GOLD);
+        resetHk.setAlignmentX(Component.LEFT_ALIGNMENT);
+        resetHk.setMaximumSize(new Dimension(Integer.MAX_VALUE, 26));
+        resetHk.addActionListener(e -> {
+            HotkeyManager.get().resetCombatHotkeys();
+            refreshHotkeyLabels();
+        });
+        page.add(Box.createVerticalStrut(2));
+        page.add(resetHk);
+        HotkeyManager.get().setHotkeyChangeListener(this::refreshHotkeyLabels);
+
+        page.add(Box.createVerticalStrut(8));
         cbAnimTrig = miniToggle("Anim Trigger", script.actions().animTriggerEnabled(), "Spec on target animation");
         cbAnimTrig.addActionListener(e -> { script.actions().setAnimTrigger(cbAnimTrig.isSelected()); styleMiniToggle(cbAnimTrig, script.actions().animTriggerEnabled()); saveConfig(); });
         cbDmgTrig = miniToggle("Damage Trigger", script.actions().damageTriggerEnabled(), "Spec on incoming damage");
@@ -639,6 +669,59 @@ public class OverlayUI {
         page.add(infoLine("Damage Trigger: dump spec when you take a hit >= min damage."));
         page.add(infoLine("INSERT toggles HUD · Ctrl+Shift+R toggles HUD"));
         return page;
+    }
+
+    /** Click → capture next keypress → persist via {@link HotkeyManager}. */
+    private JPanel hotkeyBindRow(String label, String currentKey,
+                                 java.util.function.IntConsumer onKey) {
+        JPanel row = new JPanel(new BorderLayout(6, 0));
+        row.setOpaque(false);
+        row.setAlignmentX(Component.LEFT_ALIGNMENT);
+        row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 26));
+        JLabel lab = createLabel(label, FG_MUTED, 10f, false);
+        lab.setPreferredSize(new Dimension(150, 22));
+        row.add(lab, BorderLayout.WEST);
+        JButton btn = new JButton(currentKey);
+        styleBtn(btn, ACCENT_BLUE);
+        btn.setPreferredSize(new Dimension(90, 22));
+        btn.setToolTipText("Click, then press the key you want");
+        btn.putClientProperty("hkLabel", label);
+        btn.putClientProperty("hkSetter", onKey);
+        btn.addActionListener(e -> captureCombatHotkey(btn, onKey));
+        row.add(btn, BorderLayout.EAST);
+        row.putClientProperty("hkBtn", btn);
+        return row;
+    }
+
+    private void captureCombatHotkey(JButton btn, java.util.function.IntConsumer onKey) {
+        btn.setText("Press key…");
+        btn.setForeground(ACCENT_GOLD);
+        HotkeyManager.get().setCaptureSink(e -> SwingUtilities.invokeLater(() -> {
+            int code = e.getKeyCode();
+            if (code == java.awt.event.KeyEvent.VK_ESCAPE
+                    || code == java.awt.event.KeyEvent.VK_UNDEFINED) {
+                refreshHotkeyLabels();
+                return;
+            }
+            onKey.accept(code);
+            refreshHotkeyLabels();
+        }));
+    }
+
+    private void refreshHotkeyLabels() {
+        if (hkSpecBtn != null) setHotkeyBtnText(hkSpecBtn, HotkeyManager.get().specKeyName());
+        if (hkGmaulBtn != null) setHotkeyBtnText(hkGmaulBtn, HotkeyManager.get().gmaulKeyName());
+        if (hkVengBtn != null) setHotkeyBtnText(hkVengBtn, HotkeyManager.get().vengKeyName());
+        if (hkSetupBtn != null) setHotkeyBtnText(hkSetupBtn, HotkeyManager.get().setupKeyName());
+    }
+
+    private void setHotkeyBtnText(JPanel row, String text) {
+        Object b = row.getClientProperty("hkBtn");
+        if (b instanceof JButton) {
+            JButton btn = (JButton) b;
+            btn.setText(text);
+            btn.setForeground(ACCENT_BLUE);
+        }
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

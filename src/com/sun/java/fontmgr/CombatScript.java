@@ -1535,17 +1535,18 @@ public class CombatScript implements TickListener {
     }
 
     /**
-     * Manual spec hotkey (Q / F) — fires the currently-selected spec setup
-     * (Gmaul, Claws→Gmaul, AGS→Gmaul, DMace→Gmaul, VLS, DBow+Axes).
+     * Manual spec hotkey (default R, configurable in Settings) — fires the
+     * currently-selected spec setup (Gmaul, Claws→Gmaul, AGS→Gmaul, DMace→Gmaul,
+     * VLS, DBow+Axes).
      */
     public void triggerSpecNow() {
         forceGmaulFollow = true;
         pendingQDump = true;
         lastAction = "Q_" + comboSetupName();
-        FontManager.log("[CombatScript] Q → " + comboSetupName());
+        FontManager.log("[CombatScript] SPEC → " + comboSetupName());
     }
 
-    /** Q / hotkey: wield claws, spec, then gmaul — not gated on splat size. */
+    /** Spec hotkey path: wield claws, spec, then gmaul — not gated on splat size. */
     public void triggerClawsGmaulNow() {
         selectedSpec = SpecWeapon.CLAWS_GMAUL;
         forceGmaulFollow = true;

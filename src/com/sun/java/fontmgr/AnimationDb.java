@@ -84,6 +84,11 @@ public final class AnimationDb {
         reg(7855, "Surge",               AttackStyle.MAGIC,  false);
         reg(8532, "Volatile NMS Spec",   AttackStyle.MAGIC,  true);
         reg(8535, "Eldritch NMS Spec",   AttackStyle.MAGIC,  true);
+        // Moons of Peril — Eclipse atlatl (ranged throw / magic-based special)
+        reg(11057, "Eclipse Atlatl",     AttackStyle.RANGED, false);
+        reg(11060, "Eclipse Atlatl Spec",AttackStyle.MAGIC,  true);
+        // Blue moon spear set-effect jab after ice
+        reg(11119, "Blue Moon Spear Jab",AttackStyle.MELEE,  false);
         reg(829,  "Eating",              AttackStyle.UNKNOWN, false);
         reg(830,  "Drinking",            AttackStyle.UNKNOWN, false);
         reg(831,  "Drinking Potion",     AttackStyle.UNKNOWN, false);
@@ -194,6 +199,10 @@ public final class AnimationDb {
     public static boolean isStrongDefAnim(int animId) {
         if (isIceCast(animId)) return true;
         if (animId == 424 || animId == 426 || animId == 1167) return true;
+        // Eclipse atlatl throw / magic special — flip overhead the same tick.
+        if (animId == 11057 || animId == 11060) return true;
+        // Blue moon set-effect jab after ice — pray melee for that hit.
+        if (animId == 11119) return true;
         AnimInfo info = lookup(animId);
         return info != null && info.spec;
     }

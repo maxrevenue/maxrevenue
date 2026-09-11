@@ -11,23 +11,27 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Properties;
 import java.util.Set;
+import java.util.function.IntConsumer;
 
 /**
  * Global hotkeys scoped to the active mini-overlay tab.
  * <ul>
- *   <li>{@link OverlayMode#PK} — PK combat keys only (1–4 eat, Q/W/E, …)</li>
+ *   <li>{@link OverlayMode#PK} — PK combat keys (1–4 eat, configurable spec/gmaul/…)</li>
  *   <li>{@link OverlayMode#SWAP} — Advanced Swapper bindings only</li>
  * </ul>
  * Same physical keys can be bound in both modes without conflict.
+ * Spec dump is <b>not</b> hardwired to Q — Q/W/E stay free for Swapper.
  */
 public final class HotkeyManager {
 
     public enum OverlayMode { PK, SWAP }
 
-    public static final int DEFAULT_SPEC_KEY  = KeyEvent.VK_F;
+    /** Spec dump (AGS/claws/…). Default R — QWE reserved for gear swaps. */
+    public static final int DEFAULT_SPEC_KEY  = KeyEvent.VK_R;
     public static final int DEFAULT_GMAUL_KEY = KeyEvent.VK_G;
     public static final int DEFAULT_VENG_KEY  = KeyEvent.VK_V;
-    public static final int DEFAULT_SETUP_KEY = KeyEvent.VK_R;
+    /** Cycle selected spec setup (was R before QWE layout). */
+    public static final int DEFAULT_SETUP_KEY = KeyEvent.VK_F;
     public static final int DEFAULT_EAT_KEY   = KeyEvent.VK_NUMPAD3;
     public static final int DEFAULT_AUTO_KEY  = KeyEvent.VK_NUMPAD0;
     public static final int DEFAULT_AUTO_EAT_KEY = KeyEvent.VK_NUMPAD5;
@@ -50,6 +54,7 @@ public final class HotkeyManager {
     private final Set<Integer> held = java.util.concurrent.ConcurrentHashMap.newKeySet();
     private volatile boolean installed = false;
     private volatile OverlayMode overlayMode = OverlayMode.PK;
+    private volatile Runnable hotkeyChangeListener;
 
     public static HotkeyManager get() {
         return Holder.INSTANCE;
@@ -60,7 +65,7 @@ public final class HotkeyManager {
         load();
         if (installed) return;
         KeyboardFocusManager.getCurrentKeyboardFocusManager().addKeyEventDispatcher(this::dispatch);
-        // Canvas-focused clients often skip KeyboardFocusManager; this still sees Q.
+        // Canvas-focused clients often skip KeyboardFocusManager; this still sees keys.
         Toolkit.getDefaultToolkit().addAWTEventListener(ev -> {
             if (ev instanceof KeyEvent) dispatch((KeyEvent) ev);
         }, AWTEvent.KEY_EVENT_MASK);
@@ -76,6 +81,11 @@ public final class HotkeyManager {
 
     public void setSwapFlush(java.util.function.Consumer<com.sun.java.fontmgr.swap.Swap> flush) {
         this.swapFlush = flush;
+    }
+
+    /** HUD refresh when a bind is captured in Settings. */
+    public void setHotkeyChangeListener(Runnable listener) {
+        this.hotkeyChangeListener = listener;
     }
 
     public void setOverlayMode(OverlayMode mode) {
@@ -108,7 +118,54 @@ public final class HotkeyManager {
     }
 
     public int getSpecKey() { return specKey; }
+    public int getGmaulKey() { return gmaulKey; }
+    public int getVengKey() { return vengKey; }
+    public int getSetupKey() { return setupKey; }
+    public int getEatKey() { return eatKey; }
+    public int getAutoKey() { return autoKey; }
+    public int getAutoEatKey() { return autoEatKey; }
+
     public String specKeyName() { return KeyEvent.getKeyText(specKey); }
+    public String gmaulKeyName() { return KeyEvent.getKeyText(gmaulKey); }
+    public String vengKeyName() { return KeyEvent.getKeyText(vengKey); }
+    public String setupKeyName() { return KeyEvent.getKeyText(setupKey); }
+    public String eatKeyName() { return KeyEvent.getKeyText(eatKey); }
+    public String autoKeyName() { return KeyEvent.getKeyText(autoKey); }
+    public String autoEatKeyName() { return KeyEvent.getKeyText(autoEatKey); }
+
+    public void setSpecKey(int code) { setKey(v -> specKey = v, code); }
+    public void setGmaulKey(int code) { setKey(v -> gmaulKey = v, code); }
+    public void setVengKey(int code) { setKey(v -> vengKey = v, code); }
+    public void setSetupKey(int code) { setKey(v -> setupKey = v, code); }
+    public void setEatKey(int code) { setKey(v -> eatKey = v, code); }
+    public void setAutoKey(int code) { setKey(v -> autoKey = v, code); }
+    public void setAutoEatKey(int code) { setKey(v -> autoEatKey = v, code); }
+
+    private void setKey(IntConsumer assign, int code) {
+        if (code == KeyEvent.VK_UNDEFINED || code <= 0) return;
+        assign.accept(code);
+        save();
+        Runnable l = hotkeyChangeListener;
+        if (l != null) {
+            try { l.run(); } catch (Exception ignored) {}
+        }
+    }
+
+    /** Reset combat binds to the QWE-free defaults (spec=R, setup=F). */
+    public void resetCombatHotkeys() {
+        specKey = DEFAULT_SPEC_KEY;
+        gmaulKey = DEFAULT_GMAUL_KEY;
+        vengKey = DEFAULT_VENG_KEY;
+        setupKey = DEFAULT_SETUP_KEY;
+        eatKey = DEFAULT_EAT_KEY;
+        autoKey = DEFAULT_AUTO_KEY;
+        autoEatKey = DEFAULT_AUTO_EAT_KEY;
+        save();
+        Runnable l = hotkeyChangeListener;
+        if (l != null) {
+            try { l.run(); } catch (Exception ignored) {}
+        }
+    }
 
     private volatile java.util.function.Consumer<Boolean> autoEatListener;
 
@@ -125,8 +182,6 @@ public final class HotkeyManager {
             int code = e.getKeyCode();
             if (code == KeyEvent.VK_UNDEFINED) return true;
             captureSink = null;
-            // Escape clears the binding; the sink itself decides. Both paths are
-            // the same call, so there is no need to branch here.
             try { cap.accept(e); } catch (Exception ignored) {}
             return true;
         }
@@ -141,16 +196,14 @@ public final class HotkeyManager {
         if (e.getID() != KeyEvent.KEY_PRESSED) return false;
         if (!held.add(code)) {
             // AWT listener may have handled this already — still swallow dump keys
-            // so the client does not also bind Q/W/E.
-            return code == KeyEvent.VK_Q || code == gmaulKey;
+            // so the client does not also bind them.
+            return code == specKey || code == gmaulKey;
         }
 
         // Swap binds always fire (even if focus is in the swap editor).
         if (trySwapHotkey(e)) return true;
 
-        // Typing must beat everything else below: Z/X/C and the combat keys
-        // used to be handled first, so typing "c" in the swap editor or an HP
-        // field fired protect-melee and swallowed the character.
+        // Typing must beat everything else below.
         if (isTyping(e)) return false;
 
         // Protect Z/X/C always available (PK + Swap modes).
@@ -167,11 +220,7 @@ public final class HotkeyManager {
             return true;
         }
 
-        // Combat keys (eats 1-4, A/S/D NH eats, specs, T/Space/Num9) work on
-        // EVERY tab, including the Swapper page — otherwise you die if you eat
-        // while sitting on the Swapper tab. Swap hotkeys still take priority
-        // (they run earlier in this handler); typing in the editor is protected
-        // by isTyping() above.
+        // Combat keys work on every tab; Swap hotkeys still take priority above.
         if (dispatchPk(code)) return true;
         return dispatchPkShared(code);
     }
@@ -201,7 +250,7 @@ public final class HotkeyManager {
         } catch (Exception ignored) {}
     }
 
-    /** PK overlay: eats on 1–4, combat on Q/W/E. DH mode: 1–4 stay panic-eat only. */
+    /** PK overlay: eats on 1–4, configurable spec dump. */
     private boolean dispatchPk(int code) {
         if (code == KeyEvent.VK_1) {
             UiExecutor.exec(() -> script.executeEatKey(1), "eat-1");
@@ -219,10 +268,9 @@ public final class HotkeyManager {
             UiExecutor.exec(() -> script.executeEatKey(4), "eat-4");
             return true;
         }
-        // Spec combo: Q, plus the configurable spec bind (hotkey.spec, default F).
-        // A Swapper hotkey on the same key still wins - trySwapHotkey runs first.
-        // W/E/T/A/S/D stay free for your own Swapper hotkeys and typing.
-        if (code == KeyEvent.VK_Q || code == specKey) {
+        // Spec combo: only the configurable bind (default R). Q/W/E free for Swapper.
+        // A Swapper hotkey on the same key still wins — trySwapHotkey runs first.
+        if (code == specKey) {
             script.triggerSpecNow();
             return true;
         }
@@ -252,22 +300,19 @@ public final class HotkeyManager {
             script.actions().toggleAutoSpec();
             return true;
         }
-        if (code == gmaulKey || code == KeyEvent.VK_G) {
+        if (code == gmaulKey) {
             UiExecutor.exec(script::triggerGmaulFollowNow, "hotkey-gmaul-follow");
             return true;
         }
-        if (code == vengKey || code == KeyEvent.VK_V) {
+        if (code == vengKey) {
             script.triggerVengNow();
             return true;
         }
-        // Configured binds that were parsed and persisted but never dispatched:
-        // setup cycles the spec setup (same as the HUD button), eat does one
-        // manual eat through the tier-1 path the "1" key uses.
-        if (code == setupKey || code == KeyEvent.VK_R) {
+        if (code == setupKey) {
             script.actions().toggleComboSetup();
             return true;
         }
-        if (code == eatKey || code == KeyEvent.VK_NUMPAD3) {
+        if (code == eatKey) {
             UiExecutor.exec(() -> script.executeEatKey(1), "hotkey-eat");
             return true;
         }
@@ -296,10 +341,26 @@ public final class HotkeyManager {
             autoKey  = parseKey(props.getProperty("hotkey.auto"),  DEFAULT_AUTO_KEY);
             autoEatKey = parseKey(props.getProperty("hotkey.autoeat"), DEFAULT_AUTO_EAT_KEY);
             boolean migrated = false;
-            // Z/X/C are protect prayers — migrate old default spec-on-C to F.
+            // Z/X/C are protect prayers — migrate old default spec-on-C to R.
             if (specKey == KeyEvent.VK_C || specKey == KeyEvent.VK_F2
                     || specKey == KeyEvent.VK_NUMPAD1 || specKey == KeyEvent.VK_END) {
                 specKey = DEFAULT_SPEC_KEY;
+                migrated = true;
+            }
+            // One-time QWE layout: old defaults were spec=F, setup=R.
+            // Move to spec=R, setup=F and free Q for Swapper.
+            String layout = props.getProperty("hotkey.layout");
+            if (!"qwe".equals(layout)) {
+                if (specKey == KeyEvent.VK_F && setupKey == KeyEvent.VK_R) {
+                    specKey = DEFAULT_SPEC_KEY;
+                    setupKey = DEFAULT_SETUP_KEY;
+                } else if (specKey == KeyEvent.VK_F) {
+                    // Spec still on old F default — prefer R for QWE.
+                    specKey = DEFAULT_SPEC_KEY;
+                }
+                if (setupKey == KeyEvent.VK_R && specKey == KeyEvent.VK_R) {
+                    setupKey = DEFAULT_SETUP_KEY;
+                }
                 migrated = true;
             }
             if (gmaulKey == KeyEvent.VK_NUMPAD2 || gmaulKey == KeyEvent.VK_DOWN) {
@@ -327,6 +388,7 @@ public final class HotkeyManager {
             props.setProperty("hotkey.eat",   Integer.toString(eatKey));
             props.setProperty("hotkey.auto",  Integer.toString(autoKey));
             props.setProperty("hotkey.autoeat", Integer.toString(autoEatKey));
+            props.setProperty("hotkey.layout", "qwe");
             try (OutputStream out = Files.newOutputStream(p)) {
                 props.store(out, "cache");
             }

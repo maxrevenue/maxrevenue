@@ -110,11 +110,19 @@ public final class InventoryTracker {
             // Zuriel / sceptres
             22647, 22649, 22650, 22552, 22555, 27624, 27626, 27662, 27665,
             28583, 28585,
+            // Blue moon spear (bladed staff — name has "spear", not "staff")
+            28988, 29849,
             // Slayer / ibans / common elemental
             4170, 21276, 1409, 1381, 1383, 1385, 1387, 1393, 1395, 1397, 1399,
             1401, 1403, 1405, 1407, 3053, 3054, 6562, 6563,
             11787, 11789, 20730, 20733, 20736, 20739,
     };
+
+    /** Blue moon spear + LMS variant — autocasts Ancients despite the "spear" name. */
+    public static final int[] BLUE_MOON_SPEAR_IDS = { 28988, 29849 };
+
+    /** Eclipse atlatl + LMS variant — ranged main; special is magic-based. */
+    public static final int[] ECLIPSE_ATLATL_IDS = { 29000, 29851 };
 
     /** Staves that cannot Autocast → Ice Barrage — need spellbook click then target. */
     public static final int[] NON_AUTOCAST_STAFF_IDS = {
@@ -137,18 +145,37 @@ public final class InventoryTracker {
         return false;
     }
 
-    /** Ancient / master wand / kodai — autocast Ice Barrage works. */
+    /** Ancient / master wand / kodai / blue moon spear — autocast Ice Barrage works. */
     public static boolean isAutocastStaff(int itemId, String name) {
         if (isNonAutocastStaff(itemId, name)) return false;
+        if (isBlueMoonSpear(itemId, name)) return true;
         if (containsId(MAGE_STAFF_IDS, itemId) && !isNonAutocastStaff(itemId, name)) {
             String n = stripName(name);
             return n.contains("ancient") || n.contains("master wand") || n.contains("kodai")
                     || n.contains("staff of light") || n.contains("staff of balance")
-                    || n.contains("wand");
+                    || n.contains("wand") || n.contains("blue moon");
         }
         String n = stripName(name);
         return n.contains("ancient staff") || n.contains("master wand") || n.contains("kodai")
                 || n.contains("staff of light") || n.contains("staff of balance");
+    }
+
+    /**
+     * Bladed staff from Moons of Peril — name says "spear" but it autocasts Ancients.
+     * Without this, left-click Ice and protect-mage treat it as melee.
+     */
+    public static boolean isBlueMoonSpear(int itemId, String name) {
+        if (itemId > 0 && containsId(BLUE_MOON_SPEAR_IDS, itemId)) return true;
+        String n = stripName(name);
+        if (n.isEmpty()) return false;
+        return n.contains("blue moon spear") || n.contains("bluemoon spear");
+    }
+
+    public static boolean isEclipseAtlatl(int itemId, String name) {
+        if (itemId > 0 && containsId(ECLIPSE_ATLATL_IDS, itemId)) return true;
+        String n = stripName(name);
+        if (n.isEmpty()) return false;
+        return n.contains("atlatl");
     }
 
     /**
@@ -157,6 +184,7 @@ public final class InventoryTracker {
      */
     public static boolean isMageStaff(int itemId, String name) {
         if (itemId > 0 && containsId(MAGE_STAFF_IDS, itemId)) return true;
+        if (isBlueMoonSpear(itemId, name)) return true;
         if (isNonAutocastStaff(itemId, name) || isAutocastStaff(itemId, name)) return true;
         String n = stripName(name);
         if (n.isEmpty()) return false;
@@ -381,13 +409,13 @@ public final class InventoryTracker {
 
     public static boolean isNhMainWeapon(int itemId, String name) {
         if (isAmmo(itemId, name)) return false;
-        if (itemId == 29000 || itemId == 28919 || itemId == 28922) return true;
+        if (isEclipseAtlatl(itemId, name) || itemId == 28919 || itemId == 28922) return true;
         if (isVls(itemId, name) || isWhip(itemId, name) || isFang(itemId, name)
                 || isAgs(itemId, name) || isDragonClaws(itemId, name)
                 || isGmaul(itemId, name) || isDragonMace(itemId, name)
                 || isDarkBow(itemId, name) || isDragonThrownaxe(itemId, name)
                 || isDragonKnife(itemId, name)) return true;
-        if (isMageStaff(itemId, name)) return true;
+        if (isMageStaff(itemId, name) || isBlueMoonSpear(itemId, name)) return true;
         if (isDharokAxe(itemId, name)) return true;
         String n = stripName(name);
         if (n.contains("atlatl") || n.contains("bow") || n.contains("blowpipe")
