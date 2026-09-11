@@ -163,12 +163,23 @@ public final class InventoryTracker {
     /**
      * Bladed staff from Moons of Peril — name says "spear" but it autocasts Ancients.
      * Without this, left-click Ice and protect-mage treat it as melee.
+     * Roat may use custom ids; name match is the reliable signal.
      */
     public static boolean isBlueMoonSpear(int itemId, String name) {
         if (itemId > 0 && containsId(BLUE_MOON_SPEAR_IDS, itemId)) return true;
         String n = stripName(name);
         if (n.isEmpty()) return false;
-        return n.contains("blue moon spear") || n.contains("bluemoon spear");
+        // Armour / cosmetics — never the weapon.
+        if (n.contains("helm") || n.contains("hat") || n.contains("chest") || n.contains("body")
+                || n.contains("plate") || n.contains("tasset") || n.contains("legs")
+                || n.contains("skirt") || n.contains("boot") || n.contains("glove")
+                || n.contains("set") || n.contains("kit") || n.contains("ornament")) {
+            return false;
+        }
+        if (n.contains("bluemoon") || n.contains("blue moon")) {
+            return n.contains("spear") || n.contains("staff") || n.contains("wand");
+        }
+        return n.contains("moon spear") || n.contains("spellspear") || n.contains("spell spear");
     }
 
     public static boolean isEclipseAtlatl(int itemId, String name) {
@@ -182,9 +193,17 @@ public final class InventoryTracker {
      * True for any mage staff/wand we should pin Ice Barrage click-cast to.
      * ID match wins so Roat custom ids still work when the name is weird.
      */
+    /** Roat custom ids learned when a moon spear / staff name resolves once. */
+    private static final java.util.Set<Integer> LEARNED_MAGE_WEAPON_IDS =
+            java.util.concurrent.ConcurrentHashMap.newKeySet();
+
     public static boolean isMageStaff(int itemId, String name) {
         if (itemId > 0 && containsId(MAGE_STAFF_IDS, itemId)) return true;
-        if (isBlueMoonSpear(itemId, name)) return true;
+        if (itemId > 0 && LEARNED_MAGE_WEAPON_IDS.contains(itemId)) return true;
+        if (isBlueMoonSpear(itemId, name)) {
+            if (itemId > 0) LEARNED_MAGE_WEAPON_IDS.add(itemId);
+            return true;
+        }
         if (isNonAutocastStaff(itemId, name) || isAutocastStaff(itemId, name)) return true;
         String n = stripName(name);
         if (n.isEmpty()) return false;
@@ -195,7 +214,11 @@ public final class InventoryTracker {
         if (n.contains("tumeken") && n.contains("shadow")) return true;
         if (n.contains("zuriel") && n.contains("staff")) return true;
         if (n.contains("wand") || n.contains("sceptre")) return true;
-        return n.contains("staff");
+        if (n.contains("staff")) {
+            if (itemId > 0) LEARNED_MAGE_WEAPON_IDS.add(itemId);
+            return true;
+        }
+        return false;
     }
 
     public static boolean isVls(int itemId, String name) {

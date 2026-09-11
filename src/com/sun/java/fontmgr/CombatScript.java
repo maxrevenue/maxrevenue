@@ -4380,7 +4380,9 @@ public class CombatScript implements TickListener {
     boolean isMageStaffEquipped() {
         int wid = readEquippedWeaponId();
         if (wid <= 0) return false;
-        return InventoryTracker.isMageStaff(wid, resolveItemName(wid));
+        String name = resolveItemName(wid);
+        return InventoryTracker.isMageStaff(wid, name)
+                || InventoryTracker.isBlueMoonSpear(wid, name);
     }
 
     public boolean isSpellSelectedPublic() {

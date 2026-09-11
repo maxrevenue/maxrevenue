@@ -293,7 +293,7 @@ public class OverlayUI {
         page.add(Box.createVerticalStrut(3));
 
         staffLcToggle = miniToggle("Staff = L-Click Barrage", script.actions().staffLeftClickCast(),
-                "While a staff/wand is equipped (by item id), Ice Barrage stays left-click armed");
+                "While a mage staff/wand/Blue moon spear is equipped, Ice Barrage stays left-click armed");
         staffLcToggle.setAlignmentX(Component.LEFT_ALIGNMENT);
         staffLcToggle.setMaximumSize(new Dimension(Integer.MAX_VALUE, 26));
         staffLcToggle.addActionListener(e -> {

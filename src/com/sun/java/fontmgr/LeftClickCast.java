@@ -127,13 +127,16 @@ public final class LeftClickCast {
 
     public void noteIncomingMainHand(int itemId, String name, int tick) {
         if (InventoryTracker.isAmmo(itemId, name)) return;
-        boolean staff = InventoryTracker.isMageStaff(itemId, name);
+        boolean staff = InventoryTracker.isMageStaff(itemId, name)
+                || InventoryTracker.isBlueMoonSpear(itemId, name);
         boolean main = staff || InventoryTracker.isNhMainWeapon(itemId, name);
         if (!main) return;
         iceBlockSetTick = tick;
         if (staff) {
             pendingSwapNonStaffId = -1;
             iceBlockedUntilStaffWield = false;
+            FontManager.debug("[LCC] mage weapon incoming: " + InventoryTracker.stripName(name)
+                    + " id=" + itemId);
         } else {
             pendingSwapNonStaffId = itemId > 0 ? itemId : -1;
             iceBlockedUntilStaffWield = true;
@@ -159,14 +162,18 @@ public final class LeftClickCast {
     public void syncAfterWield(int itemId, int tick) {
         String name = itemId > 0 ? script.resolveItemNamePublic(itemId) : "";
         if (InventoryTracker.isAmmo(itemId, name)) return;
-        if (InventoryTracker.isMageStaff(itemId, name)
-                || InventoryTracker.isNhMainWeapon(itemId, name)) {
+        boolean staff = InventoryTracker.isMageStaff(itemId, name)
+                || InventoryTracker.isBlueMoonSpear(itemId, name);
+        if (staff || InventoryTracker.isNhMainWeapon(itemId, name)) {
             lastMainWeaponId = itemId;
         }
-        if (InventoryTracker.isMageStaff(itemId, name)) {
+        if (staff) {
             pendingSwapNonStaffId = -1;
             iceBlockedUntilStaffWield = false;
+            // Clear stale spell, then re-arm Ice on the next hover/tick while staff is on.
             clearArmPublic();
+            FontManager.debug("[LCC] mage wielded: " + InventoryTracker.stripName(name)
+                    + " id=" + itemId + " → ice ready");
             return;
         }
         if (InventoryTracker.isNhMainWeapon(itemId, name)) {
@@ -205,17 +212,14 @@ public final class LeftClickCast {
         if (armed && !script.staffLcCast) {
             clearArmPublic();
         }
-        // Keep the pinned spell SELECTED while a staff is on (throttled) so the
-        // very first click already casts — never rely only on press-time arming
-        // (that first click used to bash before the 626 landed). The MOUSE_MOVED
-        // hook arms on hover; this tick fallback also covers equip-while-hovering
-        // (no mouse movement, so no MOUSE_MOVED event fires).
-        if (staffForIce() && !script.clientSpellSelected()) {
+        // Keep Ice SELECTED whenever a mage weapon is on so the first click
+        // already casts. prepareForWorldClick clears the arm when the cursor
+        // is not over a player (walk / bank / inv stay usable).
+        if (staffForIce()) {
             int widget = pinnedWidget > 0 ? pinnedWidget : script.iceBarrageWidgetId();
             String name = pinnedName != null ? pinnedName : "Ice Barrage";
-            boolean hoverPlayer = isMouseIn3dScreen() && isMouseOverHoverPlayer();
-            if (hoverPlayer || (armed && pinnedWidget > 0)) {
-                if (script.currentTick() - armedTick >= 4) {
+            if (!script.clientSpellSelected() || pinnedWidget != widget) {
+                if (script.currentTick() - armedTick >= 2) {
                     if (script.ensureSpellArmed(widget, name, false)) {
                         setPinned(name, widget, script.currentTick());
                     }
@@ -236,20 +240,21 @@ public final class LeftClickCast {
             return false;
         }
 
-        if (isNonStaffMainHand(live, liveName)) {
-            lastMainWeaponId = live;
-            pendingSwapNonStaffId = -1;
-            return false;
-        }
-
-        if (InventoryTracker.isMageStaff(live, liveName)) {
-            if (iceBlockedUntilStaffWield && isIceSwapBlockActive()) {
-                return false;
-            }
+        // Live mage weapon always wins. A stale melee/range ice-block (or a
+        // swap that mis-labeled Blue moon spear as non-staff) must not keep
+        // Ice disarmed while a staff is actually in hand.
+        if (InventoryTracker.isMageStaff(live, liveName)
+                || InventoryTracker.isBlueMoonSpear(live, liveName)) {
             lastMainWeaponId = live;
             pendingSwapNonStaffId = -1;
             iceBlockedUntilStaffWield = false;
             return true;
+        }
+
+        if (isNonStaffMainHand(live, liveName)) {
+            lastMainWeaponId = live;
+            pendingSwapNonStaffId = -1;
+            return false;
         }
 
         if (iceBlockedUntilStaffWield) return false;
@@ -257,7 +262,8 @@ public final class LeftClickCast {
         if (lastMainWeaponId > 0) {
             String lastName = script.resolveItemNamePublic(lastMainWeaponId);
             if (isNonStaffMainHand(lastMainWeaponId, lastName)) return false;
-            return InventoryTracker.isMageStaff(lastMainWeaponId, lastName);
+            return InventoryTracker.isMageStaff(lastMainWeaponId, lastName)
+                    || InventoryTracker.isBlueMoonSpear(lastMainWeaponId, lastName);
         }
 
         return false;
@@ -340,7 +346,8 @@ public final class LeftClickCast {
     private boolean isNonStaffMainHand(int itemId, String name) {
         if (itemId <= 0) return false;
         if (InventoryTracker.isAmmo(itemId, name)) return false;
-        if (InventoryTracker.isMageStaff(itemId, name)) return false;
+        if (InventoryTracker.isMageStaff(itemId, name)
+                || InventoryTracker.isBlueMoonSpear(itemId, name)) return false;
         return InventoryTracker.isNhMainWeapon(itemId, name);
     }
 
