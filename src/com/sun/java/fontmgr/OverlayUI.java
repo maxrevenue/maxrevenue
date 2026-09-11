@@ -388,7 +388,8 @@ public class OverlayUI {
         page.add(pkSpecModeBtn);
         page.add(Box.createVerticalStrut(4));
 
-        pkAutoSpecBtn = miniToggle("Auto Spec", script.actions().autoSpecEnabled(), "Dump spec with target + energy");
+        pkAutoSpecBtn = miniToggle("Auto Spec", script.actions().autoSpecEnabled(),
+                "OFF recommended for NH — auto AGS was yanking your Blue moon spear. Dump with Spec hotkey (R) instead");
         pkAutoSpecBtn.addActionListener(e -> { script.actions().setAutoSpec(pkAutoSpecBtn.isSelected()); styleMiniToggle(pkAutoSpecBtn, script.actions().autoSpecEnabled()); saveConfig(); });
         pkPunishToggle = miniToggle("Eat Punish", script.actions().eatPunishEnabled(), "Spec punish when they eat");
         pkPunishToggle.addActionListener(e -> { script.actions().setEatPunish(pkPunishToggle.isSelected()); styleMiniToggle(pkPunishToggle, script.actions().eatPunishEnabled()); saveConfig(); });
@@ -415,7 +416,7 @@ public class OverlayUI {
         page.add(grid);
         page.add(Box.createVerticalStrut(4));
 
-        JLabel hint = createLabel("1-4 eat · Q spec · G gmaul · V veng · R setup · Space ice · Num9 pray · Num5 auto-eat · Z/X/C overheads · other keys = your swaps", FG_MUTED, 9f, false);
+        JLabel hint = createLabel("1-4 eat · R spec · G gmaul · V veng · F cycle setup · Space ice · Num9 pray · Num5 auto-eat · Z/X/C overheads · QWE = your swaps", FG_MUTED, 9f, false);
         hint.setAlignmentX(Component.LEFT_ALIGNMENT);
         page.add(hint);
         return page;

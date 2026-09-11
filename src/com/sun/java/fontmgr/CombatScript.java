@@ -1766,6 +1766,12 @@ public class CombatScript implements TickListener {
      */
     private boolean tryAutoSpecDump(int tick) {
         if (!autoSpecEnabled || dharokEnabled) return false;
+        // Never yank Blue moon / staff mid-Ice — Auto Spec was re-equipping AGS every fight.
+        // Manual Spec hotkey (R) still dumps via triggerSpecNow → executeSpec.
+        if (isMageStaffEquipped()) {
+            FontManager.debug("[CombatScript] Auto spec skipped — mage weapon equipped");
+            return false;
+        }
         if (isSpecSequenceBusy()) return false;
         if (tick - lastHeadlessSpecTick <= SPEC_COOLDOWN) return false;
         int energy = specEnergy;
@@ -1794,6 +1800,7 @@ public class CombatScript implements TickListener {
      */
     public boolean tryEnqueueSpecIfReady(int tick, int specialEnergy, int lastHitDmg) {
         if (!autoSpecEnabled) return false;
+        if (isMageStaffEquipped()) return false;
         if (isSpecSequenceBusy()) return false;
         // Respect the stronger SPEC cooldown window
         if (tick - lastHeadlessSpecTick <= SPEC_COOLDOWN) return false;
@@ -1836,6 +1843,7 @@ public class CombatScript implements TickListener {
      */
     public boolean tryEnqueueAgsGmaulComboIfReady(int tick, int specialEnergy, int lastHitDmg) {
         if (!autoSpecEnabled) return false;
+        if (isMageStaffEquipped()) return false;
         if (isSpecSequenceBusy()) return false;
         if (tick - lastHeadlessSpecTick <= SPEC_COOLDOWN) return false;
         boolean energyOk = specialEnergy < 0 || specialEnergy >= primaryMinSpecPct();

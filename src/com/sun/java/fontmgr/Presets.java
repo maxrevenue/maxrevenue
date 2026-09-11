@@ -85,7 +85,9 @@ public final class Presets {
             /* dharok */ false,
             /* nhV2 */ true, /* nhPray */ true, /* nhBarrage */ true, /* nhWalkUnder */ true,
             /* staffLc */ true,
-            /* autoSpec */ true, /* spec */ CombatScript.SpecWeapon.AGS_GMAUL,
+            // Off by default — auto-spec was yanking AGS while you were on Blue moon / Ice.
+            // Dump with the Spec hotkey (default R) when you want it.
+            /* autoSpec */ false, /* spec */ CombatScript.SpecWeapon.AGS_GMAUL,
             /* defPray */ true, /* protectItem */ true, /* veng */ true,
             /* comboEat */ true, /* autoEat */ true, /* eatPunish */ false);
 
