@@ -116,6 +116,16 @@ public final class CombatState {
      * prayer logic actually took effect.
      */
     public final String defPrayTrace;
+    /**
+     * Our own live overhead as a style token — {@code MELEE} / {@code RANGED} /
+     * {@code MAGIC}, or {@code NONE} when no protect prayer is up.
+     *
+     * <p>Recorded so the gear-based-prayer change (#2) can actually be measured:
+     * without knowing when our overhead went up, there is no way to tell whether
+     * committing on a corroborated gear switch is faster than waiting out the
+     * stability window. {@link TickRecorder} writes it as the {@code oh} column.
+     */
+    public final String ourOverhead;
 
     // ── Diagnostics ──────────────────────────────────────────────────────────
     /** Compact debug string, or "" when overlay detail is off. Never null. */
@@ -154,6 +164,7 @@ public final class CombatState {
         this.nhFreezeTicksLeft = b.nhFreezeTicksLeft;
         this.nhV2Enabled = b.nhV2Enabled;
         this.defPrayTrace = b.defPrayTrace;
+        this.ourOverhead = b.ourOverhead;
         this.debugState = b.debugState;
     }
 
@@ -242,6 +253,7 @@ public final class CombatState {
         private int nhFreezeTicksLeft = 0;
         private boolean nhV2Enabled = false;
         private String defPrayTrace = "";
+        private String ourOverhead = "NONE";
         private String debugState = "";
 
         Builder(long seq, int tick) {
@@ -279,6 +291,7 @@ public final class CombatState {
         Builder nhFreezeTicksLeft(int v)            { this.nhFreezeTicksLeft = v; return this; }
         Builder nhV2Enabled(boolean v)              { this.nhV2Enabled = v; return this; }
         Builder defPrayTrace(String v)              { this.defPrayTrace = orDefault(v, ""); return this; }
+        Builder ourOverhead(String v)               { this.ourOverhead = orDefault(v, "NONE"); return this; }
         Builder debugState(String v)                { this.debugState = orDefault(v, ""); return this; }
 
         CombatState build() {

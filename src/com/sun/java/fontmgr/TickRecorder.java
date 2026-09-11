@@ -44,7 +44,7 @@ public final class TickRecorder {
 
     private static final String[] COLUMNS = {
         "tick", "seq", "tgt", "thp", "tmax", "spec", "okill", "odh",
-        "owpn", "ostyle", "anim", "tanim", "defpray", "action"
+        "owpn", "ostyle", "oh", "anim", "tanim", "defpray", "action"
     };
 
     private static final TickRecorder DISABLED = new TickRecorder(null);
@@ -184,6 +184,7 @@ public final class TickRecorder {
           .append(s.opponentIsDh ? 1 : 0).append('\t')
           .append(s.opponentWeaponId()).append('\t')
           .append(s.opponentWeaponStyle()).append('\t')
+          .append(oneLine(s.ourOverhead)).append('\t')
           .append(s.localAnim).append('\t')
           .append(s.lastTargetAnim).append('\t')
           .append(oneLine(s.defPrayTrace)).append('\t')

@@ -1264,6 +1264,7 @@ public class CombatScript implements TickListener {
                 .nhFreezeTicksLeft(nhFreezeTicksLeft)
                 .nhV2Enabled(nhV2Enabled)
                 .defPrayTrace(defPrayTrace)
+                .ourOverhead(protectStyleToken())
                 .debugState(debugState)
                 .build();
         recorder.record(stateSnapshot);
@@ -3215,6 +3216,16 @@ public class CombatScript implements TickListener {
         opponentLoadoutTick   = currentTick;
         opponentLoadout       = lo;
         return lo;
+    }
+
+    /**
+     * Live overhead as a style token for {@link CombatState} / {@link TickRecorder}.
+     * {@code NONE} when no protect prayer is up, so a recording can distinguish
+     * "no overhead" from "melee overhead".
+     */
+    private String protectStyleToken() {
+        AnimationDb.AttackStyle st = AnimationDb.protectStyleOf(activeProtectPrayer());
+        return st == AnimationDb.AttackStyle.UNKNOWN ? "NONE" : st.name();
     }
 
     /** The loadout captured for this tick, for {@link CombatState}. Never null. */

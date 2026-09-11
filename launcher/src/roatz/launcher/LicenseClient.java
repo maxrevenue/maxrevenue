@@ -12,7 +12,7 @@ import java.util.Properties;
 
 final class LicenseClient {
 
-    enum Kind { OK, INVALID, REVOKED, OTHER_PC, NETWORK, SERVER }
+    enum Kind { OK, INVALID, REVOKED, EXPIRED, OTHER_PC, NETWORK, SERVER }
 
     static final class Result {
         final Kind kind;
@@ -77,6 +77,12 @@ final class LicenseClient {
     static Result parse(int status, String body) {
         if (body == null) body = "";
         String err = JsonBits.str(body, "error");
+        // Checked before the 403/revoked branch: an expired license is also a 403,
+        // but telling a buyer "this key was revoked" when it simply ran out sends
+        // them to support instead of the renewal page.
+        if ("expired".equals(err)) {
+            return new Result(Kind.EXPIRED, null, 0, "", "Your license has ended.");
+        }
         if (status == 403 || "revoked".equals(err)) {
             return new Result(Kind.REVOKED, null, 0, "", "This key was revoked.");
         }
@@ -104,6 +110,7 @@ final class LicenseClient {
     static String human(Kind kind) {
         switch (kind) {
             case REVOKED: return "This key was revoked.";
+            case EXPIRED: return "Your license has ended.";
             case OTHER_PC: return "This key is already bound to another PC.";
             case INVALID: return "That key is not valid.";
             case NETWORK: return "Cannot reach the license server.";

@@ -222,6 +222,18 @@ public final class AnimationDb {
         }
     }
 
+    /**
+     * Inverse of {@link #protectPrayerId}: which style a live protect prayer is
+     * defending against, or {@link AttackStyle#UNKNOWN} when the id is not a
+     * protect prayer (so callers can tell "no overhead" from "melee overhead").
+     */
+    public static AttackStyle protectStyleOf(int prayerId) {
+        if (prayerId == PROTECT_MAGIC_PRAYER_ID) return AttackStyle.MAGIC;
+        if (prayerId == PROTECT_RANGE_PRAYER_ID) return AttackStyle.RANGED;
+        if (prayerId == PROTECT_MELEE_PRAYER_ID) return AttackStyle.MELEE;
+        return AttackStyle.UNKNOWN;
+    }
+
     public static int offensivePrayerId(AttackStyle style) {
         switch (style) {
             case RANGED: return RIGOUR_PRAYER_ID;

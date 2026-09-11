@@ -1,6 +1,8 @@
 #Requires -Version 5.1
 param(
     [string] $Note = '',
+    # Time-boxed key: days counted from first activation. 0 = perpetual.
+    [int] $Days = 0,
     [string] $Api = $env:ROATZ_LICENSE_API,
     [string] $AdminSecret = $env:ROATZ_ADMIN_SECRET
 )
@@ -12,7 +14,7 @@ if (-not $AdminSecret) {
     exit 1
 }
 
-$body = @{ note = $Note } | ConvertTo-Json
+$body = @{ note = $Note; days = $Days } | ConvertTo-Json
 $resp = Invoke-RestMethod -Method Post -Uri ($Api.TrimEnd('/') + '/v1/issue') -Headers @{
     'X-Roatz-Admin' = $AdminSecret
     'Content-Type'  = 'application/json'
@@ -20,5 +22,10 @@ $resp = Invoke-RestMethod -Method Post -Uri ($Api.TrimEnd('/') + '/v1/issue') -H
 if (-not $resp.ok) {
     Write-Host ("Issue failed: " + $resp.error) -ForegroundColor Red
     exit 1
+}
+if ($Days -gt 0) {
+    Write-Host ("$Days-day key (starts on first activation)") -ForegroundColor DarkGray
+} else {
+    Write-Host 'Perpetual key' -ForegroundColor DarkGray
 }
 Write-Host $resp.key

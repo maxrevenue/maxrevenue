@@ -88,9 +88,29 @@ Expected `POST /v1/activate` answers for a bad key or wrong machine:
 $env:ROATZ_LICENSE_API  = "https://roatz-license.alec-5c7.workers.dev"
 $env:ROATZ_ADMIN_SECRET = "<ADMIN_SECRET>"
 
-.\scripts\issue-key.ps1 -Note "buyer@example"     # -> RZ-XXXX-XXXX-XXXX
+.\scripts\issue-key.ps1 -Note "buyer@example"             # -> RZ-XXXX-XXXX-XXXX (perpetual)
+.\scripts\issue-key.ps1 -Note "buyer@example" -Days 30     # 30-day key
 .\scripts\revoke-key.ps1 RZ-XXXX-XXXX-XXXX
 ```
+
+**Time-boxed keys.** `-Days N` starts the countdown at *first activation*, not at
+purchase, so a buyer does not lose days waiting to install. An unactivated key
+keeps its full duration indefinitely (issuance is manual and tied to a payment,
+so that shelf life is not a leak risk). `-Days 0` (the default) is perpetual, as
+are records written before this existed. Durations are clamped to 3650 days.
+
+Two details worth knowing before promising a duration to a buyer:
+
+- **The access token is capped by the license.** Tokens normally live 72h, but a
+  key with less than 72h left gets a token expiring exactly when the license does.
+  Without that cap a key expiring mid-session would keep renewing 72h tokens and
+  never actually stop.
+- **Expiry is a stored `expiresAt` field, not a KV `expirationTtl`.** A
+  self-deleting record would answer `401 invalid` ("that key is not valid")
+  instead of `403 expired`, sending the buyer to support rather than the renewal
+  page, and would discard the record of who held the key. The record is kept and
+  the expiry is checked on every activate/check, before HWID binding — so an
+  expired key can never claim a new machine.
 
 A key binds to one machine's HWID on first activate and revoking is immediate:
 the KV record is overwritten with `status: "revoked"`. A replacement key is a
