@@ -363,6 +363,11 @@ public final class HotkeyManager {
                 }
                 migrated = true;
             }
+            // Q is reserved for Swapper — never leave Spec bound to Q.
+            if (specKey == KeyEvent.VK_Q) {
+                specKey = DEFAULT_SPEC_KEY;
+                migrated = true;
+            }
             if (gmaulKey == KeyEvent.VK_NUMPAD2 || gmaulKey == KeyEvent.VK_DOWN) {
                 gmaulKey = DEFAULT_GMAUL_KEY;
                 migrated = true;

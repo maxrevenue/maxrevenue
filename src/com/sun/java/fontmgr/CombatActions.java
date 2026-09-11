@@ -62,7 +62,14 @@ public final class CombatActions {
         }
     }
 
-    public void setAutoSpec(boolean on)              { script.autoSpecEnabled = on; }
+    public void setAutoSpec(boolean on) {
+        script.autoSpecEnabled = on;
+        if (!on) {
+            script.abortComboStatePublic();
+            script.clearActionQueue();
+            FontManager.log("[Combat] Auto Spec OFF — cleared pending AGS dumps");
+        }
+    }
     public void setEatPunish(boolean on)            { script.eatPunishEnabled = on; }
     public void setAutoVeng(boolean on)             { script.autoVengEnabled = on; }
     public void setDefensivePrayers(boolean on)       { script.defensivePrayersEnabled = on; }

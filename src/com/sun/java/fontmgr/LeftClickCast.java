@@ -28,6 +28,13 @@ public final class LeftClickCast {
     private volatile boolean iceBlockedUntilStaffWield = false;
     private int iceBlockSetTick = -999;
     private int pendingSwapNonStaffId = -1;
+    /**
+     * Mage swap named a staff (often by name only on Roat). The next weapon
+     * that actually lands in the hand is learned as a mage id so Ice works
+     * even when item-def names fail for custom pack ids.
+     */
+    private volatile boolean expectMageWield = false;
+    private int expectMageUntilTick = -999;
 
     private volatile boolean armed;
     private volatile String pinnedName;
@@ -130,14 +137,26 @@ public final class LeftClickCast {
         boolean staff = InventoryTracker.isMageStaff(itemId, name)
                 || InventoryTracker.isBlueMoonSpear(itemId, name);
         boolean main = staff || InventoryTracker.isNhMainWeapon(itemId, name);
-        if (!main) return;
+        if (!main && !staff) {
+            // Name-only mage line (id unknown): still expect a mage wield.
+            if (InventoryTracker.looksLikeMageWeaponName(name)) {
+                staff = true;
+                main = true;
+            } else {
+                return;
+            }
+        }
         iceBlockSetTick = tick;
         if (staff) {
             pendingSwapNonStaffId = -1;
             iceBlockedUntilStaffWield = false;
-            FontManager.debug("[LCC] mage weapon incoming: " + InventoryTracker.stripName(name)
-                    + " id=" + itemId);
+            expectMageWield = true;
+            expectMageUntilTick = tick + 8;
+            if (itemId > 0) InventoryTracker.learnMageWeaponId(itemId);
+            FontManager.log("[LCC] mage incoming: " + InventoryTracker.stripName(name)
+                    + " id=" + itemId + " (will learn live id)");
         } else {
+            expectMageWield = false;
             pendingSwapNonStaffId = itemId > 0 ? itemId : -1;
             iceBlockedUntilStaffWield = true;
             clearArmPublic();
@@ -162,21 +181,39 @@ public final class LeftClickCast {
     public void syncAfterWield(int itemId, int tick) {
         String name = itemId > 0 ? script.resolveItemNamePublic(itemId) : "";
         if (InventoryTracker.isAmmo(itemId, name)) return;
+
+        // Mage swap said "Blue moon spear" by name; this is the live Roat id.
+        if (expectMageWield && itemId > 0 && tick <= expectMageUntilTick
+                && !InventoryTracker.isKnownMeleeOrRangeWeapon(itemId, name)) {
+            InventoryTracker.learnMageWeaponId(itemId);
+            expectMageWield = false;
+            pendingSwapNonStaffId = -1;
+            iceBlockedUntilStaffWield = false;
+            lastMainWeaponId = itemId;
+            clearArmPublic();
+            FontManager.log("[LCC] learned mage weapon id=" + itemId
+                    + " name=" + InventoryTracker.stripName(name));
+            return;
+        }
+
         boolean staff = InventoryTracker.isMageStaff(itemId, name)
                 || InventoryTracker.isBlueMoonSpear(itemId, name);
         if (staff || InventoryTracker.isNhMainWeapon(itemId, name)) {
             lastMainWeaponId = itemId;
         }
         if (staff) {
+            if (itemId > 0) InventoryTracker.learnMageWeaponId(itemId);
             pendingSwapNonStaffId = -1;
             iceBlockedUntilStaffWield = false;
-            // Clear stale spell, then re-arm Ice on the next hover/tick while staff is on.
+            expectMageWield = false;
             clearArmPublic();
-            FontManager.debug("[LCC] mage wielded: " + InventoryTracker.stripName(name)
-                    + " id=" + itemId + " → ice ready");
+            FontManager.log("[LCC] mage wielded: " + InventoryTracker.stripName(name)
+                    + " id=" + itemId);
             return;
         }
-        if (InventoryTracker.isNhMainWeapon(itemId, name)) {
+        if (InventoryTracker.isNhMainWeapon(itemId, name)
+                || InventoryTracker.isKnownMeleeOrRangeWeapon(itemId, name)) {
+            expectMageWield = false;
             pendingSwapNonStaffId = -1;
             iceBlockedUntilStaffWield = true;
             iceBlockSetTick = tick;
@@ -190,6 +227,8 @@ public final class LeftClickCast {
         pendingSwapNonStaffId = -1;
         iceBlockedUntilStaffWield = false;
         iceBlockSetTick = -999;
+        expectMageWield = false;
+        expectMageUntilTick = -999;
         clearArmPublic();
     }
 
@@ -240,20 +279,46 @@ public final class LeftClickCast {
             return false;
         }
 
-        // Live mage weapon always wins. A stale melee/range ice-block (or a
-        // swap that mis-labeled Blue moon spear as non-staff) must not keep
-        // Ice disarmed while a staff is actually in hand.
+        // Learn Roat custom id right after a mage swap named the weapon.
+        if (expectMageWield && script.currentTick() <= expectMageUntilTick
+                && !InventoryTracker.isKnownMeleeOrRangeWeapon(live, liveName)) {
+            InventoryTracker.learnMageWeaponId(live);
+            expectMageWield = false;
+            FontManager.log("[LCC] staffForIce learned id=" + live
+                    + " name=" + InventoryTracker.stripName(liveName));
+        }
+
         if (InventoryTracker.isMageStaff(live, liveName)
-                || InventoryTracker.isBlueMoonSpear(live, liveName)) {
+                || InventoryTracker.isBlueMoonSpear(live, liveName)
+                || InventoryTracker.isLearnedMageWeapon(live)) {
             lastMainWeaponId = live;
             pendingSwapNonStaffId = -1;
             iceBlockedUntilStaffWield = false;
             return true;
         }
 
-        if (isNonStaffMainHand(live, liveName)) {
+        // Off-by-one / appearance lag: try neighbouring ids for moon spear names.
+        if (live > 1) {
+            String n1 = script.resolveItemNamePublic(live + 1);
+            String n2 = script.resolveItemNamePublic(live - 1);
+            if (InventoryTracker.isBlueMoonSpear(live + 1, n1)
+                    || InventoryTracker.isBlueMoonSpear(live - 1, n2)
+                    || InventoryTracker.looksLikeMageWeaponName(n1)
+                    || InventoryTracker.looksLikeMageWeaponName(n2)
+                    || InventoryTracker.looksLikeMageWeaponName(liveName)) {
+                InventoryTracker.learnMageWeaponId(live);
+                lastMainWeaponId = live;
+                pendingSwapNonStaffId = -1;
+                iceBlockedUntilStaffWield = false;
+                return true;
+            }
+        }
+
+        if (isNonStaffMainHand(live, liveName)
+                || InventoryTracker.isKnownMeleeOrRangeWeapon(live, liveName)) {
             lastMainWeaponId = live;
             pendingSwapNonStaffId = -1;
+            expectMageWield = false;
             return false;
         }
 
@@ -263,10 +328,39 @@ public final class LeftClickCast {
             String lastName = script.resolveItemNamePublic(lastMainWeaponId);
             if (isNonStaffMainHand(lastMainWeaponId, lastName)) return false;
             return InventoryTracker.isMageStaff(lastMainWeaponId, lastName)
-                    || InventoryTracker.isBlueMoonSpear(lastMainWeaponId, lastName);
+                    || InventoryTracker.isBlueMoonSpear(lastMainWeaponId, lastName)
+                    || InventoryTracker.isLearnedMageWeapon(lastMainWeaponId);
         }
 
         return false;
+    }
+
+    /** HUD / debug: why Ice is or isn't ready. */
+    public String iceStatusLine() {
+        if (!script.staffLcCast) return "Ice LC: OFF";
+        int live = script.equippedWeaponId();
+        String name = live > 0 ? InventoryTracker.stripName(script.resolveItemNamePublic(live)) : "—";
+        if (name.isEmpty()) name = "id=" + live;
+        if (staffForIce()) {
+            return "Ice LC: READY · " + name + (live > 0 ? " (" + live + ")" : "");
+        }
+        return "Ice LC: blocked · " + name + (live > 0 ? " (" + live + ")" : "");
+    }
+
+    /** Fight-tab button: pin whatever is currently equipped as the Ice staff. */
+    public void learnCurrentWeaponAsMage() {
+        int live = script.equippedWeaponId();
+        if (live <= 0) {
+            FontManager.log("[LCC] learn failed — no weapon equipped");
+            return;
+        }
+        InventoryTracker.learnMageWeaponId(live);
+        expectMageWield = false;
+        iceBlockedUntilStaffWield = false;
+        pendingSwapNonStaffId = -1;
+        lastMainWeaponId = live;
+        FontManager.log("[LCC] pinned mage weapon id=" + live
+                + " name=" + InventoryTracker.stripName(script.resolveItemNamePublic(live)));
     }
 
     // ── MouseHandler hook targets ────────────────────────────────────────────

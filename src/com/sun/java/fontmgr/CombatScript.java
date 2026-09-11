@@ -1586,7 +1586,12 @@ public class CombatScript implements TickListener {
         dbowComboEnergyEst = -1;
         primaryWieldTries = 0;
         forceGmaulFollow = false;
+        pendingQDump = false;
         clearPendingDhGmaul();
+    }
+
+    public void abortComboStatePublic() {
+        abortComboState();
     }
 
     private void startManualCombo(int tick) {
@@ -2465,6 +2470,10 @@ public class CombatScript implements TickListener {
     /** AGS is 2h — never try to pair it with defender. Wield, then spec next tick if needed. */
     private void beginAgsDump(WeaponRef primary) {
         String label = primarySpecLabel();
+        FontManager.log("[Combat] AGS wield ← " + label
+                + " auto=" + autoSpecEnabled
+                + " manualQ=" + pendingQDump
+                + " staff=" + isMageStaffEquipped());
         if (primary.equipped || primaryCurrentlyEquipped()) {
             fireAgsSpecNow();
             return;
@@ -4390,7 +4399,16 @@ public class CombatScript implements TickListener {
         if (wid <= 0) return false;
         String name = resolveItemName(wid);
         return InventoryTracker.isMageStaff(wid, name)
-                || InventoryTracker.isBlueMoonSpear(wid, name);
+                || InventoryTracker.isBlueMoonSpear(wid, name)
+                || InventoryTracker.isLearnedMageWeapon(wid);
+    }
+
+    public String iceLcStatusPublic() {
+        return leftClickCast.iceStatusLine();
+    }
+
+    public void learnCurrentWeaponAsMagePublic() {
+        leftClickCast.learnCurrentWeaponAsMage();
     }
 
     public boolean isSpellSelectedPublic() {
@@ -6080,6 +6098,12 @@ public class CombatScript implements TickListener {
     private void equipLoadoutPiece(NhLoadout.Piece piece) {
         if (piece == null || doActionMethod == null) return;
         if (isPieceWorn(piece)) return;
+        // NH loadouts must never yank AGS — that is Spec-hotkey only. Melee
+        // snapshots often include AGS from when you snapped gear mid-fight.
+        if (InventoryTracker.isAgs(piece.itemId, piece.nameKey)) {
+            FontManager.log("[NH] skip AGS in loadout (use Spec hotkey / R) id=" + piece.itemId);
+            return;
+        }
         int slot = findSlotForPiece(piece);
         if (slot < 0) return;
         equipFromSlot(slot);

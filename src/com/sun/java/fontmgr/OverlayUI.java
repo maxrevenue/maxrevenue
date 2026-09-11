@@ -72,6 +72,7 @@ public class OverlayUI {
     private JToggleButton pkAutoEatToggle, dhAutoEatToggle;
     private JButton pkSpecModeBtn;
     private JToggleButton staffLcToggle;
+    private JLabel iceLcStatusLabel;
 
     // NH
     private JToggleButton nhModeToggle, nhDefPrayToggle;
@@ -302,6 +303,19 @@ public class OverlayUI {
             saveConfig();
         });
         page.add(staffLcToggle);
+        iceLcStatusLabel = createLabel("Ice LC: —", FG_MUTED, 9.5f, false);
+        iceLcStatusLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        page.add(iceLcStatusLabel);
+        JButton pinMageBtn = new JButton("Pin current weapon as Ice staff");
+        styleBtn(pinMageBtn, ACCENT_GOLD);
+        pinMageBtn.setAlignmentX(Component.LEFT_ALIGNMENT);
+        pinMageBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 26));
+        pinMageBtn.setToolTipText("Wield Blue moon spear, then click — fixes Roat custom item ids");
+        pinMageBtn.addActionListener(e -> {
+            script.learnCurrentWeaponAsMagePublic();
+            if (iceLcStatusLabel != null) iceLcStatusLabel.setText(script.iceLcStatusPublic());
+        });
+        page.add(pinMageBtn);
         page.add(Box.createVerticalStrut(3));
         page.add(stepper("Auto-spec on your hit ≥ (dmg)", script.actions().damageTriggerMin(), 1, 99, 5,
                 v -> { script.actions().setDamageTriggerMin(v); saveConfig(); }));
@@ -991,6 +1005,12 @@ public class OverlayUI {
                         dhSwapStatusLabel.setForeground(FG_MUTED);
                     }
                     actionTickerLabel.setText("Action: " + lastAction);
+                    if (iceLcStatusLabel != null) {
+                        String ice = script.iceLcStatusPublic();
+                        iceLcStatusLabel.setText(ice);
+                        iceLcStatusLabel.setForeground(ice.startsWith("Ice LC: READY")
+                                ? ACCENT_GREEN : FG_MUTED);
+                    }
                     syncToggle(pkAutoSpecBtn, act.autoSpecEnabled());
                     syncToggle(pkPunishToggle, act.eatPunishEnabled());
                     syncToggle(pkVengToggle, act.autoVengEnabled());

@@ -197,14 +197,75 @@ public final class InventoryTracker {
     private static final java.util.Set<Integer> LEARNED_MAGE_WEAPON_IDS =
             java.util.concurrent.ConcurrentHashMap.newKeySet();
 
+    public static void learnMageWeaponId(int itemId) {
+        if (itemId > 0) LEARNED_MAGE_WEAPON_IDS.add(itemId);
+    }
+
+    public static boolean isLearnedMageWeapon(int itemId) {
+        return itemId > 0 && LEARNED_MAGE_WEAPON_IDS.contains(itemId);
+    }
+
+    /** Name-only check used when swap lines have no numeric id yet. */
+    public static boolean looksLikeMageWeaponName(String name) {
+        String n = stripName(name);
+        if (n.isEmpty()) return false;
+        if (n.contains("helm") || n.contains("hat") || n.contains("chest") || n.contains("body")
+                || n.contains("plate") || n.contains("tasset") || n.contains("legs")
+                || n.contains("skirt") || n.contains("boot") || n.contains("glove")
+                || n.contains("set") || n.contains("kit")) {
+            return false;
+        }
+        if (n.contains("staff") || n.contains("wand") || n.contains("sceptre")
+                || n.contains("trident") || n.contains("sanguinesti") || n.contains("kodai")
+                || n.contains("tumeken")) {
+            return true;
+        }
+        if (n.contains("bluemoon") || n.contains("blue moon") || n.contains("moon spear")
+                || n.contains("spellspear") || n.contains("spell spear")) {
+            return true;
+        }
+        return false;
+    }
+
+    /** Weapons that must never keep Ice armed (AGS, bows, etc.). */
+    public static boolean isKnownMeleeOrRangeWeapon(int itemId, String name) {
+        if (isLearnedMageWeapon(itemId) || isBlueMoonSpear(itemId, name) || isMageStaff(itemId, name)) {
+            return false;
+        }
+        if (isAgs(itemId, name) || isWhip(itemId, name) || isFang(itemId, name)
+                || isGmaul(itemId, name) || isDragonClaws(itemId, name)
+                || isDragonMace(itemId, name) || isVls(itemId, name)
+                || isVoidwaker(itemId, name) || isDarkBow(itemId, name)
+                || isDragonThrownaxe(itemId, name) || isDragonKnife(itemId, name)
+                || isEclipseAtlatl(itemId, name) || isDharokAxe(itemId, name)
+                || isStatius(itemId, name)) {
+            return true;
+        }
+        String n = stripName(name);
+        if (n.isEmpty()) return false;
+        if (n.contains("godsword") || n.contains("whip") || n.contains("scimitar")
+                || n.contains("claws") || n.contains("ballista") || n.contains("blowpipe")
+                || n.contains("crossbow") || n.contains("atlatl") || n.contains("bow")
+                || n.contains("maul") || n.contains("dagger") || n.contains("rapier")
+                || n.contains("hasta") || n.contains("halberd") || n.contains("bulwark")
+                || n.contains("macuahuitl")) {
+            return true;
+        }
+        return false;
+    }
+
     public static boolean isMageStaff(int itemId, String name) {
         if (itemId > 0 && containsId(MAGE_STAFF_IDS, itemId)) return true;
-        if (itemId > 0 && LEARNED_MAGE_WEAPON_IDS.contains(itemId)) return true;
+        if (isLearnedMageWeapon(itemId)) return true;
         if (isBlueMoonSpear(itemId, name)) {
-            if (itemId > 0) LEARNED_MAGE_WEAPON_IDS.add(itemId);
+            if (itemId > 0) learnMageWeaponId(itemId);
             return true;
         }
         if (isNonAutocastStaff(itemId, name) || isAutocastStaff(itemId, name)) return true;
+        if (looksLikeMageWeaponName(name)) {
+            if (itemId > 0) learnMageWeaponId(itemId);
+            return true;
+        }
         String n = stripName(name);
         if (n.isEmpty()) return false;
         if (n.contains("cape") || n.contains("kit") || n.contains("ornament")
@@ -215,7 +276,7 @@ public final class InventoryTracker {
         if (n.contains("zuriel") && n.contains("staff")) return true;
         if (n.contains("wand") || n.contains("sceptre")) return true;
         if (n.contains("staff")) {
-            if (itemId > 0) LEARNED_MAGE_WEAPON_IDS.add(itemId);
+            if (itemId > 0) learnMageWeaponId(itemId);
             return true;
         }
         return false;
