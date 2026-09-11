@@ -1,0 +1,31 @@
+{
+  "routes": [
+    "/",
+    "/offer",
+    "/advertorial",
+    "/classic",
+    "/squeeze",
+    "/opt-in",
+    "/magnet-thank-you",
+    "/application",
+    "/checkout",
+    "/upsell-1",
+    "/downsell",
+    "/upsell-2",
+    "/thank-you",
+    "/refund",
+    "/privacy",
+    "/terms",
+    "*"
+  ],
+  "redirects": {
+    "/classic": "/offer",
+    "/opt-in": "/squeeze"
+  },
+  "external": {
+    "operator_dashboard": "https://operator-dashboard-peach.vercel.app",
+    "signup": "https://operator-dashboard-peach.vercel.app/signup",
+    "login": "https://operator-dashboard-peach.vercel.app/login",
+    "dashboard": "https://operator-dashboard-peach.vercel.app/dashboard"
+  }
+}

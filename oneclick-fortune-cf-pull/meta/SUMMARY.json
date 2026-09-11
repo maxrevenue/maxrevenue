@@ -1,0 +1,18 @@
+{
+  "worker": "oneclick-fortune",
+  "workers_dev": "https://oneclick-fortune.alec-5c7.workers.dev",
+  "account_id": "5c799272b867b7b535e61023c0773713",
+  "subdomain": "alec-5c7",
+  "latest_version_id": "7bc7a1f6-f8c7-4f70-b5b4-e5b4510edc6d",
+  "compatibility_date": "2026-08-25",
+  "assets": {
+    "not_found_handling": "single-page-application",
+    "serve_directly": true
+  },
+  "bindings": [],
+  "secrets": [],
+  "routes_custom_domains": [],
+  "author": "alec@room23.net",
+  "last_deployed": "2026-09-07T01:07:11.406149Z",
+  "notes": "Assets-only Worker SPA. No Worker script modules, no KV/D1/R2 bindings. /squeeze is a client-side React Router route."
+}

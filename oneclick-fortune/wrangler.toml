@@ -1,0 +1,21 @@
+name = "oneclick-fortune"
+main = "src/worker.js"
+compatibility_date = "2026-08-25"
+workers_dev = true
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+run_worker_first = ["/api/*"]
+
+[[kv_namespaces]]
+binding = "LEADS"
+id = "6ac1e52671f4431ca9f0727c129c8830"
+
+# Optional secrets (set via `wrangler secret put`):
+#   RESEND_API_KEY
+#   ADMIN_SECRET
+# Optional vars:
+#   CONTACT_FROM_EMAIL = "OneClick Fortune <hello@room23.net>"
+#   ADMIN_EMAIL = "alec@room23.net"

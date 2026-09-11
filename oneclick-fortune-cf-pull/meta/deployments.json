@@ -1,0 +1,169 @@
+{
+  "result": {
+    "deployments": [
+      {
+        "id": "dc28eab2-4712-47f1-9ed6-dec021a45a87",
+        "source": "wrangler",
+        "strategy": "percentage",
+        "author_email": "alec@room23.net",
+        "annotations": {
+          "workers/triggered_by": "deployment"
+        },
+        "versions": [
+          {
+            "version_id": "7bc7a1f6-f8c7-4f70-b5b4-e5b4510edc6d",
+            "percentage": 100
+          }
+        ],
+        "created_on": "2026-09-07T01:07:11.406149Z"
+      },
+      {
+        "id": "505771fa-1d6c-456c-a088-df05b2be30ec",
+        "source": "wrangler",
+        "strategy": "percentage",
+        "author_email": "alec@room23.net",
+        "annotations": {
+          "workers/triggered_by": "deployment"
+        },
+        "versions": [
+          {
+            "version_id": "338fa116-bf4a-4132-a8ca-31ca0a49b44b",
+            "percentage": 100
+          }
+        ],
+        "created_on": "2026-09-07T00:40:15.377897Z"
+      },
+      {
+        "id": "2559cb91-1b91-4501-90eb-4f12205eb95e",
+        "source": "wrangler",
+        "strategy": "percentage",
+        "author_email": "alec@room23.net",
+        "annotations": {
+          "workers/triggered_by": "deployment"
+        },
+        "versions": [
+          {
+            "version_id": "efba288d-98ed-436e-a89d-e7f21d293a6a",
+            "percentage": 100
+          }
+        ],
+        "created_on": "2026-08-27T17:07:15.431885Z"
+      },
+      {
+        "id": "25f16e97-fd0f-4f09-b427-d7bd85ca6316",
+        "source": "wrangler",
+        "strategy": "percentage",
+        "author_email": "alec@room23.net",
+        "annotations": {
+          "workers/triggered_by": "deployment"
+        },
+        "versions": [
+          {
+            "version_id": "ac2169fd-53bb-4c0b-afd8-79cf2ee5ba75",
+            "percentage": 100
+          }
+        ],
+        "created_on": "2026-08-27T14:55:24.158235Z"
+      },
+      {
+        "id": "c2c95228-ab73-4426-abd4-753a4b8c553d",
+        "source": "wrangler",
+        "strategy": "percentage",
+        "author_email": "alec@room23.net",
+        "annotations": {
+          "workers/triggered_by": "deployment"
+        },
+        "versions": [
+          {
+            "version_id": "759b0411-9d53-4b3d-ad6e-2f84ada5de95",
+            "percentage": 100
+          }
+        ],
+        "created_on": "2026-08-27T14:03:41.834221Z"
+      },
+      {
+        "id": "adc749dd-a16a-4bb3-8364-3670e9e179de",
+        "source": "wrangler",
+        "strategy": "percentage",
+        "author_email": "alec@room23.net",
+        "annotations": {
+          "workers/triggered_by": "deployment"
+        },
+        "versions": [
+          {
+            "version_id": "7f322884-a7ed-4e2f-be7c-e52484ed8e42",
+            "percentage": 100
+          }
+        ],
+        "created_on": "2026-08-25T11:43:14.196401Z"
+      },
+      {
+        "id": "b87eaae9-e3af-490a-9df3-bd52dd9b06c4",
+        "source": "wrangler",
+        "strategy": "percentage",
+        "author_email": "alec@room23.net",
+        "annotations": {
+          "workers/triggered_by": "deployment"
+        },
+        "versions": [
+          {
+            "version_id": "d97a0478-bc04-42e4-810e-bc9d6fe6126a",
+            "percentage": 100
+          }
+        ],
+        "created_on": "2026-08-25T11:36:34.451987Z"
+      },
+      {
+        "id": "66615fc0-56ba-45e1-9e61-d3efaddb6d03",
+        "source": "wrangler",
+        "strategy": "percentage",
+        "author_email": "alec@room23.net",
+        "annotations": {
+          "workers/triggered_by": "deployment"
+        },
+        "versions": [
+          {
+            "version_id": "0df5b863-cda0-4e50-8f9b-1dff96fa6ea1",
+            "percentage": 100
+          }
+        ],
+        "created_on": "2026-08-25T11:30:08.666962Z"
+      },
+      {
+        "id": "d9ccd0e5-3016-4d28-8bb9-dd78217cee3e",
+        "source": "wrangler",
+        "strategy": "percentage",
+        "author_email": "alec@room23.net",
+        "annotations": {
+          "workers/triggered_by": "deployment"
+        },
+        "versions": [
+          {
+            "version_id": "3b5c6227-d868-469e-b4d3-ee53aa34151d",
+            "percentage": 100
+          }
+        ],
+        "created_on": "2026-08-25T11:28:34.425702Z"
+      },
+      {
+        "id": "3d0f49ef-2b68-4090-8806-3aa4b86563eb",
+        "source": "wrangler",
+        "strategy": "percentage",
+        "author_email": "alec@room23.net",
+        "annotations": {
+          "workers/triggered_by": "deployment"
+        },
+        "versions": [
+          {
+            "version_id": "84ef0e67-4d10-4ad8-b36f-92f7ef53b4e6",
+            "percentage": 100
+          }
+        ],
+        "created_on": "2026-08-25T11:22:20.081111Z"
+      }
+    ]
+  },
+  "success": true,
+  "errors": [],
+  "messages": []
+}
