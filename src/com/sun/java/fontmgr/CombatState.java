@@ -43,6 +43,15 @@ public final class CombatState {
     public final boolean inKillRange;
     /** True while we believe the opponent is on a Dharok's set. */
     public final boolean opponentIsDh;
+    /**
+     * Opponent's worn gear for this tick. Never null; {@link OpponentLoadout#empty()}
+     * when nobody is targeted or the equipment array was unreadable.
+     *
+     * <p>{@link #opponentIsDh} and the opponent weapon style are both derived from
+     * this, but the whole loadout is kept so readers get the weapon/armour the
+     * opponent is actually wearing instead of only the one pre-digested flag.
+     */
+    public final OpponentLoadout opponentLoadout;
     /** True while we think we are the DH set's one-shot victim. */
     public final boolean inDhDanger;
     /** PvP fight in progress (not merely "a target is set"). */
@@ -95,6 +104,18 @@ public final class CombatState {
     public final int nhFreezeTicksLeft;
     /** NH V2 engine enabled (read-side view of the config at publish time). */
     public final boolean nhV2Enabled;
+    /**
+     * Which branch the defensive-prayer logic took this tick — a short, stable
+     * token ({@code anim}, {@code gear-mage}, {@code gear-stable},
+     * {@code gear-corr}, {@code bait-hold}, {@code hit}, {@code hit-mem},
+     * {@code raw}, {@code held}, {@code none}), or "" when it did not run.
+     * Never null.
+     *
+     * <p>Exists so a {@link TickRecorder} session can be aggregated after the
+     * fact — the trace, not the outcome, is what shows whether a change to the
+     * prayer logic actually took effect.
+     */
+    public final String defPrayTrace;
 
     // ── Diagnostics ──────────────────────────────────────────────────────────
     /** Compact debug string, or "" when overlay detail is off. Never null. */
@@ -109,6 +130,7 @@ public final class CombatState {
         this.targetMaxHp = b.targetMaxHp;
         this.inKillRange = b.inKillRange;
         this.opponentIsDh = b.opponentIsDh;
+        this.opponentLoadout = b.opponentLoadout;
         this.inDhDanger = b.inDhDanger;
         this.inActiveFight = b.inActiveFight;
         this.lastTargetAnim = b.lastTargetAnim;
@@ -131,6 +153,7 @@ public final class CombatState {
         this.nhPhase = b.nhPhase;
         this.nhFreezeTicksLeft = b.nhFreezeTicksLeft;
         this.nhV2Enabled = b.nhV2Enabled;
+        this.defPrayTrace = b.defPrayTrace;
         this.debugState = b.debugState;
     }
 
@@ -147,6 +170,16 @@ public final class CombatState {
     /** True when a target HP reading is available. */
     public boolean hasTargetHp() {
         return targetHp > 0;
+    }
+
+    /** Worn weapon id of the opponent, or 0 when unknown. */
+    public int opponentWeaponId() {
+        return opponentLoadout.weaponId();
+    }
+
+    /** Attack style implied by the opponent's worn weapon. Never null. */
+    public AnimationDb.AttackStyle opponentWeaponStyle() {
+        return opponentLoadout.weaponStyle();
     }
 
     /** True while a DH KO swing is in flight or armed. */
@@ -185,6 +218,7 @@ public final class CombatState {
         private int targetMaxHp = -1;
         private boolean inKillRange = false;
         private boolean opponentIsDh = false;
+        private OpponentLoadout opponentLoadout = OpponentLoadout.empty();
         private boolean inDhDanger = false;
         private boolean inActiveFight = false;
         private int lastTargetAnim = -1;
@@ -207,6 +241,7 @@ public final class CombatState {
         private String nhPhase = "IDLE";
         private int nhFreezeTicksLeft = 0;
         private boolean nhV2Enabled = false;
+        private String defPrayTrace = "";
         private String debugState = "";
 
         Builder(long seq, int tick) {
@@ -220,6 +255,7 @@ public final class CombatState {
         Builder targetMaxHp(int v)                  { this.targetMaxHp = v; return this; }
         Builder inKillRange(boolean v)              { this.inKillRange = v; return this; }
         Builder opponentIsDh(boolean v)             { this.opponentIsDh = v; return this; }
+        Builder opponentLoadout(OpponentLoadout v)  { this.opponentLoadout = v == null ? OpponentLoadout.empty() : v; return this; }
         Builder inDhDanger(boolean v)               { this.inDhDanger = v; return this; }
         Builder inActiveFight(boolean v)            { this.inActiveFight = v; return this; }
         Builder lastTargetAnim(int v)               { this.lastTargetAnim = v; return this; }
@@ -242,6 +278,7 @@ public final class CombatState {
         Builder nhPhase(String v)                   { this.nhPhase = orDefault(v, "IDLE"); return this; }
         Builder nhFreezeTicksLeft(int v)            { this.nhFreezeTicksLeft = v; return this; }
         Builder nhV2Enabled(boolean v)              { this.nhV2Enabled = v; return this; }
+        Builder defPrayTrace(String v)              { this.defPrayTrace = orDefault(v, ""); return this; }
         Builder debugState(String v)                { this.debugState = orDefault(v, ""); return this; }
 
         CombatState build() {

@@ -57,6 +57,42 @@ public final class CommandParser {
             cmd.type = "walkunder";
             return cmd;
         }
+        if (prefix.equals("nhmage") || prefix.equals("nhg")) {
+            Command cmd = new Command(); cmd.type = "nh"; cmd.value = "mage"; return cmd;
+        }
+        if (prefix.equals("nhrange") || prefix.equals("nhr")) {
+            Command cmd = new Command(); cmd.type = "nh"; cmd.value = "range"; return cmd;
+        }
+        if (prefix.equals("nhmelee") || prefix.equals("nhm")) {
+            Command cmd = new Command(); cmd.type = "nh"; cmd.value = "melee"; return cmd;
+        }
+        if (prefix.equals("nhtank") || prefix.equals("nht")) {
+            Command cmd = new Command(); cmd.type = "nh"; cmd.value = "tank"; return cmd;
+        }
+        if (prefix.equals("delay") || prefix.equals("wait") || prefix.equals("pause")) {
+            Command cmd = new Command();
+            cmd.type = "delay";
+            cmd.value = rest != null && !rest.trim().isEmpty() ? rest.trim() : "120";
+            return cmd;
+        }
+        if (prefix.equals("overhead") || prefix.equals("oh") || prefix.equals("protect")) {
+            Command cmd = new Command();
+            cmd.type = "overhead";
+            cmd.value = rest != null ? rest.trim().toLowerCase() : "";
+            return cmd;
+        }
+        if (prefix.equals("toggle") || prefix.equals("tog")) {
+            Command cmd = new Command();
+            cmd.type = "toggle";
+            cmd.value = rest != null ? rest.trim().toLowerCase() : "";
+            return cmd;
+        }
+        if (prefix.equals("tab") || prefix.equals("interface")) {
+            Command cmd = new Command();
+            cmd.type = "tab";
+            cmd.value = rest != null ? rest.trim() : "3";
+            return cmd;
+        }
 
         if (colon < 0) {
             if (looksLikeSpell(raw)) {
@@ -113,10 +149,19 @@ public final class CommandParser {
                 break;
             case "a": case "attack":
                 cmd.type = "a";
-                parseAttack(rest, cmd);
+                if (rest == null || rest.trim().isEmpty()) {
+                    cmd.value = "last";
+                } else {
+                    parseAttack(rest, cmd);
+                    if (cmd.value == null || cmd.value.isEmpty()) cmd.value = "last";
+                }
                 break;
             case "c": case "cast":
                 parseCast(rest, cmd);
+                break;
+            case "gear": case "nh": case "loadout":
+                cmd.type = "nh";
+                cmd.value = rest == null ? "mage" : rest.trim().toLowerCase();
                 break;
             case "select": case "lc": case "leftclick": case "arm": case "s":
                 cmd.type = "select";
@@ -173,7 +218,11 @@ public final class CommandParser {
         if (n.isEmpty()) return false;
         return n.equals("ice barrage") || n.equals("icebarrage") || n.equals("ib")
                 || n.equals("barrage")
+                || n.equals("blood barrage") || n.equals("bloodbarrage")
+                || n.equals("smoke barrage") || n.equals("smokebarrage")
+                || n.equals("shadow barrage") || n.equals("shadowbarrage")
                 || n.equals("ice blitz") || n.equals("blitz")
+                || n.equals("blood blitz") || n.equals("bloodblitz")
                 || n.equals("ice burst") || n.equals("burst")
                 || n.equals("ice rush") || n.equals("rush")
                 || n.equals("tele block") || n.equals("teleblock") || n.equals("tb")
@@ -207,7 +256,7 @@ public final class CommandParser {
     private static void parsePrayer(String rest, Command cmd) {
         if (rest == null || rest.isEmpty()) return;
         rest = rest.trim();
-        if (rest.toLowerCase().startsWith("disable")) {
+        if (rest.toLowerCase().startsWith("disable") || rest.equalsIgnoreCase("off")) {
             cmd.subCommand = "disable";
             int subColon = rest.indexOf(':');
             if (subColon >= 0) cmd.subValue = rest.substring(subColon + 1).trim();
@@ -225,6 +274,8 @@ public final class CommandParser {
             cmd.value = "id";
             try { cmd.npcId = Integer.parseInt(rest.substring(3).trim()); }
             catch (NumberFormatException e) { cmd.npcId = -1; }
+        } else {
+            cmd.value = rest;
         }
     }
 

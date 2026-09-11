@@ -1,11 +1,8 @@
 package com.sun.java.fontmgr;
 
-import java.awt.AWTEvent;
 import java.awt.KeyEventDispatcher;
 import java.awt.KeyboardFocusManager;
-import java.awt.Toolkit;
 import java.awt.event.KeyEvent;
-import java.awt.event.MouseEvent;
 
 /**
  * Yields auto-combat when you click or hold pause, so the client looks like
@@ -27,18 +24,7 @@ final class PauseManager {
     void init(CombatScript script) {
         this.script = script;
         if (installed) return;
-        Toolkit.getDefaultToolkit().addAWTEventListener(e -> {
-            if (e.getID() != MouseEvent.MOUSE_PRESSED) return;
-            if (!(e instanceof MouseEvent)) return;
-            MouseEvent me = (MouseEvent) e;
-            // Ignore overlay chrome; only yield on game clicks.
-            if (me.getComponent() != null) {
-                String cn = me.getComponent().getClass().getName();
-                if (cn.startsWith("javax.swing") || cn.startsWith("com.sun.java.fontmgr")) return;
-            }
-            int tick = currentTick();
-            if (tick >= 0) pauseUntilTick = tick + 4;
-        }, AWTEvent.MOUSE_EVENT_MASK);
+        // Game clicks: {@link ClientHooks#onMousePressed} via MouseHandler bytecode.
 
         KeyEventDispatcher d = e -> {
             if (e.getKeyCode() != KeyEvent.VK_PAUSE && e.getKeyCode() != KeyEvent.VK_SCROLL_LOCK) {
@@ -60,6 +46,12 @@ final class PauseManager {
 
     boolean isHotkeyPaused() {
         return hotkeyPause;
+    }
+
+    /** Called from {@link ClientHooks} on every game-canvas left/right press. */
+    void onGameMousePressed() {
+        int tick = currentTick();
+        if (tick >= 0) pauseUntilTick = tick + 4;
     }
 
     private int currentTick() {

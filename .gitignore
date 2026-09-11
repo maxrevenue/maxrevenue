@@ -25,3 +25,10 @@ Desktop.ini
 .idea/
 .vscode/
 *.iml
+
+# ── License Worker ────────────────────────────────────────────────────────
+license-server/node_modules/
+license-server/.wrangler/
+license-server/.dev.vars
+license-server/.prod.vars
+license-server/worker-configuration.d.ts

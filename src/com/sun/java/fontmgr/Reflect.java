@@ -33,7 +33,7 @@ public final class Reflect {
         return null;
     }
 
-    /** Public/declared method matching name + arity (walks superclasses). */
+    /** Public method matching name + arity. Private methods need {@link #declaredMethod}. */
     public static Method method(Class<?> cls, String name, int paramCount) {
         if (cls == null || name == null) return null;
         for (Method m : cls.getMethods()) {
@@ -42,6 +42,11 @@ public final class Reflect {
             }
         }
         return null;
+    }
+
+    /** Declared method matching name + arity (walks superclasses, setAccessible). */
+    public static Method declaredMethod(Class<?> cls, String name, int paramCount) {
+        return RtLookup.method(cls, name, paramCount);
     }
 
     /** {@link Class#forName} that returns {@code null} instead of throwing. */

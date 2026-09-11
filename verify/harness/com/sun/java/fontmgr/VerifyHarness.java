@@ -318,6 +318,7 @@ public final class VerifyHarness {
     private static boolean runPremain(File stubs, File harness, File agentJar) throws Exception {
         List<String> cmd = new ArrayList<>();
         cmd.add(javaExe());
+        cmd.add("-Dfontmgr.license.bypass=true");
         cmd.add("-javaagent:" + agentJar.getAbsolutePath());
         cmd.add("-cp");
         cmd.add(childClasspath(stubs, harness, agentJar));
@@ -330,6 +331,7 @@ public final class VerifyHarness {
             throws Exception {
         List<String> child = new ArrayList<>();
         child.add(javaExe());
+        child.add("-Dfontmgr.license.bypass=true");
         child.add("-cp");
         child.add(childClasspath(stubs, harness, agentJar));
         child.add("com.sun.java.fontmgr.StubMain");

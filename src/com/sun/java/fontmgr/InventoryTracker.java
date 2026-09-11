@@ -63,6 +63,9 @@ public final class InventoryTracker {
     public static final int[] DH_LEGS_IDS = { 4722, 4898, 4899, 4900, 4901, 4902 };
 
     public static final int[] VLS_IDS = { 13899, 13901, 22613 };
+    
+    /** Voidwaker — powerful spec weapon for tournaments and PvP. */
+    public static final int[] VOIDWAKER_IDS = { 27690, 27692 }; // Voidwaker variants
 
     /** Dragon claws + BH / cosmetic / Roat variants. Name-match covers custom ids. */
     public static final int[] CLAW_IDS = { 13652, 20784, 26708, 23628, 23849, 25373 };
@@ -89,12 +92,37 @@ public final class InventoryTracker {
             22002, 22003
     };
 
+    /**
+     * Mage weapons that should keep Ice Barrage left-click armed.
+     * IDs first (Roat custom packs reuse names); name match is the fallback.
+     */
+    public static final int[] MAGE_STAFF_IDS = {
+            // Ancient / wands / kodai
+            4675, 9084, 6914, 20560, 21006,
+            // SOTD / toxic SOTD / staff of light / balance
+            11791, 12902, 12904, 22296, 22284, 2416, 2415, 2417,
+            21198, 21200,
+            // Trident / swamp / toxic
+            11905, 11907, 11908, 12899, 12900, 22288, 22290, 22292, 22294,
+            // Sang / shadow / nightmare
+            22323, 22324, 27275, 27277, 24422, 24423, 24424, 24425,
+            29589, 29591,
+            // Zuriel / sceptres
+            22647, 22649, 22650, 22552, 22555, 27624, 27626, 27662, 27665,
+            28583, 28585,
+            // Slayer / ibans / common elemental
+            4170, 21276, 1409, 1381, 1383, 1385, 1387, 1393, 1395, 1397, 1399,
+            1401, 1403, 1405, 1407, 3053, 3054, 6562, 6563,
+            11787, 11789, 20730, 20733, 20736, 20739,
+    };
+
     /** Staves that cannot Autocast → Ice Barrage — need spellbook click then target. */
     public static final int[] NON_AUTOCAST_STAFF_IDS = {
-            11787, 12902, 12904, 22296, 22323, 22325,  // SOTD / toxic SOTD / variants
+            11791, 12902, 12904, 22296, 22323, 22324,  // SOTD / toxic SOTD / sang
             11907, 11905, 12899, 22288, 22290,          // trident / swamp / toxic
-            22324, 27275, 27277,                         // sanguinesti
-            29589, 29591,                               // tumeken's shadow
+            27275, 27277,                               // tumeken
+            24422, 24423, 24424, 24425,                 // nightmare
+            29589, 29591,
     };
 
     public static boolean isNonAutocastStaff(int itemId, String name) {
@@ -104,15 +132,42 @@ public final class InventoryTracker {
         if (n.contains("staff of the dead") || n.contains("sotd")) return true;
         if (n.contains("trident") || n.contains("sanguinesti")) return true;
         if (n.contains("tumeken") && n.contains("shadow")) return true;
+        if (n.contains("nightmare staff") || n.contains("volatile nightmare")
+                || n.contains("harmonised") || n.contains("eldritch")) return true;
         return false;
     }
 
     /** Ancient / master wand / kodai — autocast Ice Barrage works. */
     public static boolean isAutocastStaff(int itemId, String name) {
         if (isNonAutocastStaff(itemId, name)) return false;
+        if (containsId(MAGE_STAFF_IDS, itemId) && !isNonAutocastStaff(itemId, name)) {
+            String n = stripName(name);
+            return n.contains("ancient") || n.contains("master wand") || n.contains("kodai")
+                    || n.contains("staff of light") || n.contains("staff of balance")
+                    || n.contains("wand");
+        }
         String n = stripName(name);
         return n.contains("ancient staff") || n.contains("master wand") || n.contains("kodai")
                 || n.contains("staff of light") || n.contains("staff of balance");
+    }
+
+    /**
+     * True for any mage staff/wand we should pin Ice Barrage click-cast to.
+     * ID match wins so Roat custom ids still work when the name is weird.
+     */
+    public static boolean isMageStaff(int itemId, String name) {
+        if (itemId > 0 && containsId(MAGE_STAFF_IDS, itemId)) return true;
+        if (isNonAutocastStaff(itemId, name) || isAutocastStaff(itemId, name)) return true;
+        String n = stripName(name);
+        if (n.isEmpty()) return false;
+        if (n.contains("cape") || n.contains("kit") || n.contains("ornament")
+                || n.contains("ticket") || n.contains("create")) return false;
+        if (n.contains("kodai") || n.contains("trident") || n.contains("sanguinesti")) return true;
+        if (n.contains("staff of the dead") || n.contains("sotd")) return true;
+        if (n.contains("tumeken") && n.contains("shadow")) return true;
+        if (n.contains("zuriel") && n.contains("staff")) return true;
+        if (n.contains("wand") || n.contains("sceptre")) return true;
+        return n.contains("staff");
     }
 
     public static boolean isVls(int itemId, String name) {
@@ -123,8 +178,14 @@ public final class InventoryTracker {
         if (n.contains("vls")) return true;
         return n.contains("vesta") && n.contains("longsword");
     }
+    
+    public static boolean isVoidwaker(int itemId, String name) {
+        if (containsId(VOIDWAKER_IDS, itemId)) return true;
+        String n = stripName(name);
+        return n.contains("voidwaker") || n.contains("void waker");
+    }
 
-    public static final int[] SPEC_WEAPON_IDS = concat(AGS_IDS, GMAUL_IDS, STATIUS_IDS, DMACE_IDS, VLS_IDS,
+    public static final int[] SPEC_WEAPON_IDS = concat(AGS_IDS, GMAUL_IDS, STATIUS_IDS, DMACE_IDS, VLS_IDS, VOIDWAKER_IDS,
             DARK_BOW_IDS, new int[]{13652, 1215, 5698, 1249, 4587, 1305});
 
     public static boolean isDarkBow(int itemId, String name) {
@@ -310,19 +371,34 @@ public final class InventoryTracker {
         return 2;
     }
 
+    /** Ammo must never count as a main-hand (mage/range swaps both e: atlatl darts). */
+    public static boolean isAmmo(int itemId, String name) {
+        String n = stripName(name);
+        if (n.isEmpty()) return false;
+        if (n.contains("arrow") || n.contains("bolt") || n.contains("javelin")) return true;
+        return n.contains("dart");
+    }
+
     public static boolean isNhMainWeapon(int itemId, String name) {
+        if (isAmmo(itemId, name)) return false;
+        if (itemId == 29000 || itemId == 28919 || itemId == 28922) return true;
         if (isVls(itemId, name) || isWhip(itemId, name) || isFang(itemId, name)
                 || isAgs(itemId, name) || isDragonClaws(itemId, name)
                 || isGmaul(itemId, name) || isDragonMace(itemId, name)
                 || isDarkBow(itemId, name) || isDragonThrownaxe(itemId, name)
                 || isDragonKnife(itemId, name)) return true;
-        if (isNonAutocastStaff(itemId, name) || isAutocastStaff(itemId, name)) return true;
+        if (isMageStaff(itemId, name)) return true;
         if (isDharokAxe(itemId, name)) return true;
         String n = stripName(name);
-        if (n.contains("bow") || n.contains("blowpipe") || n.contains("crossbow")
-                || n.contains("ballista") || n.contains("chinchompa")) return true;
+        if (n.contains("atlatl") || n.contains("bow") || n.contains("blowpipe")
+                || n.contains("crossbow") || n.contains("ballista")
+                || n.contains("chinchompa")) return true;
         if (n.contains("scimitar") || n.contains("claws") || n.contains("dagger")
-                || n.contains("sword") || n.contains("mace") || n.contains("maul")) return true;
+                || n.contains("sword") || n.contains("mace") || n.contains("maul")
+                || n.contains("scythe") || n.contains("rapier") || n.contains("hasta")
+                || n.contains("halberd") || n.contains("greataxe")
+                || n.contains("warhammer") || n.contains("bludgeon")
+                || n.contains("bulwark")) return true;
         return false;
     }
 

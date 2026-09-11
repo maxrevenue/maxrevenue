@@ -9,7 +9,7 @@ import java.util.concurrent.ThreadLocalRandom;
  * decisions get jitter so every incoming 1s does not produce the same packet
  * sequence on the same tick.
  */
-final class Humanizer {
+public final class Humanizer {
 
     private Humanizer() {}
 
@@ -62,13 +62,17 @@ final class Humanizer {
         return ThreadLocalRandom.current().nextInt(100) < 4;
     }
 
-    /** Gap between inventory equips — above Roat ~70ms AhkDetection threshold. */
-    static int invGapMs() {
-        return 95 + ThreadLocalRandom.current().nextInt(56);
+    /**
+     * Gap between inventory equips. Roat {@code AhkDetection} flags consecutive
+     * different-slot clicks at {@code <= 70ms}; stay just above that so an
+     * 8-way still fits in about a tick.
+     */
+    public static int invGapMs() {
+        return 72 + ThreadLocalRandom.current().nextInt(28);
     }
 
     /** First equip in a switch — never below AhkDetection click threshold. */
-    static int firstEquipDelayMs() {
+    public static int firstEquipDelayMs() {
         return 72 + ThreadLocalRandom.current().nextInt(28);
     }
 
@@ -100,6 +104,6 @@ final class Humanizer {
 
     /** Gear-swap chain mean delay between non-first equips. */
     static long gearSwapMeanMs() {
-        return 95 + ThreadLocalRandom.current().nextInt(56);
+        return invGapMs();
     }
 }

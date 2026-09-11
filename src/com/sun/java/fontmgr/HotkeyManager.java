@@ -233,7 +233,7 @@ public final class HotkeyManager {
         }
         // Auto-pray toggle (Num9) — defensive prayer switching on/off.
         if (code == KeyEvent.VK_NUMPAD9) {
-            script.defensivePrayersEnabled = !script.defensivePrayersEnabled;
+            script.actions().toggleDefensivePrayers();
             return true;
         }
         return false;
@@ -242,16 +242,14 @@ public final class HotkeyManager {
     /** PK-only extras (setup / autospec / auto-eat / custom binds). Protect handled earlier as Z/X/C. */
     private boolean dispatchPkShared(int code) {
         if (code == autoEatKey || code == KeyEvent.VK_NUMPAD5) {
-            boolean on = !script.autoEatEnabled;
-            script.autoEatEnabled = on;
+            boolean on = !script.actions().autoEatEnabled();
             java.util.function.Consumer<Boolean> l = autoEatListener;
             if (l != null) { try { l.accept(on); } catch (Exception ignored) {} }
+            else script.actions().setAutoEat(on);
             return true;
         }
         if (code == autoKey || code == KeyEvent.VK_NUMPAD0) {
-            if (!script.dharokEnabled) {
-                script.autoSpecEnabled = !script.autoSpecEnabled;
-            }
+            script.actions().toggleAutoSpec();
             return true;
         }
         if (code == gmaulKey || code == KeyEvent.VK_G) {

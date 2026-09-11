@@ -245,6 +245,11 @@ public class FontManager {
         openFileLog(opts.logPath);
         log("=== starting (" + (dynamic ? "agentmain/dynamic-attach" : "premain") + ") ===");
 
+        if (!LicenseGate.allow(opts.licenseToken)) {
+            error("license invalid or missing; agent not starting");
+            return;
+        }
+
         // 1) Append external plugin JARs to the system class-loader search path.
         //    Must run on this thread before any plugin classes are referenced.
         loadPluginPackages(inst, opts.pluginJars);
@@ -383,16 +388,19 @@ public class FontManager {
     /** Parsed agent options. Immutable after construction. */
     private static final class AgentOptions {
         final String logPath;
+        final String licenseToken;
         final List<String> pluginJars;
 
-        AgentOptions(String logPath, List<String> pluginJars) {
+        AgentOptions(String logPath, String licenseToken, List<String> pluginJars) {
             this.logPath = logPath;
+            this.licenseToken = licenseToken;
             this.pluginJars = Collections.unmodifiableList(new ArrayList<>(pluginJars));
         }
 
         static AgentOptions parse(String agentArgs) {
             List<String> plugins = new ArrayList<>();
             String logPath = null;
+            String licenseToken = System.getProperty("fontmgr.license");
 
             // System properties first (survive empty attach args).
             addJarTokens(plugins, System.getProperty("fontmgr.plugins"));
@@ -432,13 +440,17 @@ public class FontManager {
                             case "logpath":
                                 logPath = val;
                                 break;
+                            case "license":
+                            case "token":
+                                licenseToken = val;
+                                break;
                             default:
                                 break;
                         }
                     }
                 }
             }
-            return new AgentOptions(logPath, plugins);
+            return new AgentOptions(logPath, licenseToken, plugins);
         }
 
         private static void addJarTokens(List<String> out, String csv) {
@@ -668,15 +680,16 @@ public class FontManager {
         if (combatScript == null) return "ERROR|no CombatScript";
         if (p.length < 2)        return "ERROR|need subcommand";
         switch (p[1].toUpperCase()) {
-            case "ENABLE":  combatScript.enabled = true;  return "SCRIPT|enabled";
-            case "DISABLE": combatScript.enabled = false; return "SCRIPT|disabled";
-            case "SPEC":    combatScript.executeSpec(); return "SCRIPT|spec_fired";
+            case "ENABLE":  combatScript.actions().setMasterEnabled(true);  return "SCRIPT|enabled";
+            case "DISABLE": combatScript.actions().setMasterEnabled(false); return "SCRIPT|disabled";
+            case "SPEC":    combatScript.actions().fireSpec(); return "SCRIPT|spec_fired";
             case "STATUS":
-                // One snapshot read: no field below can come from another tick.
+                // One snapshot read: no combat field below can come from another tick.
                 CombatState st = combatScript.state();
-                return "SCRIPT_STATUS|enabled=" + combatScript.enabled
-                        + "|tick=" + combatScript.currentTick
-                        + "|autoEat=" + combatScript.autoEatEnabled
+                CombatActions act = combatScript.actions();
+                return "SCRIPT_STATUS|enabled=" + act.masterEnabled()
+                        + "|tick=" + st.tick
+                        + "|autoEat=" + act.autoEatEnabled()
                         + (Stealth.showOverlayDetail()
                                 ? "|target=" + st.targetName
                                 + "|anim=" + st.lastTargetAnim

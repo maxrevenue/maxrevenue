@@ -1,0 +1,4 @@
+# Copy to .dev.vars for `npx wrangler dev` (never commit .dev.vars).
+# TOKEN_SECRET must match LicenseToken.HMAC_SECRET in the Java client.
+ADMIN_SECRET=change-me-local-admin
+TOKEN_SECRET=RoatzLicense-v1-8f3c2a91e6b74d0a9c15f28e4b7d63a0

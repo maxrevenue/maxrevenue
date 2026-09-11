@@ -10,7 +10,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Consolidated always-on-top PK HUD.
+ * Consolidated always-on-top HUD.
  *
  * One panel for everything:
  *   PK Combat — vitals, target, spec combo + triggers, eat thresholds, protection
@@ -24,24 +24,33 @@ import java.util.concurrent.TimeUnit;
  */
 public class OverlayUI {
 
-    private static final Color BG_DARK       = new Color(20, 22, 26, 235);
-    private static final Color CARD_BG       = new Color(30, 33, 38, 220);
-    private static final Color TITLE_BG      = new Color(38, 42, 48);
-    private static final Color FG_BRIGHT     = new Color(240, 242, 245);
-    private static final Color FG_MUTED      = new Color(150, 155, 165);
-    private static final Color ACCENT_BLUE   = new Color(85, 145, 255);
-    private static final Color ACCENT_GOLD   = new Color(255, 195, 60);
-    private static final Color ACCENT_GREEN  = new Color(65, 195, 95);
-    private static final Color ACCENT_RED    = new Color(235, 75, 75);
-    private static final Color ACCENT_PURPLE = new Color(160, 110, 240);
-    private static final Color ACCENT_ORANGE = new Color(255, 140, 60);
-    private static final Color BTN_BG        = new Color(42, 45, 52);
-    private static final Color BTN_BORDER    = new Color(60, 65, 75);
+    //
+    // Palette comes from the shared com.sun.java.fontmgr.Theme so the HUD and the
+    // launcher cannot drift apart. The HUD floats over the game, so its surfaces
+    // are the shared colours with alpha applied here rather than in Theme.
+    private static final Color BG_DARK       = Theme.withAlpha(Theme.BG_DARK, 235);
+    private static final Color CARD_BG       = Theme.withAlpha(Theme.CARD_BG, 220);
+    private static final Color TITLE_BG      = Theme.TITLE_BG;
+    private static final Color FG_BRIGHT     = Theme.FG_BRIGHT;
+    private static final Color FG_MUTED      = Theme.FG_MUTED;
+    private static final Color ACCENT_BLUE   = Theme.ACCENT_BLUE;
+    private static final Color ACCENT_GOLD   = Theme.ACCENT_GOLD;
+    private static final Color ACCENT_GREEN  = Theme.ACCENT_GREEN;
+    private static final Color ACCENT_RED    = Theme.ACCENT_RED;
+    private static final Color ACCENT_PURPLE = Theme.ACCENT_PURPLE;
+    private static final Color ACCENT_ORANGE = Theme.ACCENT_ORANGE;
+    private static final Color BTN_BG        = Theme.BTN_BG;
+    private static final Color BTN_BORDER    = Theme.BTN_BORDER;
 
     private final CombatScript script;
     private final JFrame frame;
     private final SmoothBar hpBar, prayBar, specBar;
-    private final JLabel targetNameLabel, targetHpLabel, combatStatusLabel, actionTickerLabel;
+    private final JLabel targetNameLabel, targetHpLabel, actionTickerLabel;
+    /**
+     * Pro-figures strip under the target line: what the opponent is actually
+     * holding ({@link OpponentLoadout} from #1), then the decision chips.
+     */
+    private final JLabel targetWeaponLabel, fightStateLabel, koLabel, specReadyLabel;
     private final JLabel dhAxeStatusLabel, dhMaxHitLabel, dhSwapStatusLabel;
     private final JToggleButton masterToggle;
 
@@ -58,6 +67,7 @@ public class OverlayUI {
 
     // PK toggles
     private JToggleButton pkAutoSpecBtn, pkPunishToggle, pkVengToggle, pkDefPrayToggle;
+    private JToggleButton pkGearPrayToggle;
     private JToggleButton pkComboEatToggle, pkProtectItemToggle;
     private JToggleButton pkAutoEatToggle, dhAutoEatToggle;
     private JButton pkSpecModeBtn;
@@ -74,6 +84,8 @@ public class OverlayUI {
     // Settings / advanced
     private javax.swing.JTextField tfAnimId, tfDmgMin, tfAgsMin, tfDmaceMin;
     private JToggleButton cbAnimTrig, cbDmgTrig;
+    /** Preset buttons, one per {@link Presets.Mode}; restyled each tick. */
+    private JButton[] presetBtns;
 
     private int activeTab = 0;
     private boolean collapsed = false;
@@ -107,7 +119,7 @@ public class OverlayUI {
         frame.setUndecorated(true);
         frame.setAlwaysOnTop(true);
         frame.setType(Window.Type.UTILITY);
-        frame.setTitle("Roat PKz HUD");
+        frame.setTitle(Product.NAME + " " + Product.VERSION);
         frame.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
 
         RoundedPanel root = new RoundedPanel(14, BG_DARK);
@@ -119,10 +131,14 @@ public class OverlayUI {
         titleBar.setOpaque(true);
         titleBar.setBackground(TITLE_BG);
         titleBar.setBorder(new EmptyBorder(4, 8, 4, 8));
-        JLabel appTitle = new JLabel("⚔ PK HUD");
+        JPanel brand = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 0));
+        brand.setOpaque(false);
+        JLabel appTitle = new JLabel(Product.NAME);
         appTitle.setForeground(ACCENT_GOLD);
         appTitle.setFont(appTitle.getFont().deriveFont(Font.BOLD, 11.5f));
-        titleBar.add(appTitle, BorderLayout.WEST);
+        brand.add(appTitle);
+        brand.add(createLabel("v" + Product.VERSION, FG_MUTED, 9f, false));
+        titleBar.add(brand, BorderLayout.WEST);
 
         JPanel titleRight = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 0));
         titleRight.setOpaque(false);
@@ -134,14 +150,14 @@ public class OverlayUI {
         collapseBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         collapseBtn.addActionListener(e -> toggleCollapse());
         titleRight.add(collapseBtn);
-        masterToggle = new JToggleButton(script.enabled ? "BOT ON" : "BOT OFF");
-        masterToggle.setSelected(script.enabled);
+        masterToggle = new JToggleButton(script.actions().masterEnabled() ? "LIVE" : "ARMED");
+        masterToggle.setSelected(script.actions().masterEnabled());
         masterToggle.setFocusPainted(false);
         masterToggle.setFont(masterToggle.getFont().deriveFont(Font.BOLD, 10f));
-        styleMasterToggle(masterToggle, script.enabled);
+        styleMasterToggle(masterToggle, script.actions().masterEnabled());
         masterToggle.addActionListener(e -> {
-            script.enabled = masterToggle.isSelected();
-            styleMasterToggle(masterToggle, script.enabled);
+            script.actions().setMasterEnabled(masterToggle.isSelected());
+            styleMasterToggle(masterToggle, script.actions().masterEnabled());
             saveConfig();
         });
         titleRight.add(masterToggle);
@@ -169,7 +185,12 @@ public class OverlayUI {
         specBar = new SmoothBar("SPEC", ACCENT_GOLD, ACCENT_GOLD);
         targetNameLabel   = createLabel("Target: -", FG_BRIGHT, 11f, true);
         targetHpLabel     = createLabel("HP: -", ACCENT_GOLD, 11f, true);
-        combatStatusLabel = createLabel("Status: IDLE", FG_MUTED, 10.5f, false);
+        targetWeaponLabel = createLabel("-", FG_MUTED, 9.5f, false);
+        fightStateLabel   = createLabel("Idle", FG_MUTED, 10f, true);
+        koLabel           = createLabel("KO range", ACCENT_RED, 10f, true);
+        specReadyLabel    = createLabel("Spec ready", ACCENT_GOLD, 10f, true);
+        koLabel.setVisible(false);
+        specReadyLabel.setVisible(false);
         actionTickerLabel = createLabel("Action: Ready", ACCENT_BLUE, 10f, false);
         dhAxeStatusLabel  = createLabel("Greataxe: READY", ACCENT_GREEN, 10.5f, true);
         dhMaxHitLabel     = createLabel("Axe Max Hit: -", ACCENT_GOLD, 10.5f, true);
@@ -183,14 +204,13 @@ public class OverlayUI {
         vitals.add(specBar);
 
         RoundedPanel targetP = new RoundedPanel(8, CARD_BG);
-        targetP.setLayout(new BorderLayout(6, 2));
+        targetP.setLayout(new BoxLayout(targetP, BoxLayout.Y_AXIS));
         targetP.setBorder(new EmptyBorder(6, 8, 6, 8));
-        JPanel tt = new JPanel(new BorderLayout(4, 0)); tt.setOpaque(false);
-        tt.add(targetNameLabel, BorderLayout.WEST); tt.add(targetHpLabel, BorderLayout.EAST);
-        targetP.add(tt, BorderLayout.NORTH);
-        JPanel tb = new JPanel(new BorderLayout(4, 0)); tb.setOpaque(false);
-        tb.add(combatStatusLabel, BorderLayout.WEST);
-        targetP.add(tb, BorderLayout.SOUTH);
+        targetP.add(splitRow(targetNameLabel, targetHpLabel));
+        targetP.add(Box.createVerticalStrut(1));
+        targetP.add(splitRow(targetWeaponLabel, null));
+        targetP.add(Box.createVerticalStrut(3));
+        targetP.add(chipRow(fightStateLabel, koLabel, specReadyLabel));
 
         JPanel north = new JPanel();
         north.setLayout(new BoxLayout(north, BoxLayout.Y_AXIS));
@@ -266,24 +286,90 @@ public class OverlayUI {
     /** Fight = the few combat switches you actually use. */
     private JPanel buildFightPage() {
         JPanel page = vbox();
+        page.add(buildPresetRow());
+        page.add(Box.createVerticalStrut(4));
         page.add(buildPkPage());
         page.add(Box.createVerticalStrut(3));
 
-        staffLcToggle = miniToggle("Staff = L-Click Barrage", script.staffLcCast,
+        staffLcToggle = miniToggle("Staff = L-Click Barrage", script.actions().staffLeftClickCast(),
                 "While a staff/wand is equipped (by item id), Ice Barrage stays left-click armed");
         staffLcToggle.setAlignmentX(Component.LEFT_ALIGNMENT);
         staffLcToggle.setMaximumSize(new Dimension(Integer.MAX_VALUE, 26));
         staffLcToggle.addActionListener(e -> {
-            script.staffLcCast = staffLcToggle.isSelected();
-            styleMiniToggle(staffLcToggle, script.staffLcCast);
+            script.actions().setStaffLeftClickCast(staffLcToggle.isSelected());
+            styleMiniToggle(staffLcToggle, script.actions().staffLeftClickCast());
             saveConfig();
         });
         page.add(staffLcToggle);
         page.add(Box.createVerticalStrut(3));
-        page.add(stepper("Auto-spec on your hit ≥ (dmg)", script.damageTriggerMin, 1, 99, 5,
-                v -> { script.damageTriggerMin = v; saveConfig(); }));
+        page.add(stepper("Auto-spec on your hit ≥ (dmg)", script.actions().damageTriggerMin(), 1, 99, 5,
+                v -> { script.actions().setDamageTriggerMin(v); saveConfig(); }));
         page.add(Box.createVerticalStrut(3));
         return page;
+    }
+
+    /**
+     * Quiz-free starting points (#4). Three buttons that flip existing toggles;
+     * the one whose flags still all hold is highlighted, so the row never claims a
+     * preset is active after the user has changed something.
+     */
+    private JPanel buildPresetRow() {
+        JPanel wrap = new JPanel();
+        wrap.setLayout(new BoxLayout(wrap, BoxLayout.Y_AXIS));
+        wrap.setOpaque(false);
+        wrap.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        JLabel title = createLabel("Preset", FG_BRIGHT, 10.5f, true);
+        title.setAlignmentX(Component.LEFT_ALIGNMENT);
+        wrap.add(title);
+
+        Presets.Mode[] modes = Presets.Mode.values();
+        JPanel row = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 2));
+        row.setOpaque(false);
+        row.setAlignmentX(Component.LEFT_ALIGNMENT);
+        presetBtns = new JButton[modes.length];
+        for (int i = 0; i < modes.length; i++) {
+            final Presets.Mode mode = modes[i];
+            JButton b = new JButton(mode.label);
+            b.setFocusPainted(false);
+            b.setFont(b.getFont().deriveFont(Font.BOLD, 10f));
+            b.setToolTipText(mode.hint + " — sets the toggles below; change anything and it un-highlights");
+            b.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+            b.addActionListener(e -> {
+                Presets.apply(mode, script.actions());
+                saveConfig();
+                stylePresetBtns();
+            });
+            presetBtns[i] = b;
+            row.add(b);
+        }
+        wrap.add(row);
+
+        JLabel hint = createLabel("Sets the toggles below. Your own settings are kept until you click one.",
+                FG_MUTED, 9f, false);
+        hint.setAlignmentX(Component.LEFT_ALIGNMENT);
+        wrap.add(hint);
+
+        wrap.setMaximumSize(new Dimension(Integer.MAX_VALUE, wrap.getPreferredSize().height));
+        stylePresetBtns();
+        return wrap;
+    }
+
+    /** Highlights the preset whose flags currently all hold; none are highlighted by default. */
+    private void stylePresetBtns() {
+        if (presetBtns == null) return;
+        Presets.Mode activePreset = Presets.active(script.actions());
+        Presets.Mode[] modes = Presets.Mode.values();
+        for (int i = 0; i < presetBtns.length && i < modes.length; i++) {
+            JButton b = presetBtns[i];
+            if (b == null) continue;
+            boolean on = modes[i] == activePreset;
+            b.setBackground(on ? ACCENT_GOLD : BTN_BG);
+            b.setForeground(on ? Theme.ON_ACCENT : FG_MUTED);
+            b.setBorder(BorderFactory.createCompoundBorder(
+                    BorderFactory.createLineBorder(on ? ACCENT_GOLD : BTN_BORDER),
+                    new EmptyBorder(4, 9, 4, 9)));
+        }
     }
 
     private JPanel buildPkPage() {
@@ -301,20 +387,22 @@ public class OverlayUI {
         page.add(pkSpecModeBtn);
         page.add(Box.createVerticalStrut(4));
 
-        pkAutoSpecBtn = miniToggle("Auto Spec", script.autoSpecEnabled, "Dump spec with target + energy");
-        pkAutoSpecBtn.addActionListener(e -> { script.autoSpecEnabled = pkAutoSpecBtn.isSelected(); styleMiniToggle(pkAutoSpecBtn, script.autoSpecEnabled); saveConfig(); });
-        pkPunishToggle = miniToggle("Eat Punish", script.eatPunishEnabled, "Spec punish when they eat");
-        pkPunishToggle.addActionListener(e -> { script.eatPunishEnabled = pkPunishToggle.isSelected(); styleMiniToggle(pkPunishToggle, script.eatPunishEnabled); saveConfig(); });
-        pkVengToggle = miniToggle("Auto Veng", script.autoVengEnabled, "Vengeance on engage");
-        pkVengToggle.addActionListener(e -> { script.autoVengEnabled = pkVengToggle.isSelected(); styleMiniToggle(pkVengToggle, script.autoVengEnabled); saveConfig(); });
-        pkDefPrayToggle = miniToggle("Overheads", script.defensivePrayersEnabled, "Z/X/C protect");
-        pkDefPrayToggle.addActionListener(e -> { script.defensivePrayersEnabled = pkDefPrayToggle.isSelected(); styleMiniToggle(pkDefPrayToggle, script.defensivePrayersEnabled); saveConfig(); });
-        pkComboEatToggle = miniToggle("Combo Eat", script.comboEatEnabled, "Auto combo-eat below threshold");
-        pkComboEatToggle.addActionListener(e -> { script.comboEatEnabled = pkComboEatToggle.isSelected(); styleMiniToggle(pkComboEatToggle, script.comboEatEnabled); saveConfig(); });
-        pkAutoEatToggle = miniToggle("Auto Eat", script.autoEatEnabled, "Master switch for ALL automatic eating (Num5). Off = only your 1-4 keys eat");
+        pkAutoSpecBtn = miniToggle("Auto Spec", script.actions().autoSpecEnabled(), "Dump spec with target + energy");
+        pkAutoSpecBtn.addActionListener(e -> { script.actions().setAutoSpec(pkAutoSpecBtn.isSelected()); styleMiniToggle(pkAutoSpecBtn, script.actions().autoSpecEnabled()); saveConfig(); });
+        pkPunishToggle = miniToggle("Eat Punish", script.actions().eatPunishEnabled(), "Spec punish when they eat");
+        pkPunishToggle.addActionListener(e -> { script.actions().setEatPunish(pkPunishToggle.isSelected()); styleMiniToggle(pkPunishToggle, script.actions().eatPunishEnabled()); saveConfig(); });
+        pkVengToggle = miniToggle("Auto Veng", script.actions().autoVengEnabled(), "Vengeance on engage");
+        pkVengToggle.addActionListener(e -> { script.actions().setAutoVeng(pkVengToggle.isSelected()); styleMiniToggle(pkVengToggle, script.actions().autoVengEnabled()); saveConfig(); });
+        pkDefPrayToggle = miniToggle("Overheads", script.actions().defensivePrayersEnabled(), "Z/X/C protect");
+        pkDefPrayToggle.addActionListener(e -> { script.actions().setDefensivePrayers(pkDefPrayToggle.isSelected()); styleMiniToggle(pkDefPrayToggle, script.actions().defensivePrayersEnabled()); saveConfig(); });
+        pkGearPrayToggle = miniToggle("Fast Overheads", script.actions().gearCorroboratedDefPrayer(), "Trust a weapon switch the tick their armour also changes (skips the 2-tick wait). Off = old 2-tick behaviour");
+        pkGearPrayToggle.addActionListener(e -> { script.actions().setGearCorroboratedDefPrayer(pkGearPrayToggle.isSelected()); styleMiniToggle(pkGearPrayToggle, script.actions().gearCorroboratedDefPrayer()); saveConfig(); });
+        pkComboEatToggle = miniToggle("Combo Eat", script.actions().comboEatEnabled(), "Auto combo-eat below threshold");
+        pkComboEatToggle.addActionListener(e -> { script.actions().setComboEat(pkComboEatToggle.isSelected()); styleMiniToggle(pkComboEatToggle, script.actions().comboEatEnabled()); saveConfig(); });
+        pkAutoEatToggle = miniToggle("Auto Eat", script.actions().autoEatEnabled(), "Master switch for ALL automatic eating (Num5). Off = only your 1-4 keys eat");
         pkAutoEatToggle.addActionListener(e -> { setAutoEat(pkAutoEatToggle.isSelected()); });
-        pkProtectItemToggle = miniToggle("Protect Item", script.autoProtectItemEnabled, "Auto protect item in danger zone");
-        pkProtectItemToggle.addActionListener(e -> { script.autoProtectItemEnabled = pkProtectItemToggle.isSelected(); styleMiniToggle(pkProtectItemToggle, script.autoProtectItemEnabled); saveConfig(); });
+        pkProtectItemToggle = miniToggle("Protect Item", script.actions().protectItemEnabled(), "Auto protect item in danger zone");
+        pkProtectItemToggle.addActionListener(e -> { script.actions().setProtectItem(pkProtectItemToggle.isSelected()); styleMiniToggle(pkProtectItemToggle, script.actions().protectItemEnabled()); saveConfig(); });
 
         JPanel grid = new JPanel(new GridLayout(4, 2, 4, 4));
         grid.setOpaque(false);
@@ -322,7 +410,7 @@ public class OverlayUI {
         grid.add(pkAutoSpecBtn); grid.add(pkVengToggle);
         grid.add(pkComboEatToggle); grid.add(pkAutoEatToggle);
         grid.add(pkDefPrayToggle); grid.add(pkProtectItemToggle);
-        grid.add(pkPunishToggle);
+        grid.add(pkPunishToggle); grid.add(pkGearPrayToggle);
         page.add(grid);
         page.add(Box.createVerticalStrut(4));
 
@@ -335,8 +423,8 @@ public class OverlayUI {
     private JPanel buildNhPage() {
         JPanel page = vbox();
         
-        // 🔥 NH V2 - Clean & Reliable System
-        JLabel nhv2Title = createLabel("🔥 NH V2 - Clean & Reliable", ACCENT_GOLD, 12f, true);
+        // NH V2 — auto barrage, prayers, walk-under
+        JLabel nhv2Title = createLabel("NH V2", ACCENT_GOLD, 12f, true);
         nhv2Title.setAlignmentX(Component.LEFT_ALIGNMENT);
         page.add(nhv2Title);
         page.add(Box.createVerticalStrut(6));
@@ -392,10 +480,10 @@ public class OverlayUI {
             saveConfig();
         });
         
-        JToggleButton protItemToggle = miniToggle("Protect Item", script.autoProtectItemEnabled, "Auto protect item in PvP");
+        JToggleButton protItemToggle = miniToggle("Protect Item", script.actions().protectItemEnabled(), "Auto protect item in PvP");
         protItemToggle.addActionListener(e -> {
-            script.autoProtectItemEnabled = protItemToggle.isSelected();
-            styleMiniToggle(protItemToggle, script.autoProtectItemEnabled);
+            script.actions().setProtectItem(protItemToggle.isSelected());
+            styleMiniToggle(protItemToggle, script.actions().protectItemEnabled());
             saveConfig();
         });
         
@@ -408,13 +496,13 @@ public class OverlayUI {
         page.add(Box.createVerticalStrut(4));
 
         // Staff = left-click Ice Barrage (never staff-bash while a staff is on).
-        JToggleButton staffLcToggle = miniToggle("Staff = L-Click Barrage", script.staffLcCast,
+        JToggleButton staffLcToggle = miniToggle("Staff = L-Click Barrage", script.actions().staffLeftClickCast(),
                 "While a staff/wand is equipped (by item id), Ice Barrage stays left-click armed");
         staffLcToggle.setAlignmentX(Component.LEFT_ALIGNMENT);
         staffLcToggle.setMaximumSize(new Dimension(Integer.MAX_VALUE, 26));
         staffLcToggle.addActionListener(e -> {
-            script.staffLcCast = staffLcToggle.isSelected();
-            styleMiniToggle(staffLcToggle, script.staffLcCast);
+            script.actions().setStaffLeftClickCast(staffLcToggle.isSelected());
+            styleMiniToggle(staffLcToggle, script.actions().staffLeftClickCast());
             saveConfig();
         });
         page.add(staffLcToggle);
@@ -459,12 +547,12 @@ public class OverlayUI {
         page.add(Box.createVerticalStrut(6));
         
         // KO HP — auto NH loop only. Swapper-driven NH ignores this.
-        page.add(stepper("KO HP (auto melee switch)", script.nhKoHp, 1, 99, 1,
-                v -> { script.nhKoHp = v; saveConfig(); }));
+        page.add(stepper("KO HP (auto melee switch)", script.actions().nhKoHp(), 1, 99, 1,
+                v -> { script.actions().setNhKoHp(v); saveConfig(); }));
         page.add(Box.createVerticalStrut(8));
         
         // Info
-        page.add(infoLine("🔥 NH V2: Reliable ice barrage + smart prayers + auto walk-under"));
+        page.add(infoLine("NH V2: ice barrage + smart prayers + auto walk-under"));
         page.add(infoLine("Cycle: Freeze → Range → Melee KO"));
         page.add(infoLine("Set gear in Swapper → NH Loadouts"));
         page.add(infoLine("A/S/D eat · Space ice · T tank · Z/X/C overheads"));
@@ -485,18 +573,14 @@ public class OverlayUI {
         page.add(card);
         page.add(Box.createVerticalStrut(6));
 
-        dhModeToggle = miniToggle(script.dharokEnabled ? "DH MODE: ACTIVE" : "DH MODE: OFF", script.dharokEnabled, "Low HP greataxe + 1-tick whip/def");
+        dhModeToggle = miniToggle(script.actions().dharokEnabled() ? "DH MODE: ACTIVE" : "DH MODE: OFF", script.actions().dharokEnabled(), "Low HP greataxe + 1-tick whip/def");
         dhModeToggle.setAlignmentX(Component.LEFT_ALIGNMENT);
         dhModeToggle.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
         dhModeToggle.addActionListener(e -> {
-            script.dharokEnabled = dhModeToggle.isSelected();
-            dhModeToggle.setText(script.dharokEnabled ? "DH MODE: ACTIVE" : "DH MODE: OFF");
-            styleMiniToggle(dhModeToggle, script.dharokEnabled);
-            if (script.dharokEnabled) {
-                script.enabled = false; script.comboEatEnabled = false;
-                script.dharokAutoEat = false; script.autoSpecEnabled = false;
-                script.dharokUseOrb = false; script.dharokAutoStack = false;
-                script.eatPunishEnabled = true; script.autoVengEnabled = true;
+            script.actions().setDharokEnabled(dhModeToggle.isSelected());
+            dhModeToggle.setText(script.actions().dharokEnabled() ? "DH MODE: ACTIVE" : "DH MODE: OFF");
+            styleMiniToggle(dhModeToggle, script.actions().dharokEnabled());
+            if (script.actions().dharokEnabled()) {
                 masterToggle.setSelected(false); styleMasterToggle(masterToggle, false);
                 if (dhPunishToggle != null) { dhPunishToggle.setSelected(true); styleMiniToggle(dhPunishToggle, true); }
                 if (dhVengToggle != null) { dhVengToggle.setSelected(true); styleMiniToggle(dhVengToggle, true); }
@@ -506,11 +590,11 @@ public class OverlayUI {
         page.add(dhModeToggle);
         page.add(Box.createVerticalStrut(4));
 
-        dhPunishToggle = miniToggle("Eat Punish", script.eatPunishEnabled, "Gmaul punish on eat");
-        dhPunishToggle.addActionListener(e -> { script.eatPunishEnabled = dhPunishToggle.isSelected(); styleMiniToggle(dhPunishToggle, script.eatPunishEnabled); saveConfig(); });
-        dhVengToggle = miniToggle("Auto Veng", script.autoVengEnabled, "Vengeance on engage");
-        dhVengToggle.addActionListener(e -> { script.autoVengEnabled = dhVengToggle.isSelected(); styleMiniToggle(dhVengToggle, script.autoVengEnabled); saveConfig(); });
-        dhAutoEatToggle = miniToggle("Auto Eat", script.autoEatEnabled, "Master switch for ALL automatic eating (Num5). Turn OFF to stay low HP for the greataxe");
+        dhPunishToggle = miniToggle("Eat Punish", script.actions().eatPunishEnabled(), "Gmaul punish on eat");
+        dhPunishToggle.addActionListener(e -> { script.actions().setEatPunish(dhPunishToggle.isSelected()); styleMiniToggle(dhPunishToggle, script.actions().eatPunishEnabled()); saveConfig(); });
+        dhVengToggle = miniToggle("Auto Veng", script.actions().autoVengEnabled(), "Vengeance on engage");
+        dhVengToggle.addActionListener(e -> { script.actions().setAutoVeng(dhVengToggle.isSelected()); styleMiniToggle(dhVengToggle, script.actions().autoVengEnabled()); saveConfig(); });
+        dhAutoEatToggle = miniToggle("Auto Eat", script.actions().autoEatEnabled(), "Master switch for ALL automatic eating (Num5). Turn OFF to stay low HP for the greataxe");
         dhAutoEatToggle.setAlignmentX(Component.LEFT_ALIGNMENT);
         dhAutoEatToggle.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
         dhAutoEatToggle.addActionListener(e -> setAutoEat(dhAutoEatToggle.isSelected()));
@@ -532,24 +616,24 @@ public class OverlayUI {
 
     private JPanel buildSettingsPage() {
         JPanel page = vbox();
-        cbAnimTrig = miniToggle("Anim Trigger", script.animTriggerEnabled, "Spec on target animation");
-        cbAnimTrig.addActionListener(e -> { script.animTriggerEnabled = cbAnimTrig.isSelected(); styleMiniToggle(cbAnimTrig, script.animTriggerEnabled); saveConfig(); });
-        cbDmgTrig = miniToggle("Damage Trigger", script.damageTriggerEnabled, "Spec on incoming damage");
-        cbDmgTrig.addActionListener(e -> { script.damageTriggerEnabled = cbDmgTrig.isSelected(); styleMiniToggle(cbDmgTrig, script.damageTriggerEnabled); saveConfig(); });
+        cbAnimTrig = miniToggle("Anim Trigger", script.actions().animTriggerEnabled(), "Spec on target animation");
+        cbAnimTrig.addActionListener(e -> { script.actions().setAnimTrigger(cbAnimTrig.isSelected()); styleMiniToggle(cbAnimTrig, script.actions().animTriggerEnabled()); saveConfig(); });
+        cbDmgTrig = miniToggle("Damage Trigger", script.actions().damageTriggerEnabled(), "Spec on incoming damage");
+        cbDmgTrig.addActionListener(e -> { script.actions().setDamageTrigger(cbDmgTrig.isSelected()); styleMiniToggle(cbDmgTrig, script.actions().damageTriggerEnabled()); saveConfig(); });
 
         page.add(cbAnimTrig);
-        page.add(stepper("Anim ID", script.animTriggerAnim, 1, 9999, 1,
-                v -> { script.animTriggerAnim = v; saveConfig(); }));
+        page.add(stepper("Anim ID", script.actions().animTriggerAnim(), 1, 9999, 1,
+                v -> { script.actions().setAnimTriggerAnim(v); saveConfig(); }));
         page.add(Box.createVerticalStrut(3));
         page.add(cbDmgTrig);
-        page.add(stepper("Min damage", script.damageTriggerMin, 1, 99, 1,
-                v -> { script.damageTriggerMin = v; saveConfig(); }));
+        page.add(stepper("Min damage", script.actions().damageTriggerMin(), 1, 99, 1,
+                v -> { script.actions().setDamageTriggerMin(v); saveConfig(); }));
         page.add(Box.createVerticalStrut(3));
-        page.add(stepper("AGS min spec %", script.agsMinSpecPct, 0, 100, 5,
-                v -> { script.agsMinSpecPct = v; saveConfig(); }));
+        page.add(stepper("AGS min spec %", script.actions().agsMinSpecPct(), 0, 100, 5,
+                v -> { script.actions().setAgsMinSpecPct(v); saveConfig(); }));
         page.add(Box.createVerticalStrut(3));
-        page.add(stepper("DMace min spec %", script.dmaceMinSpecPct, 0, 100, 5,
-                v -> { script.dmaceMinSpecPct = v; saveConfig(); }));
+        page.add(stepper("DMace min spec %", script.actions().dmaceMinSpecPct(), 0, 100, 5,
+                v -> { script.actions().setDmaceMinSpecPct(v); saveConfig(); }));
         page.add(Box.createVerticalStrut(4));
         page.add(infoLine("Anim Trigger: dump spec when target plays a spec animation."));
         page.add(infoLine("Damage Trigger: dump spec when you take a hit >= min damage."));
@@ -558,6 +642,62 @@ public class OverlayUI {
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
+
+    /** Left/right row for the target card. Either side may be null. */
+    private static JPanel splitRow(JComponent west, JComponent east) {
+        JPanel p = new JPanel(new BorderLayout(6, 0));
+        p.setOpaque(false);
+        p.setAlignmentX(Component.LEFT_ALIGNMENT);
+        if (west != null) p.add(west, BorderLayout.WEST);
+        if (east != null) p.add(east, BorderLayout.EAST);
+        // BoxLayout children default to an unbounded max size and would stretch;
+        // pin the height to the natural one, as the other vbox() children do.
+        p.setMaximumSize(new Dimension(Integer.MAX_VALUE, p.getPreferredSize().height));
+        return p;
+    }
+
+    /** Left-aligned decision chips; only the chips that apply are visible. */
+    private static JPanel chipRow(JComponent... chips) {
+        JPanel p = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
+        p.setOpaque(false);
+        p.setAlignmentX(Component.LEFT_ALIGNMENT);
+        for (JComponent c : chips) p.add(c);
+        p.setMaximumSize(new Dimension(Integer.MAX_VALUE, p.getPreferredSize().height));
+        return p;
+    }
+
+    /**
+     * "Abyssal whip · melee" straight off the per-tick {@link OpponentLoadout},
+     * or "—" when the opponent's gear is not readable yet.
+     */
+    private static String opponentLine(CombatState st) {
+        String name = displayName(st.opponentLoadout != null
+                ? st.opponentLoadout.weaponName() : null);
+        if (name.isEmpty()) return "—";
+        return name + " · " + styleWord(st.opponentWeaponStyle());
+    }
+
+    /** Product language for a style — never the enum name. */
+    private static String styleWord(AnimationDb.AttackStyle style) {
+        if (style == null) return "unknown";
+        switch (style) {
+            case MELEE:  return "melee";
+            case RANGED: return "range";
+            case MAGIC:  return "mage";
+            default:     return "unknown";
+        }
+    }
+
+    /**
+     * Item names arrive with the client's colour tags attached and can be very
+     * long on custom servers; strip the markup and cap the width so the target
+     * card cannot be stretched by an opponent's gear.
+     */
+    private static String displayName(String raw) {
+        if (raw == null) return "";
+        String s = raw.replaceAll("<[^>]*>", "").replaceAll("@[^@]*@", "").trim();
+        return s.length() > 26 ? s.substring(0, 26) + "…" : s;
+    }
 
     private JPanel vbox() {
         JPanel p = new JPanel();
@@ -621,7 +761,7 @@ public class OverlayUI {
     }
 
     private void styleMasterToggle(JToggleButton b, boolean on) {
-        b.setText(on ? "BOT ON" : "BOT OFF");
+        b.setText(on ? "LIVE" : "ARMED");
         b.setBackground(on ? new Color(40, 140, 60) : new Color(50, 53, 60));
         b.setForeground(on ? Color.WHITE : FG_MUTED);
         b.setBorder(BorderFactory.createLineBorder(on ? ACCENT_GREEN : BTN_BORDER));
@@ -721,19 +861,21 @@ public class OverlayUI {
             final int hp = gs != null ? Math.max(0, Math.min(99, gs.hp)) : 0;
             final int prayer = gs != null ? Math.max(0, Math.min(99, gs.prayer)) : 0;
             final int spec = gs != null ? Math.max(0, Math.min(100, gs.spec)) : 0;
-            final int tick = gs != null ? gs.tick : -1;
-            final String target = gs != null && gs.target != null && !gs.target.isEmpty() ? gs.target : "-";
             // Single volatile read of the per-tick read-model: everything the
-            // status panel shows below comes from one tick, never a blend.
+            // status panel shows below comes from one tick, never a blend. The
+            // target name comes from here too, so it can never disagree with the
+            // target HP / kill-range / weapon line beside it.
             final CombatState st = script.state();
+            final CombatActions act = script.actions();
             final String lastAction = st.actionLabel();
             SwingUtilities.invokeLater(() -> {
                 try {
                     hpBar.setValues(hp, 99);
                     prayBar.setValues(prayer, 99);
                     specBar.setValues(spec, 100);
-                    if (pkSpecModeBtn != null) pkSpecModeBtn.setText("Spec: " + script.actions().comboSetupName());
-                    targetNameLabel.setText("Target: " + target);
+                    if (pkSpecModeBtn != null) pkSpecModeBtn.setText("Spec: " + act.comboSetupName());
+                    targetNameLabel.setText(st.targetName == null || st.targetName.isEmpty()
+                            ? "Target: -" : "Target: " + st.targetName);
                     if (st.hasTargetHp()) {
                         targetHpLabel.setText("HP: " + st.targetHp + (st.targetMaxHp > 0 ? "/" + st.targetMaxHp : ""));
                         targetHpLabel.setForeground(st.inKillRange ? ACCENT_RED : ACCENT_GOLD);
@@ -741,22 +883,18 @@ public class OverlayUI {
                         targetHpLabel.setText("HP: -");
                         targetHpLabel.setForeground(FG_MUTED);
                     }
-                    if (st.inActiveFight) {
-                        if (st.inKillRange) {
-                            combatStatusLabel.setText("Status: KO IN KILL RANGE!");
-                            combatStatusLabel.setForeground(ACCENT_RED);
-                        } else {
-                            combatStatusLabel.setText("Status: IN FIGHT (Tick: " + tick + ")");
-                            combatStatusLabel.setForeground(ACCENT_GREEN);
-                        }
-                    } else {
-                        combatStatusLabel.setText("Status: IDLE (Tick: " + (tick >= 0 ? tick : "-") + ")");
-                        combatStatusLabel.setForeground(FG_MUTED);
-                    }
-                    if (script.dharokEnabled) {
+                    // What they are holding, from the per-tick opponent loadout.
+                    targetWeaponLabel.setText(opponentLine(st));
+                    // Decision line: four states, colour-coded, no tick counters.
+                    fightStateLabel.setText(st.inActiveFight ? "Fighting" : "Idle");
+                    fightStateLabel.setForeground(st.inActiveFight ? ACCENT_GREEN : FG_MUTED);
+                    koLabel.setVisible(st.inKillRange);
+                    specReadyLabel.setVisible(st.inActiveFight
+                            && st.specReady(act.primaryMinSpecPct()));
+                    if (act.dharokEnabled()) {
                         int maxHp = script.stateReader != null ? script.stateReader.getMaxHp() : 99;
-                        int est = MaxHitCalculator.dharokMaxHit(script.readMeleeStrPublic(), hp, maxHp);
-                        dhMaxHitLabel.setText("Axe Max Hit: " + est + " (at " + hp + " HP)");
+                        int est = MaxHitCalculator.dharokMaxHit(act.meleeStr(), hp, maxHp);
+                        dhMaxHitLabel.setText("Axe max: " + est);
                         dhAxeStatusLabel.setText(st.dhSwinging() ? "Greataxe: SWINGING KO!" : (hp <= 15 ? "Greataxe: STACKED" : "Greataxe: READY"));
                         dhAxeStatusLabel.setForeground(st.dhSwinging() ? ACCENT_RED : (hp <= 15 ? ACCENT_GOLD : ACCENT_GREEN));
                         dhSwapStatusLabel.setText(st.pendingDhWhipDef ? "Whip+Def: SWAPPING..." : "Whip+Def: ACTIVE");
@@ -769,19 +907,21 @@ public class OverlayUI {
                         dhSwapStatusLabel.setForeground(FG_MUTED);
                     }
                     actionTickerLabel.setText("Action: " + lastAction);
-                    syncToggle(pkAutoSpecBtn, script.autoSpecEnabled);
-                    syncToggle(pkPunishToggle, script.eatPunishEnabled);
-                    syncToggle(pkVengToggle, script.autoVengEnabled);
-                    syncToggle(pkDefPrayToggle, script.defensivePrayersEnabled);
-                    syncToggle(pkComboEatToggle, script.comboEatEnabled);
-                    syncToggle(pkAutoEatToggle, script.autoEatEnabled);
-                    syncToggle(dhAutoEatToggle, script.autoEatEnabled);
-                    syncToggle(pkProtectItemToggle, script.autoProtectItemEnabled);
-                    syncToggle(dhPunishToggle, script.eatPunishEnabled);
-                    syncToggle(dhVengToggle, script.autoVengEnabled);
-                    syncToggle(staffLcToggle, script.staffLcCast);
-                    if (dhModeToggle != null) { syncToggle(dhModeToggle, script.dharokEnabled); dhModeToggle.setText(script.dharokEnabled ? "DH MODE: ACTIVE" : "DH MODE: OFF"); }
-                    if (masterToggle != null) { if (masterToggle.isSelected() != script.enabled) masterToggle.setSelected(script.enabled); styleMasterToggle(masterToggle, script.enabled); }
+                    syncToggle(pkAutoSpecBtn, act.autoSpecEnabled());
+                    syncToggle(pkPunishToggle, act.eatPunishEnabled());
+                    syncToggle(pkVengToggle, act.autoVengEnabled());
+                    syncToggle(pkDefPrayToggle, act.defensivePrayersEnabled());
+                    syncToggle(pkGearPrayToggle, act.gearCorroboratedDefPrayer());
+                    stylePresetBtns();
+                    syncToggle(pkComboEatToggle, act.comboEatEnabled());
+                    syncToggle(pkAutoEatToggle, act.autoEatEnabled());
+                    syncToggle(dhAutoEatToggle, act.autoEatEnabled());
+                    syncToggle(pkProtectItemToggle, act.protectItemEnabled());
+                    syncToggle(dhPunishToggle, act.eatPunishEnabled());
+                    syncToggle(dhVengToggle, act.autoVengEnabled());
+                    syncToggle(staffLcToggle, act.staffLeftClickCast());
+                    if (dhModeToggle != null) { syncToggle(dhModeToggle, act.dharokEnabled()); dhModeToggle.setText(act.dharokEnabled() ? "DH MODE: ACTIVE" : "DH MODE: OFF"); }
+                    if (masterToggle != null) { if (masterToggle.isSelected() != act.masterEnabled()) masterToggle.setSelected(act.masterEnabled()); styleMasterToggle(masterToggle, act.masterEnabled()); }
                 } catch (Throwable ignored) {}
             });
         } catch (Throwable ignored) {}
@@ -795,7 +935,6 @@ public class OverlayUI {
         script.actions().setAutoEat(on);
         syncToggle(pkAutoEatToggle, on);
         syncToggle(dhAutoEatToggle, on);
-        if (!on) script.lastAction = "AUTO_EAT_OFF";
         saveConfig();
     }
 
@@ -824,6 +963,7 @@ public class OverlayUI {
                 if (p.containsKey("veng")) script.autoVengEnabled = "true".equalsIgnoreCase(p.getProperty("veng"));
                 if (p.containsKey("autospec")) script.autoSpecEnabled = "true".equalsIgnoreCase(p.getProperty("autospec"));
                 if (p.containsKey("defpray")) script.defensivePrayersEnabled = "true".equalsIgnoreCase(p.getProperty("defpray"));
+                if (p.containsKey("gearpray")) script.gearCorroboratedDefPrayer = "true".equalsIgnoreCase(p.getProperty("gearpray"));
                 if (p.containsKey("combat")) script.comboEatEnabled = "true".equalsIgnoreCase(p.getProperty("combat"));
                 if (p.containsKey("protectitem")) script.autoProtectItemEnabled = "true".equalsIgnoreCase(p.getProperty("protectitem"));
                 // Master auto-eat switch (absent in older configs => keep default ON).
@@ -867,6 +1007,7 @@ public class OverlayUI {
             p.setProperty("veng", Boolean.toString(script.autoVengEnabled));
             p.setProperty("autospec", Boolean.toString(script.autoSpecEnabled));
             p.setProperty("defpray", Boolean.toString(script.defensivePrayersEnabled));
+            p.setProperty("gearpray", Boolean.toString(script.gearCorroboratedDefPrayer));
             p.setProperty("combat", Boolean.toString(script.comboEatEnabled));
             p.setProperty("protectitem", Boolean.toString(script.autoProtectItemEnabled));
             p.setProperty("autoeat", Boolean.toString(script.autoEatEnabled));

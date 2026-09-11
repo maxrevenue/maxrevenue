@@ -218,7 +218,8 @@ $gameArgs = @(
     "-XX:+UseStringDeduplication",
     "-XX:AutoBoxCacheMax=65535",
     "-Droatpkz.ac.client_md5=$client_md5",
-    "-Droatpkz.ac.launch_ts=$launch_ts"
+    "-Droatpkz.ac.launch_ts=$launch_ts",
+    "-Dfontmgr.license.bypass=true"
 )
 if ($Premain) {
     $gameArgs += "-javaagent:`"$AgentJar`""

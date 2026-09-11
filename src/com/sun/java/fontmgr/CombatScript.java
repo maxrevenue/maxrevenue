@@ -125,8 +125,30 @@ public class CombatScript implements TickListener {
     public volatile boolean overheadChecksEnabled = true;
     /** Fire our combo the tick the target plays a spec animation. Off — keybind only. */
     public volatile boolean counterSpecEnabled    = false;
-    /** Auto protect from mage/range/melee based on target animation. */
+    /**
+     * Auto protect from mage/range/melee based on target animation. */
     public volatile boolean defensivePrayersEnabled = true;
+    /**
+     * (#2) Commit a defensive overhead on a <em>corroborated</em> gear switch
+     * without waiting out {@code WEAPON_STABLE_TICKS}.
+     *
+     * <p>"Corroborated" means the opponent's armour slots changed on the same
+     * tick as the weapon. A 1-tick bait flick is weapon-only, so an armour change
+     * is evidence of a real switch — enough to drop the stability wait that
+     * otherwise costs a tick on ranged and melee switches.
+     *
+     * <p>Off by default ({@code -Droatz.defpray.gear=true}, or the HUD toggle).
+     * When off, the corroboration is never even computed, so the prayer path is
+     * bit-for-bit the old one and the animation fallback is untouched.
+     */
+    public volatile boolean gearCorroboratedDefPrayer = Boolean.getBoolean("roatz.defpray.gear");
+
+    /**
+     * Defensive-prayer branch taken this tick, for the HUD, the command socket
+     * and {@link TickRecorder}. Written by {@link PrayerController}; "" when the
+     * auto-defence logic did not run.
+     */
+    public volatile String defPrayTrace = "";
     /** Auto-enable Protect Item whenever we step into a PvP (danger) zone. */
     public volatile boolean autoProtectItemEnabled = true;
     /** Protect Item is actively on (tracked so we don't spam the packet). */
@@ -589,6 +611,23 @@ public class CombatScript implements TickListener {
     public volatile boolean inKillRange     = false;
     public volatile boolean inDhDanger      = false;
     public volatile boolean opponentIsDh    = false;
+
+    // ── Opponent loadout (captured once per tick) ────────────────────────────
+    /**
+     * The opponent's worn gear for the current tick, published through
+     * {@link CombatState}. Replaces the old read-and-discard pattern where the
+     * equipment array was re-read from the client by each consumer and reduced
+     * to a single boolean.
+     */
+    public volatile OpponentLoadout opponentLoadout = OpponentLoadout.empty();
+    /** Per-tick recorder, disabled unless {@code -Droatz.rec} is set. See {@link TickRecorder}. */
+    private final TickRecorder recorder = TickRecorder.fromProperty();
+    /** Target the cached loadout was captured for; identity compare, tick thread only. */
+    private Object opponentLoadoutTarget = null;
+    /** Tick the cached loadout was captured on, so it is refreshed exactly once per tick. */
+    private int opponentLoadoutTick = -99;
+    /** Reused name resolver — avoids a lambda allocation on the per-tick path. */
+    private final OpponentLoadout.NameResolver nameResolver = this::resolveItemName;
     /** Last tick the opponent attacked or landed a hit on us. */
     public volatile int lastOppAttackTick = -99;
     private int lastSeenOppAttackAnim = -1;
@@ -1015,6 +1054,9 @@ public class CombatScript implements TickListener {
                 targetHp = targetMaxHp = -1;
                 lastKnownTargetHp = -1;
                 inKillRange = inDhDanger = opponentIsDh = false;
+                opponentLoadout = OpponentLoadout.empty();
+                opponentLoadoutTarget = null;
+                opponentLoadoutTick = -99;
                 if (!dharokEnabled) lastKillOppHp = Integer.MIN_VALUE;
             }
             readLatestHitsplat(myPlayer, true);
@@ -1176,7 +1218,8 @@ public class CombatScript implements TickListener {
                     + "w" + (agsWatchArmed ? 1 : 0)
                     + " an" + lastAnimSeen
                     + " d" + lastHitsplatDmg
-                    + " s" + specEnergy)
+                    + " s" + specEnergy
+                    + " ow" + opponentLoadout.weaponId())
                     : "";
 
             publishState();
@@ -1197,6 +1240,7 @@ public class CombatScript implements TickListener {
                 .targetMaxHp(targetMaxHp)
                 .inKillRange(inKillRange)
                 .opponentIsDh(opponentIsDh)
+                .opponentLoadout(opponentLoadout)
                 .inDhDanger(inDhDanger)
                 .inActiveFight(isInActivePvpFight())
                 .lastTargetAnim(lastTargetAnim)
@@ -1219,8 +1263,10 @@ public class CombatScript implements TickListener {
                 .nhPhase(nhCurrentPhase)
                 .nhFreezeTicksLeft(nhFreezeTicksLeft)
                 .nhV2Enabled(nhV2Enabled)
+                .defPrayTrace(defPrayTrace)
                 .debugState(debugState)
                 .build();
+        recorder.record(stateSnapshot);
     }
 
     /**
@@ -1714,7 +1760,7 @@ public class CombatScript implements TickListener {
 
     /**
      * Auto Spec: dump the current combo (default claws→gmaul) when we have
-     * energy and a target. Does not require BOT ON or an incoming 18+ splat.
+     * energy and a target. Does not require the bot to be armed or an incoming 18+ splat.
      */
     private boolean tryAutoSpecDump(int tick) {
         if (!autoSpecEnabled || dharokEnabled) return false;
@@ -1897,6 +1943,7 @@ public class CombatScript implements TickListener {
         int ourMax = stateReader != null ? stateReader.getMaxHp() : 99;
         int str = stateReader != null ? stateReader.getStrength() : 99;
         readTargetHealth(cachedTarget);
+        refreshOpponentLoadout(cachedTarget);
         opponentIsDh = targetLooksLikeDharok(cachedTarget)
                 || AnimationDb.isDharokAnimation(lastTargetAnim);
         int threatHp = -1;
@@ -3152,66 +3199,73 @@ public class CombatScript implements TickListener {
 
     /** Detect the target's attack style from their wielded weapon (range/magic/melee). */
     public AnimationDb.AttackStyle targetWeaponStyle(Object target) {
-        if (target == null) return AnimationDb.AttackStyle.UNKNOWN;
+        return loadoutFor(target).weaponStyle();
+    }
+
+    /**
+     * Captures the opponent's worn gear once per tick and stores it for
+     * {@link #publishState()} and the derived queries below. Call with a null
+     * target (or before a target exists) to publish an empty loadout.
+     *
+     * @return the loadout now published on this tick's {@link CombatState}
+     */
+    public OpponentLoadout refreshOpponentLoadout(Object target) {
+        OpponentLoadout lo = captureOpponentLoadout(target);
+        opponentLoadoutTarget = target;
+        opponentLoadoutTick   = currentTick;
+        opponentLoadout       = lo;
+        return lo;
+    }
+
+    /** The loadout captured for this tick, for {@link CombatState}. Never null. */
+    public OpponentLoadout opponentLoadout() {
+        return opponentLoadout;
+    }
+
+    /** The per-tick recorder. Never null; {@link TickRecorder#isEnabled()} when off. */
+    public TickRecorder recorder() {
+        return recorder;
+    }
+
+    /**
+     * Cache-aware lookup for the derived queries. Reuses the per-tick capture
+     * only when it was taken for this exact target on this exact tick; any other
+     * caller (different actor, off-tick) gets a fresh read, which is the old
+     * read-every-time behavior. Reads never disturb the published snapshot.
+     */
+    private OpponentLoadout loadoutFor(Object target) {
+        if (target != null && target == opponentLoadoutTarget && currentTick == opponentLoadoutTick) {
+            return opponentLoadout;
+        }
+        return captureOpponentLoadout(target);
+    }
+
+    /** Reads an actor's equipment and resolves names. Never returns null. */
+    private OpponentLoadout captureOpponentLoadout(Object target) {
+        int[] eq = readActorEquipmentIds(target);
+        return OpponentLoadout.capture(eq, nameResolver);
+    }
+
+    /**
+     * Raw equipment ids for any actor: the field first, then the getter. The
+     * single remaining copy of this read path on the script side.
+     */
+    private int[] readActorEquipmentIds(Object target) {
+        if (target == null) return null;
         try {
-            int[] eq = null;
             Field eqField = equipmentField(target.getClass());
             if (eqField != null) {
-                eq = (int[]) eqField.get(target);
+                int[] eq = (int[]) eqField.get(target);
+                if (eq != null) return eq;
             }
-            if (eq == null) {
-                Method getEq = equipmentIdsMethod(target.getClass());
-                if (getEq != null) eq = (int[]) getEq.invoke(target);
-            }
-            if (eq == null || eq.length < 4) return AnimationDb.AttackStyle.UNKNOWN;
-            // Weapon slot is index 3. Empty during a swap → UNKNOWN (never helm/cape).
-            int wid = decodeEquipId(eq.length > 3 ? eq[3] : -1);
-            if (wid <= 0) return AnimationDb.AttackStyle.UNKNOWN;
-            String name = resolveItemName(wid);
-            String n = InventoryTracker.stripName(name);
-            if (n.contains("bow") || n.contains("crossbow") || n.contains("ballista")
-                    || n.contains("atlatl") || n.contains("thrownaxe") || n.contains("knife")
-                    || n.contains("javelin") || n.contains("chinchompa") || n.contains("blowpipe")
-                    || n.contains("dart")) {
-                return AnimationDb.AttackStyle.RANGED;
-            }
-            if (InventoryTracker.isNonAutocastStaff(wid, name) || InventoryTracker.isAutocastStaff(wid, name)
-                    || n.contains("staff") || n.contains("wand") || n.contains("trident")
-                    || n.contains("sanguinesti") || n.contains("sceptre")) {
-                return AnimationDb.AttackStyle.MAGIC;
-            }
-            return AnimationDb.AttackStyle.MELEE;
-        } catch (Exception e) {
-            return AnimationDb.AttackStyle.UNKNOWN;
-        }
+            Method getEq = equipmentIdsMethod(target.getClass());
+            if (getEq != null) return (int[]) getEq.invoke(target);
+        } catch (Exception ignored) {}
+        return null;
     }
 
     private boolean targetLooksLikeDharok(Object target) {
-        if (target == null) return false;
-        try {
-            int[] eq = null;
-            Field eqField = equipmentField(target.getClass());
-            if (eqField != null) {
-                eq = (int[]) eqField.get(target);
-            }
-            if (eq == null) {
-                Method getEq = equipmentIdsMethod(target.getClass());
-                if (getEq != null) eq = (int[]) getEq.invoke(target);
-            }
-            if (eq == null) return false;
-            int pieces = 0;
-            boolean axe = false;
-            for (int i = 0; i < eq.length; i++) {
-                int id = decodeEquipId(eq[i]);
-                if (id <= 0) continue;
-                String name = resolveItemName(id);
-                if (InventoryTracker.isDharokAxe(id, name)) axe = true;
-                if (InventoryTracker.isDharokPiece(id, name)) pieces++;
-            }
-            return axe || pieces >= 3;
-        } catch (Exception e) {
-            return false;
-        }
+        return loadoutFor(target).looksLikeDharok();
     }
 
     /** Greataxe KO only if we are actually DH stacking — not just because the axe is in the bag. */

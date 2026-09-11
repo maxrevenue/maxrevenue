@@ -1,0 +1,12 @@
+{
+  "name": "roatz-license",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-10",
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+  "kv_namespaces": [
+    { "binding": "LICENSES", "id": "c9073d13ebe4413a8fa832bd2ed31cf0" }
+  ]
+}

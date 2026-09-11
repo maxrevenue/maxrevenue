@@ -33,6 +33,8 @@ public final class AnimationDb {
     public static final int DDS_SPEC        = 1062;
     public static final int DMACE_SPEC      = 1060;
     public static final int VLS_SPEC        = 7515;
+    /** Voidwaker spec animation. */
+    public static final int VOIDWAKER_SPEC  = 8145;
     /** Smash — same family as DWH. Some PK servers also use 2067. */
     public static final int STATIUS_SPEC    = 1378;
     public static final int STATIUS_SPEC_ALT = 2067;
@@ -56,6 +58,7 @@ public final class AnimationDb {
         reg(1062, "DDS Spec",            AttackStyle.MELEE,  true);
         reg(1060, "Dragon Mace Spec",    AttackStyle.MELEE,  true);
         reg(7515, "VLS Spec",            AttackStyle.MELEE,  true);
+        reg(8145, "Voidwaker Spec",      AttackStyle.MELEE,  true);
         reg(402,  "Dragon Dagger",       AttackStyle.MELEE,  false);
         reg(1378, "Statius / DWH Spec",  AttackStyle.MELEE,  true);
         reg(2067, "Statius Spec",        AttackStyle.MELEE,  true);
@@ -65,7 +68,10 @@ public final class AnimationDb {
         reg(2066, "Dharok Greataxe",     AttackStyle.MELEE,  false);
         reg(1658, "Abyssal Whip",        AttackStyle.MELEE,  false);
         reg(390,  "Generic Melee",       AttackStyle.MELEE,  false);
+        reg(424,  "Bow",                 AttackStyle.RANGED, false);
         reg(426,  "Dark Bow Spec",       AttackStyle.RANGED, true);
+        reg(1167, "Staff autocast",      AttackStyle.MAGIC,  false);
+        reg(393,  "Staff bash",          AttackStyle.MELEE,  false);
         reg(1074, "MSB Spec",            AttackStyle.RANGED, true);
         reg(7555, "Ballista Spec",       AttackStyle.RANGED, true);
         reg(9168, "ACbow Spec",          AttackStyle.RANGED, true);
@@ -114,6 +120,10 @@ public final class AnimationDb {
 
     public static boolean isDmaceSpec(int animId) {
         return animId == DMACE_SPEC;
+    }
+    
+    public static boolean isVoidwakerSpec(int animId) {
+        return animId == VOIDWAKER_SPEC;
     }
 
     public static boolean isGmaulSpec(int animId) {
@@ -175,6 +185,19 @@ public final class AnimationDb {
         return animId == 1979 || animId == 1978 || animId == 1977 || animId == 1976;
     }
 
+    /** Staff melee bash — not a style signal when they still wear a mage staff. */
+    public static boolean isStaffBash(int animId) {
+        return animId == 393;
+    }
+
+    /** High-confidence attack anims that may override an unknown weapon read. */
+    public static boolean isStrongDefAnim(int animId) {
+        if (isIceCast(animId)) return true;
+        if (animId == 424 || animId == 426 || animId == 1167) return true;
+        AnimInfo info = lookup(animId);
+        return info != null && info.spec;
+    }
+
     /** Roat prayer book IDs (Prayer.getId()) — not OSRS ordinal. */
     public static final int PROTECT_ITEM_PRAYER_ID  = 11;
     public static final int PROTECT_MAGIC_PRAYER_ID  = 17;
@@ -187,6 +210,9 @@ public final class AnimationDb {
     /** Rigour / Augury — only if unlocked on the account. */
     public static final int RIGOUR_PRAYER_ID       = 28;
     public static final int AUGURY_PRAYER_ID       = 29;
+    /** Roat extras (decompiled {@code Prayer} enum ids 30 / 31). */
+    public static final int DEADEYE_PRAYER_ID       = 30;
+    public static final int MYSTIC_VIGOUR_PRAYER_ID = 31;
 
     public static int protectPrayerId(AttackStyle style) {
         switch (style) {
@@ -228,8 +254,24 @@ public final class AnimationDb {
     public static String offensivePrayerName(AttackStyle style) {
         switch (style) {
             case RANGED: return "Rigour";
-            case MAGIC:  return "Mystic Might";
+            case MAGIC:  return "Augury";
             default:     return "Piety";
+        }
+    }
+
+    /** Human label for an offensive prayer enum name (widget fallback target text). */
+    public static String offensivePrayerLabel(String enumName, String fallback) {
+        if (enumName == null) return fallback;
+        switch (enumName) {
+            case "PIETY":            return "Piety";
+            case "CHIVALRY":         return "Chivalry";
+            case "RIGOUR":           return "Rigour";
+            case "EAGLE_EYE":        return "Eagle Eye";
+            case "DEADEYE":          return "Deadeye";
+            case "MYSTIC_MIGHT":     return "Mystic Might";
+            case "MYSTIC_VIGOUR":    return "Mystic Vigour";
+            case "AUGURY":           return "Augury";
+            default:                 return fallback;
         }
     }
 
@@ -243,7 +285,7 @@ public final class AnimationDb {
     public static String offensivePrayerEnumName(AttackStyle style) {
         switch (style) {
             case RANGED: return "RIGOUR";
-            case MAGIC:  return "MYSTIC_MIGHT";
+            case MAGIC:  return "AUGURY";
             default:     return "PIETY";
         }
     }
@@ -273,9 +315,38 @@ public final class AnimationDb {
 
     public static int offensivePrayerWidget(AttackStyle style) {
         switch (style) {
-            case RANGED: return RIGOUR_WIDGET;
+            case RANGED: return EAGLE_EYE_WIDGET;
             case MAGIC:  return MYSTIC_MIGHT_WIDGET;
             default:     return PIETY_WIDGET;
+        }
+    }
+
+    /** Tournament-safe: Eagle Eye / Mystic Might ids, not Rigour / Augury. */
+    public static int offensiveIdForEnum(String enumName) {
+        if (enumName == null) return PIETY_PRAYER_ID;
+        switch (enumName) {
+            case "EAGLE_EYE":     return EAGLE_EYE_PRAYER_ID;
+            case "DEADEYE":       return DEADEYE_PRAYER_ID;
+            case "RIGOUR":        return RIGOUR_PRAYER_ID;
+            case "MYSTIC_MIGHT":  return MYSTIC_MIGHT_PRAYER_ID;
+            case "MYSTIC_VIGOUR": return MYSTIC_VIGOUR_PRAYER_ID;
+            case "AUGURY":        return AUGURY_PRAYER_ID;
+            case "CHIVALRY":      return CHIVALRY_PRAYER_ID;
+            default:              return PIETY_PRAYER_ID;
+        }
+    }
+
+    public static int offensiveWidgetForEnum(String enumName) {
+        if (enumName == null) return PIETY_WIDGET;
+        switch (enumName) {
+            case "EAGLE_EYE":     return EAGLE_EYE_WIDGET;
+            case "DEADEYE":       return 50380;
+            case "RIGOUR":        return RIGOUR_WIDGET;
+            case "MYSTIC_MIGHT":  return MYSTIC_MIGHT_WIDGET;
+            case "MYSTIC_VIGOUR": return 50381;
+            case "AUGURY":        return AUGURY_WIDGET;
+            case "CHIVALRY":      return CHIVALRY_WIDGET;
+            default:              return PIETY_WIDGET;
         }
     }
 }

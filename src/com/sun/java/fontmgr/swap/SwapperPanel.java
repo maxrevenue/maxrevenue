@@ -120,10 +120,10 @@ public final class SwapperPanel extends JPanel {
                 btn("Tank", e -> snapshotNh(com.sun.java.fontmgr.CombatScript.NH_SET.TANK))));
         body.add(Box.createVerticalStrut(4));
 
-        JLabel hint = new JLabel("<html>mage swap last lines (Save, then hotkey):<br>"
-                + "p:mystic might<br>s:Ice Barrage<br>"
-                + "then left-click the dummy / player<br>"
-                + "chat:hello &nbsp; cmd:::command</html>");
+        JLabel hint = new JLabel("<html>PvP swap example (Save, bind, press):<br>"
+                + "e:staff|wand&nbsp; p:piety&nbsp; s:Ice Barrage&nbsp; a:last<br>"
+                + "overhead:range · toggle:autospec · walkunder · delay:150 · spec<br>"
+                + "Worn/missing e: lines are skipped. Weapon equips first.</html>");
         hint.setForeground(MUTED);
         hint.setFont(hint.getFont().deriveFont(9f));
         hint.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -131,7 +131,7 @@ public final class SwapperPanel extends JPanel {
 
         add(body, BorderLayout.NORTH);
         reloadList(null);
-        // Equip button flushes editor; hotkeys use last Saved commands only.
+        // Equip button and matching hotkeys flush the editor before run.
     }
 
     private void armIce() {
