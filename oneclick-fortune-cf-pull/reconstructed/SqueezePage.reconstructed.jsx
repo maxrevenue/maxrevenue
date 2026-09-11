@@ -1,8 +1,7 @@
 /**
- * Reconstructed from deployed Worker assets (oneclick-fortune @ 2026-09-07)
+ * Reconstructed Squeeze page — now posts to Worker POST /api/leads
  * Route: /squeeze  (alias: /opt-in -> /squeeze)
- * Behavior: client-only form; onSubmit navigates to /magnet-thank-you
- * No Cloudflare bindings, secrets, or backend lead capture on this Worker.
+ * On success: navigate to /magnet-thank-you; map also at /setup-map
  */
 import { Link, useNavigate } from "react-router-dom";
 
@@ -11,9 +10,32 @@ const LEGAL_FOOTER = /* see LEGAL_FOOTER.txt */ undefined;
 export function SqueezePage() {
   const navigate = useNavigate();
 
-  function onSubmit(e) {
+  async function onSubmit(e) {
     e.preventDefault();
-    navigate("/magnet-thank-you");
+    const form = e.currentTarget;
+    const name = form.name.value.trim();
+    const email = form.email.value.trim();
+    const btn = form.querySelector('button[type="submit"]');
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = "Sending…";
+    }
+    try {
+      const res = await fetch("/api/leads", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, email, source: "squeeze" }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Submit failed");
+      navigate("/magnet-thank-you");
+    } catch (err) {
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = "Send me the map";
+      }
+      alert(err.message || "Something went wrong. Please try again.");
+    }
   }
 
   return (
