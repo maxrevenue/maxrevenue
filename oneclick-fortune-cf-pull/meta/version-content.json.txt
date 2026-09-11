@@ -1,0 +1,37 @@
+{
+  "result": {
+    "id": "7bc7a1f6-f8c7-4f70-b5b4-e5b4510edc6d",
+    "number": 11,
+    "metadata": {
+      "created_on": "2026-09-07T01:07:10.980176Z",
+      "source": "wrangler",
+      "author_id": "bb73c8b32ee97a08b2f718cd40fba139",
+      "author_email": "alec@room23.net",
+      "has_preview": true
+    },
+    "annotations": {
+      "workers/triggered_by": "version_upload"
+    },
+    "resources": {
+      "script": {
+        "etag": "",
+        "handlers": null,
+        "last_deployed_from": ""
+      },
+      "script_runtime": {
+        "assets": {
+          "not_found_handling": "single-page-application",
+          "serve_directly": true,
+          "raw_run_worker_first": false
+        },
+        "compatibility_date": "2026-08-25",
+        "usage_model": "standard"
+      },
+      "bindings": []
+    }
+  },
+  "success": true,
+  "errors": [],
+  "messages": []
+}
+

@@ -1,0 +1,155 @@
+{
+  "result": {
+    "items": [
+      {
+        "id": "7bc7a1f6-f8c7-4f70-b5b4-e5b4510edc6d",
+        "number": 11,
+        "metadata": {
+          "created_on": "2026-09-07T01:07:10.980176Z",
+          "source": "wrangler",
+          "author_id": "bb73c8b32ee97a08b2f718cd40fba139",
+          "author_email": "alec@room23.net",
+          "has_preview": true
+        },
+        "annotations": {
+          "workers/triggered_by": "version_upload"
+        }
+      },
+      {
+        "id": "338fa116-bf4a-4132-a8ca-31ca0a49b44b",
+        "number": 10,
+        "metadata": {
+          "created_on": "2026-09-07T00:40:14.814426Z",
+          "source": "wrangler",
+          "author_id": "bb73c8b32ee97a08b2f718cd40fba139",
+          "author_email": "alec@room23.net",
+          "has_preview": true
+        },
+        "annotations": {
+          "workers/triggered_by": "version_upload"
+        }
+      },
+      {
+        "id": "efba288d-98ed-436e-a89d-e7f21d293a6a",
+        "number": 9,
+        "metadata": {
+          "created_on": "2026-08-27T17:07:14.761933Z",
+          "source": "wrangler",
+          "author_id": "bb73c8b32ee97a08b2f718cd40fba139",
+          "author_email": "alec@room23.net",
+          "has_preview": true
+        },
+        "annotations": {
+          "workers/triggered_by": "version_upload"
+        }
+      },
+      {
+        "id": "ac2169fd-53bb-4c0b-afd8-79cf2ee5ba75",
+        "number": 8,
+        "metadata": {
+          "created_on": "2026-08-27T14:55:23.720377Z",
+          "source": "wrangler",
+          "author_id": "bb73c8b32ee97a08b2f718cd40fba139",
+          "author_email": "alec@room23.net",
+          "has_preview": true
+        },
+        "annotations": {
+          "workers/triggered_by": "version_upload"
+        }
+      },
+      {
+        "id": "759b0411-9d53-4b3d-ad6e-2f84ada5de95",
+        "number": 7,
+        "metadata": {
+          "created_on": "2026-08-27T14:03:41.433875Z",
+          "source": "wrangler",
+          "author_id": "bb73c8b32ee97a08b2f718cd40fba139",
+          "author_email": "alec@room23.net",
+          "has_preview": true
+        },
+        "annotations": {
+          "workers/triggered_by": "version_upload"
+        }
+      },
+      {
+        "id": "7f322884-a7ed-4e2f-be7c-e52484ed8e42",
+        "number": 6,
+        "metadata": {
+          "created_on": "2026-08-25T11:43:13.805415Z",
+          "source": "wrangler",
+          "author_id": "bb73c8b32ee97a08b2f718cd40fba139",
+          "author_email": "alec@room23.net",
+          "has_preview": true
+        },
+        "annotations": {
+          "workers/triggered_by": "version_upload"
+        }
+      },
+      {
+        "id": "d97a0478-bc04-42e4-810e-bc9d6fe6126a",
+        "number": 5,
+        "metadata": {
+          "created_on": "2026-08-25T11:36:34.079832Z",
+          "source": "wrangler",
+          "author_id": "bb73c8b32ee97a08b2f718cd40fba139",
+          "author_email": "alec@room23.net",
+          "has_preview": true
+        },
+        "annotations": {
+          "workers/triggered_by": "version_upload"
+        }
+      },
+      {
+        "id": "0df5b863-cda0-4e50-8f9b-1dff96fa6ea1",
+        "number": 4,
+        "metadata": {
+          "created_on": "2026-08-25T11:30:07.864243Z",
+          "source": "wrangler",
+          "author_id": "bb73c8b32ee97a08b2f718cd40fba139",
+          "author_email": "alec@room23.net",
+          "has_preview": true
+        },
+        "annotations": {
+          "workers/triggered_by": "version_upload"
+        }
+      },
+      {
+        "id": "3b5c6227-d868-469e-b4d3-ee53aa34151d",
+        "number": 3,
+        "metadata": {
+          "created_on": "2026-08-25T11:28:33.914142Z",
+          "source": "wrangler",
+          "author_id": "bb73c8b32ee97a08b2f718cd40fba139",
+          "author_email": "alec@room23.net",
+          "has_preview": true
+        },
+        "annotations": {
+          "workers/triggered_by": "version_upload"
+        }
+      },
+      {
+        "id": "84ef0e67-4d10-4ad8-b36f-92f7ef53b4e6",
+        "number": 2,
+        "metadata": {
+          "created_on": "2026-08-25T11:22:19.624104Z",
+          "source": "wrangler",
+          "author_id": "bb73c8b32ee97a08b2f718cd40fba139",
+          "author_email": "alec@room23.net",
+          "has_preview": true
+        },
+        "annotations": {
+          "workers/triggered_by": "version_upload"
+        }
+      }
+    ]
+  },
+  "success": true,
+  "errors": null,
+  "messages": null,
+  "result_info": {
+    "page": 1,
+    "per_page": 10,
+    "count": 10,
+    "total_count": 11
+  }
+}
