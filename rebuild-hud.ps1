@@ -5,12 +5,26 @@ $ErrorActionPreference = 'Stop'
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location -LiteralPath $Root
 
+function Invoke-QuietTaskkill {
+    param([Parameter(Mandatory = $true)][string[]]$TaskkillArgs)
+    # taskkill prints "ERROR: The process ... not found" to stderr when idle.
+    # With $ErrorActionPreference=Stop that aborts the whole script — swallow it.
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & taskkill.exe @TaskkillArgs 1>$null 2>$null | Out-Null
+    } catch {
+        # ignore — process already gone is fine
+    } finally {
+        $ErrorActionPreference = $prev
+    }
+}
+
 function Stop-RoatzLocks {
     Write-Host 'Stopping old Roatz / Roat clients...' -ForegroundColor Yellow
 
-    # Hard kill by image name (covers locked jpackage exe even when CIM lags).
     foreach ($im in @('Roatz.exe', 'RoatzBot.exe')) {
-        & taskkill.exe /F /IM $im /T 2>$null | Out-Null
+        Invoke-QuietTaskkill -TaskkillArgs @('/F', '/IM', $im, '/T')
     }
 
     Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
@@ -30,7 +44,7 @@ function Stop-RoatzLocks {
         ForEach-Object {
             Write-Host ("  kill pid {0} {1}" -f $_.ProcessId, $_.Name)
             Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
-            & taskkill.exe /F /PID $_.ProcessId /T 2>$null | Out-Null
+            Invoke-QuietTaskkill -TaskkillArgs @('/F', '/PID', "$($_.ProcessId)", '/T')
         }
 
     # Give Windows time to release file handles on Roatz.exe
@@ -45,6 +59,12 @@ function Remove-TreeWithRetry {
     if (-not (Test-Path -LiteralPath $Path)) { return $true }
     for ($i = 1; $i -le $Attempts; $i++) {
         try {
+            # Rename locked exe first so jpackage can recreate the folder tree.
+            $lockedExe = Join-Path $Path 'Roatz\Roatz.exe'
+            if (Test-Path -LiteralPath $lockedExe) {
+                $deadName = "Roatz.exe.old-$PID"
+                Rename-Item -LiteralPath $lockedExe -NewName $deadName -Force -ErrorAction SilentlyContinue
+            }
             Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop
             if (-not (Test-Path -LiteralPath $Path)) { return $true }
         } catch {
@@ -81,7 +101,7 @@ Write-Host 'Source OK: PK Loadouts present' -ForegroundColor Green
 Stop-RoatzLocks
 
 $cacheJar = Join-Path $env:TEMP '.cache\fontconfig-ext.jar'
-$status = Join-Path $env:TEMP '.cache\fontconfig-attach.status' # AttachStatus.FILE_NAME
+$status = Join-Path $env:TEMP '.cache\fontconfig-attach.status'
 if (Test-Path -LiteralPath $cacheJar) {
     Remove-Item -LiteralPath $cacheJar -Force -ErrorAction SilentlyContinue
     Write-Host "Cleared $cacheJar" -ForegroundColor Yellow
@@ -93,8 +113,8 @@ if (Test-Path -LiteralPath $status) {
 $jpackageDir = Join-Path $Root 'build\jpackage'
 Write-Host 'Clearing locked jpackage output...' -ForegroundColor Yellow
 if (-not (Remove-TreeWithRetry -Path $jpackageDir)) {
-    Write-Host 'ERROR: still cannot delete build\jpackage — Roatz.exe is locked.' -ForegroundColor Red
-    Write-Host 'Close Roatz from the taskbar/tray, then run:' -ForegroundColor Red
+    Write-Host 'ERROR: still cannot delete build\jpackage — something still locks Roatz.exe.' -ForegroundColor Red
+    Write-Host 'Close File Explorer windows inside build\jpackage, then:' -ForegroundColor Red
     Write-Host '  taskkill /F /IM Roatz.exe /T'
     Write-Host '  powershell -ExecutionPolicy Bypass -File .\rebuild-hud.ps1'
     exit 1
