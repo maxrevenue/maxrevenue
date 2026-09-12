@@ -109,9 +109,24 @@ public class OverlayUI {
     });
     private final java.util.Timer animationTimer = new java.util.Timer(true);
 
+    private static volatile OverlayUI INSTANCE;
+
     public static void show(CombatScript script) {
         if (script == null) return;
-        SwingUtilities.invokeLater(() -> new OverlayUI(script).frame.setVisible(true));
+        SwingUtilities.invokeLater(() -> {
+            OverlayUI existing = INSTANCE;
+            if (existing != null && existing.frame != null && existing.frame.isDisplayable()) {
+                existing.frame.setVisible(true);
+                existing.frame.toFront();
+                existing.frame.setAlwaysOnTop(true);
+                existing.frame.requestFocus();
+                return;
+            }
+            OverlayUI ui = new OverlayUI(script);
+            INSTANCE = ui;
+            ui.frame.setVisible(true);
+            ui.frame.toFront();
+        });
     }
 
     public OverlayUI(CombatScript script) {
@@ -282,6 +297,7 @@ public class OverlayUI {
         frame.addWindowListener(new java.awt.event.WindowAdapter() {
             @Override public void windowClosed(java.awt.event.WindowEvent e) {
                 scheduler.shutdownNow(); animationTimer.cancel();
+                if (INSTANCE == OverlayUI.this) INSTANCE = null;
             }
         });
     }

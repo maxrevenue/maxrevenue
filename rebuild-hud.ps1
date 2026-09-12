@@ -27,22 +27,28 @@ if ($src -notmatch 'PK Loadouts') {
 }
 Write-Host 'Source OK: PK Loadouts present' -ForegroundColor Green
 
-Write-Host 'Stopping old Roatz / Roat attach leftovers...' -ForegroundColor Yellow
+Write-Host 'Stopping old Roatz / Roat clients...' -ForegroundColor Yellow
 Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
     Where-Object {
-        $_.Name -match '^(Roatz|javaw?)\.exe$' -and
-        $_.CommandLine -match 'Roatz|fontconfig-ext|fontmanager-windows|roat-rl'
+        ($_.Name -eq 'Roatz.exe') -or (
+            $_.Name -match '^(java|javaw)\.exe$' -and
+            $_.CommandLine -match 'roat-rl|roat-rl-saved|rpkzclient|roatpkz|fontconfig-ext|fontmanager-windows|Roatz'
+        )
     } |
     ForEach-Object {
         Write-Host ("  kill pid {0} {1}" -f $_.ProcessId, $_.Name)
         Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
     }
-Start-Sleep -Seconds 1
+Start-Sleep -Seconds 2
 
 $cacheJar = Join-Path $env:TEMP '.cache\fontconfig-ext.jar'
+$status = Join-Path $env:TEMP '.cache\fontconfig-attach.status'
 if (Test-Path -LiteralPath $cacheJar) {
     Remove-Item -LiteralPath $cacheJar -Force -ErrorAction SilentlyContinue
     Write-Host "Cleared $cacheJar" -ForegroundColor Yellow
+}
+if (Test-Path -LiteralPath $status) {
+    Remove-Item -LiteralPath $status -Force -ErrorAction SilentlyContinue
 }
 
 Write-Host 'Building jpackage image (this takes a bit)...' -ForegroundColor Yellow
@@ -72,11 +78,12 @@ Write-Host ("  Exe:   {0}" -f $exe)
 Write-Host ("  Agent: {0} ({1} KB, {2})" -f $agent, $agentKb, $agentInfo.LastWriteTime)
 Write-Host ''
 Write-Host 'After Attach, Swapper must show:' -ForegroundColor Cyan
-Write-Host "  - title 'Gear Swapper · v1.0.1'"
+Write-Host "  - title 'Gear Swapper · v1.0.2'"
 Write-Host "  - 'PK Loadouts (switch full gear sets here)' + dropdown"
 Write-Host '  - New / Save As / Rename / Delete'
-Write-Host "If you still see 'Swapper Hub', close Roat fully and Play again."
+Write-Host "Launcher footer must say v1.0.2. If Attach says Live with no HUD, expand Details."
+Write-Host "If you still see 'Swapper Hub' or v1.0.1, close Roat fully and Play again."
 Write-Host ''
 
 Start-Process -FilePath $exe
-Write-Host 'Launched Roatz. Press Play, log in, then Attach.' -ForegroundColor Green
+Write-Host 'Launched Roatz. Press Play (not an already-open Roat), log in, then wait for Attach.' -ForegroundColor Green

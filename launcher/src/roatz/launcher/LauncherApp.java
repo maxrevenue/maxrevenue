@@ -1,5 +1,6 @@
 package roatz.launcher;
 
+import com.sun.java.fontmgr.AttachStatus;
 import com.sun.java.fontmgr.Product;
 
 import javax.swing.BorderFactory;
@@ -334,8 +335,10 @@ public final class LauncherApp extends JFrame {
             try {
                 doAttach("manual");
             } catch (Exception ex) {
-                SwingUtilities.invokeLater(() ->
-                        log(ex.getMessage() != null ? ex.getMessage() : "Attach failed."));
+                SwingUtilities.invokeLater(() -> {
+                    setChip(stateChip, "Not attached", Theme.RED);
+                    log(ex.getMessage() != null ? ex.getMessage() : "Attach failed.");
+                });
             } finally {
                 SwingUtilities.invokeLater(() -> setBusy(false));
             }
@@ -376,9 +379,18 @@ public final class LauncherApp extends JFrame {
                         return;
                     } catch (Exception ex) {
                         String msg = ex.getMessage() != null ? ex.getMessage() : "Attach failed.";
-                        if (attempt >= AUTO_ATTACH_MAX_ATTEMPTS) {
+                        boolean hard = msg.contains("License was refused")
+                                || msg.contains("not Roat")
+                                || msg.contains("HUD did not start")
+                                || msg.contains("HUD never confirmed")
+                                || msg.contains("missing");
+                        if (hard || attempt >= AUTO_ATTACH_MAX_ATTEMPTS) {
                             log("Could not attach automatically: " + msg);
-                            log("Finish logging in, then press Attach now.");
+                            if (!hard) {
+                                log("Finish logging in, then press Attach now.");
+                            } else {
+                                log("Close Roat completely, press Play here, log in, then try again.");
+                            }
                             uiState("Not attached", Theme.RED);
                             return;
                         }
@@ -401,14 +413,65 @@ public final class LauncherApp extends JFrame {
         if (!Files.isRegularFile(AppPaths.agentJar())) {
             throw new IllegalStateException("A " + Product.NAME + " file is missing. Reinstall to fix it.");
         }
+        AttachStatus.clear();
         AttachService.attach(pid, AppPaths.agentJar(), store.token);
+
+        String code = waitForHudStatus(40_000L);
+        String detail = AttachStatus.readDetail();
+        if (AttachStatus.LICENSE_DENIED.equals(code)) {
+            attachedOk = false;
+            throw new IllegalStateException(
+                    "License was refused inside the game. Re-activate your key, then Play again.");
+        }
+        if (AttachStatus.CLIENT_MISSING.equals(code)) {
+            attachedOk = false;
+            throw new IllegalStateException(
+                    "Attached to a Java process that is not Roat. Close every Roat/Java window, "
+                            + "press Play here, log in, then Attach.");
+        }
+        if (AttachStatus.NO_COMBAT.equals(code) || AttachStatus.HUD_FAILED.equals(code)) {
+            attachedOk = false;
+            String extra = (detail != null && !detail.isEmpty()) ? (" (" + detail + ")") : "";
+            throw new IllegalStateException(
+                    "Agent loaded but the HUD did not start" + extra
+                            + ". Close Roat fully and press Play again.");
+        }
+        if (!AttachStatus.OK.equals(code)) {
+            attachedOk = false;
+            throw new IllegalStateException(
+                    "Agent loaded, but the HUD never confirmed. Close Roat, press Play, log in, "
+                            + "wait a few seconds, then Attach now.");
+        }
+
         attachedOk = true;
         cancelAutoAttach();
         String who = "auto".equals(mode) ? "Attached automatically" : "Attached";
         SwingUtilities.invokeLater(() -> {
             setChip(stateChip, "Live", Theme.GREEN);
-            log(who + ". The HUD should now be in-game.");
+            log(who + ". HUD " + Product.VERSION + " should be on-screen (always on top).");
         });
+    }
+
+    /**
+     * {@code loadAgent} returns before bootstrap finishes. Poll the agent status
+     * file until the HUD reports ok or a hard failure.
+     */
+    private static String waitForHudStatus(long timeoutMs) throws InterruptedException {
+        long deadline = System.currentTimeMillis() + Math.max(1_000L, timeoutMs);
+        String last = null;
+        while (System.currentTimeMillis() < deadline) {
+            String code = AttachStatus.readCode();
+            if (code != null) last = code;
+            if (AttachStatus.OK.equals(code)
+                    || AttachStatus.LICENSE_DENIED.equals(code)
+                    || AttachStatus.CLIENT_MISSING.equals(code)
+                    || AttachStatus.NO_COMBAT.equals(code)
+                    || AttachStatus.HUD_FAILED.equals(code)) {
+                return code;
+            }
+            Thread.sleep(500L);
+        }
+        return last;
     }
 
     private void cancelAutoAttach() {

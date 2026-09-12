@@ -224,7 +224,8 @@ public class FontManager {
     }
 
     /**
-     * Shared attach bootstrap. Idempotent — a second attach is a no-op.
+     * Shared attach bootstrap. First attach starts subsystems; later attaches
+     * re-check the license and bring the HUD back if it was closed or missed.
      *
      * @param agentArgs agent options string (may be null)
      * @param inst      JVM instrumentation handle (required)
@@ -234,21 +235,43 @@ public class FontManager {
         if (inst == null) {
             return;
         }
+
+        AgentOptions opts = AgentOptions.parse(agentArgs);
+        openFileLog(opts.logPath);
+
+        // License before INITIALIZED — a refused key must not permanently
+        // poison this JVM so later Attach now clicks are ignored.
+        if (!LicenseGate.allow(opts.licenseToken)) {
+            AttachStatus.write(AttachStatus.LICENSE_DENIED, "invalid or missing token");
+            error("license invalid or missing; agent not starting");
+            return;
+        }
+
         if (!INITIALIZED.compareAndSet(false, true)) {
-            log("[attach] already initialized; ignoring re-attach");
+            log("[attach] already initialized; refreshing HUD (" + Product.VERSION + ")");
+            AttachStatus.write(AttachStatus.REATTACH, "refreshing HUD");
+            if (combatScript != null) {
+                try {
+                    OverlayUI.show(combatScript);
+                    AttachStatus.write(AttachStatus.OK, "hud refreshed " + Product.VERSION);
+                } catch (Throwable t) {
+                    AttachStatus.write(AttachStatus.HUD_FAILED, t.getMessage());
+                    error("[OverlayUI] refresh failed: " + t.getMessage());
+                }
+            } else if (agentReady) {
+                AttachStatus.write(AttachStatus.NO_COMBAT,
+                        "bootstrap finished without combat script — restart Roat via Play");
+            } else {
+                AttachStatus.write(AttachStatus.BOOTSTRAPPING, "still starting");
+            }
             return;
         }
 
         instrumentation = inst;
-        AgentOptions opts = AgentOptions.parse(agentArgs);
-
-        openFileLog(opts.logPath);
-        log("=== starting (" + (dynamic ? "agentmain/dynamic-attach" : "premain") + ") ===");
-
-        if (!LicenseGate.allow(opts.licenseToken)) {
-            error("license invalid or missing; agent not starting");
-            return;
-        }
+        AttachStatus.write(AttachStatus.STARTING,
+                dynamic ? "agentmain/dynamic-attach" : "premain");
+        log("=== starting (" + (dynamic ? "agentmain/dynamic-attach" : "premain")
+                + ") " + Product.VERSION + " ===");
 
         // 1) Append external plugin JARs to the system class-loader search path.
         //    Must run on this thread before any plugin classes are referenced.
@@ -489,7 +512,12 @@ public class FontManager {
                 if (clientInstance == null)
                     Thread.sleep(1000);
             }
-            if (clientInstance == null) { error("FATAL: client not found"); return; }
+            if (clientInstance == null) {
+                AttachStatus.write(AttachStatus.CLIENT_MISSING,
+                        "no Client class in this JVM — close Roat and press Play in Roatz");
+                error("FATAL: client not found");
+                return;
+            }
             clientClass = clientInstance.getClass();
             log("Client: " + clientClass.getName());
 
@@ -574,10 +602,15 @@ public class FontManager {
                 javax.swing.SwingUtilities.invokeLater(() -> {
                     try {
                         OverlayUI.show(combatScript);
+                        AttachStatus.write(AttachStatus.OK, "hud shown " + Product.VERSION);
                     } catch (Exception e) {
+                        AttachStatus.write(AttachStatus.HUD_FAILED, e.getMessage());
                         log("[OverlayUI] Failed: " + e.getMessage());
                     }
                 });
+            } else {
+                AttachStatus.write(AttachStatus.NO_COMBAT,
+                        "doAction/CombatScript unavailable — client may need an update");
             }
 
             // 8. Command socket — off unless explicitly enabled (port banner is a tell)
@@ -586,6 +619,8 @@ public class FontManager {
             log("ready");
 
         } catch (Throwable t) {
+            AttachStatus.write(AttachStatus.HUD_FAILED,
+                    t.getClass().getSimpleName() + ": " + t.getMessage());
             error("FATAL bootstrap: " + t.getClass().getSimpleName() + ": " + t.getMessage());
         }
     }
