@@ -96,10 +96,10 @@ public class OverlayUI {
     private Point dragOffset = null;
     private final java.nio.file.Path cfgPath;
 
-    private static final int FRAME_W = 320;
-    private static final int FRAME_H = 620;
+    private static final int FRAME_W = 340;
+    private static final int FRAME_H = 720;
     private static final int FRAME_H_COLLAPSED = 40;
-    private static final int FRAME_W_MINI = 36;
+    private static final int FRAME_W_MINI = 44;
     private static final int FRAME_H_MINI = 28;
 
     private JPanel titleBar;
@@ -174,16 +174,17 @@ public class OverlayUI {
         appTitle.setForeground(ACCENT_GOLD);
         appTitle.setFont(appTitle.getFont().deriveFont(Font.BOLD, 11.5f));
         brand.add(appTitle);
-        brand.add(createLabel("v" + Product.VERSION, FG_MUTED, 9f, false));
+        brand.add(createLabel(Product.VERSION, FG_MUTED, 9f, false));
         titleBar.add(brand, BorderLayout.WEST);
 
         JPanel titleRight = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 0));
         titleRight.setOpaque(false);
-        collapseBtn = new JButton(collapsed ? "▴" : "▾");
+        collapseBtn = new JButton(collapsed ? "▴" : "▾ Mini");
         collapseBtn.setFocusable(false);
         collapseBtn.setBorder(null);
         collapseBtn.setContentAreaFilled(false);
         collapseBtn.setForeground(FG_BRIGHT);
+        collapseBtn.setToolTipText("Collapse → click again for tiny pill → restore");
         collapseBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         collapseBtn.addActionListener(e -> toggleCollapse());
         titleRight.add(collapseBtn);
@@ -327,6 +328,8 @@ public class OverlayUI {
         scroll.setOpaque(false);
         scroll.getViewport().setOpaque(false);
         scroll.getVerticalScrollBar().setUnitIncrement(16);
+        // Always show the bar so Fight/DH content is obviously scrollable.
+        scroll.setVerticalScrollBarPolicy(ScrollPaneConstants.VERTICAL_SCROLLBAR_ALWAYS);
         scroll.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
         JPanel wrap = new JPanel(new BorderLayout());
         wrap.setOpaque(false);
@@ -353,9 +356,9 @@ public class OverlayUI {
         page.add(Box.createVerticalStrut(4));
         page.add(buildPkPage());
         page.add(Box.createVerticalStrut(6));
-        page.add(buildNhPage());
-        page.add(Box.createVerticalStrut(3));
 
+        // Staff LC + Pin stay ABOVE NH so they are not buried under the NH block
+        // (that was clipping "Pin current weapon" / Ice LC at the bottom of the HUD).
         staffLcToggle = miniToggle("Staff = L-Click Barrage", script.actions().staffLeftClickCast(),
                 "While a mage staff/wand/Blue moon spear is equipped, Ice Barrage stays left-click armed");
         staffLcToggle.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -382,7 +385,9 @@ public class OverlayUI {
         page.add(Box.createVerticalStrut(3));
         page.add(stepper("Auto-spec on your hit ≥ (dmg)", script.actions().damageTriggerMin(), 1, 99, 5,
                 v -> { script.actions().setDamageTriggerMin(v); saveConfig(); }));
-        page.add(Box.createVerticalStrut(3));
+        page.add(Box.createVerticalStrut(6));
+        page.add(buildNhPage());
+        page.add(Box.createVerticalStrut(4));
         return page;
     }
 
@@ -586,19 +591,8 @@ public class OverlayUI {
         page.add(utilRow);
         page.add(Box.createVerticalStrut(4));
 
-        // Staff = left-click Ice Barrage (never staff-bash while a staff is on).
-        JToggleButton staffLcToggle = miniToggle("Staff = L-Click Barrage", script.actions().staffLeftClickCast(),
-                "While a staff/wand is equipped (by item id), Ice Barrage stays left-click armed");
-        staffLcToggle.setAlignmentX(Component.LEFT_ALIGNMENT);
-        staffLcToggle.setMaximumSize(new Dimension(Integer.MAX_VALUE, 26));
-        staffLcToggle.addActionListener(e -> {
-            script.actions().setStaffLeftClickCast(staffLcToggle.isSelected());
-            styleMiniToggle(staffLcToggle, script.actions().staffLeftClickCast());
-            saveConfig();
-        });
-        page.add(staffLcToggle);
-        page.add(Box.createVerticalStrut(6));
-        
+        // Staff LC lives on Fight (above NH) so it is not buried under this block.
+
         // Manual controls
         JButton forceBarrageBtn = new JButton("Test Barrage");
         styleBtn(forceBarrageBtn, ACCENT_BLUE);
@@ -949,10 +943,10 @@ public class OverlayUI {
         }
         if (collapseBtn != null) {
             collapseBtn.setVisible(true);
-            collapseBtn.setText(minimized ? "▣" : (collapsed ? "▴" : "▾"));
+            collapseBtn.setText(minimized ? "▣" : (collapsed ? "▴ Mini" : "▾ Mini"));
             collapseBtn.setToolTipText(minimized
                     ? "Click to restore HUD"
-                    : (collapsed ? "Click again to fully minimize to a tiny pill" : "Collapse to title bar"));
+                    : (collapsed ? "Click again to fully minimize to a tiny pill" : "Collapse to title bar (again = tiny pill)"));
         }
         if (masterToggle != null) masterToggle.setVisible(!tiny);
         if (tiny) {

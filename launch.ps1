@@ -34,6 +34,8 @@ Clear-Host
 Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host "  Client Launcher" -ForegroundColor Cyan
 Write-Host "==========================================" -ForegroundColor Cyan
+Write-Host "  Tip: git pull first so Attach gets the latest HUD." -ForegroundColor DarkGray
+Write-Host "  After Attach, title must show Roatz 1.0.6 + a '▾ Mini' button." -ForegroundColor DarkGray
 
 # ── Official launcher mode (recommended when login is broken) ──────────────
 if ($Official) {
@@ -53,14 +55,37 @@ if ($Official) {
 
 # ── Build agent ───────────────────────────────────────────────────────────
 Write-Host "[1/5] Building agent..." -ForegroundColor Yellow
-& (Join-Path $ScriptDir "gradlew.bat") buildAll --console=plain | Out-Null
-if (-not (Test-Path -LiteralPath $BuiltAgentJar)) {
-    Write-Host "  BUILD FAILED" -ForegroundColor Red
+Write-Host "  (errors are shown — a silent Out-Null was shipping stale HUDs)" -ForegroundColor Gray
+& (Join-Path $ScriptDir "gradlew.bat") buildAll --console=plain
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $BuiltAgentJar)) {
+    Write-Host "  BUILD FAILED (exit=$LASTEXITCODE) — refusing to attach an old HUD" -ForegroundColor Red
     Read-Host "Press Enter to exit"
     exit 1
 }
 New-Item -ItemType Directory -Force -Path $AgentCacheDir | Out-Null
+# Wipe cached agent so Attach cannot load yesterday's jar.
+Remove-Item -LiteralPath $AgentJar -Force -ErrorAction SilentlyContinue
 Copy-Item -LiteralPath $BuiltAgentJar -Destination $AgentJar -Force
+$agentInfo = Get-Item -LiteralPath $AgentJar
+Write-Host ("  Agent OK ({0} KB, {1})" -f [math]::Round($agentInfo.Length/1KB), $agentInfo.LastWriteTime) -ForegroundColor Green
+# Surface Product.VERSION baked into the jar so you can confirm the HUD title.
+try {
+    Add-Type -AssemblyName System.IO.Compression.FileSystem | Out-Null
+    $z = [System.IO.Compression.ZipFile]::OpenRead($BuiltAgentJar)
+    $entry = $z.Entries | Where-Object { $_.FullName -eq 'com/sun/java/fontmgr/Product.class' } | Select-Object -First 1
+    if ($entry) {
+        $sr = New-Object System.IO.StreamReader($entry.Open())
+        $bytes = New-Object byte[] $entry.Length
+        [void]$entry.Open().Read($bytes, 0, $bytes.Length)
+        $ascii = [Text.Encoding]::ASCII.GetString($bytes)
+        if ($ascii -match '1\.\d+\.\d+') {
+            Write-Host ("  Product.VERSION in jar: {0}  ← HUD title must show this after Attach" -f $Matches[0]) -ForegroundColor Cyan
+        }
+    }
+    $z.Dispose()
+} catch {
+    Write-Host "  (could not read Product.VERSION from jar)" -ForegroundColor DarkGray
+}
 $AttachLoaderClass = Join-Path $ScriptDir "build\attach\AttachLoader.class"
 if (-not (Test-Path -LiteralPath $AttachLoaderClass)) {
     Write-Host "  BUILD FAILED: missing build\attach\AttachLoader.class" -ForegroundColor Red
