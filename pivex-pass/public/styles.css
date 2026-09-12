@@ -137,12 +137,115 @@ h2 {
   font-size: 14px;
   font-weight: 600;
 }
-.sprint-copy {
-  margin: 12px 0 0;
+.day-lock {
+  margin-bottom: 14px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 1px solid rgba(229,115,108,0.55);
+  background: rgba(229,115,108,0.16);
+  box-shadow: var(--shadow);
+  animation: rise 0.45s ease both;
+}
+.day-lock b {
+  display: block;
+  font-size: 18px;
+  letter-spacing: -0.02em;
+  margin-bottom: 4px;
+  color: #F5C4BF;
+}
+.day-lock span {
   font-size: 13px;
+  font-weight: 600;
+  line-height: 1.45;
+  color: var(--paper);
+}
+.day-lock.ok {
+  border-color: rgba(111,207,176,0.45);
+  background: rgba(111,207,176,0.12);
+}
+.day-lock.ok b { color: var(--mint); }
+.coach-panel {
+  border-color: rgba(224,164,90,0.45);
+  background: linear-gradient(180deg, rgba(224,164,90,0.14), rgba(22,32,48,0.82));
+}
+.coach-step {
+  margin: 0 0 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--copper);
+}
+.coach-title {
+  margin: 0 0 8px !important;
+  font-size: clamp(26px, 6vw, 34px);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.05;
+}
+.coach-text {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
   line-height: 1.5;
   color: var(--paper);
+}
+.coach-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 14px;
+}
+.easy-balance {
+  font-family: var(--font-mono);
+  font-size: clamp(28px, 7vw, 40px);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  margin: 4px 0 12px;
+}
+.easy-details {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.easy-details summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+.easy-secondary { margin-top: 8px; }
+.sync-copy {
+  margin: 0 0 10px;
+  font-size: 14px;
   font-weight: 600;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.sync-copy b { color: var(--paper); }
+.lots-hero {
+  margin: 0;
+  padding: 16px 14px 8px;
+  font-size: clamp(28px, 6vw, 36px);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1;
+}
+.lots-hero .lots-num {
+  color: var(--copper);
+  font-family: var(--font-mono);
+}
+.volume-warn {
+  margin: 0 14px 12px;
+  padding: 10px 12px;
+  border-radius: 9px;
+  background: rgba(229,115,108,0.14);
+  border: 1px solid rgba(229,115,108,0.45);
+  color: #F5C4BF;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.45;
 }
 
 .session-track {
@@ -299,8 +402,16 @@ input:focus, select:focus { outline: none; border-color: var(--copper-dim); }
   background: transparent;
   color: var(--coral);
   border: 1px solid rgba(229,115,108,0.35);
+  margin-top: 12px;
+  margin-bottom: 2px;
 }
-.btn-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.btn-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 10px;
+}
+.btn-row .btn { margin-top: 0; }
 
 .result {
   margin-top: 12px;
@@ -319,9 +430,12 @@ input:focus, select:focus { outline: none; border-color: var(--copper-dim); }
   font-size: 12px;
   line-height: 1.5;
   font-weight: 600;
+  color: var(--paper);
 }
-.note { background: rgba(224,164,90,0.1); border: 1px solid rgba(224,164,90,0.35); }
-.warn { background: rgba(229,115,108,0.12); border: 1px solid rgba(229,115,108,0.4); color: #F0B0AB; }
+.note { background: rgba(224,164,90,0.12); border: 1px solid rgba(224,164,90,0.4); }
+.warn { background: rgba(229,115,108,0.14); border: 1px solid rgba(229,115,108,0.45); color: #F5C4BF; }
+input::placeholder { color: #6E7F99; opacity: 1; }
+.result .r-sub { color: #A8B6CC; }
 
 .toggle-row {
   display: flex;
@@ -487,3 +601,24 @@ input:focus, select:focus { outline: none; border-color: var(--copper-dim); }
   .rules-grid { grid-template-columns: 1fr; }
   h1 { font-size: 36px; }
 }
+
+
+.consistency-warn {
+  margin-top: 10px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: rgba(224, 164, 90, 0.14);
+  border: 1px solid rgba(224, 164, 90, 0.45);
+  color: #F0D2A8;
+  font-size: 0.92rem;
+  line-height: 1.4;
+}
+.consistency-warn b { color: #F5C97A; }
+.override-box {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: rgba(229, 115, 108, 0.12);
+  border: 1px solid rgba(229, 115, 108, 0.4);
+}
+.override-box button { margin-top: 8px; }

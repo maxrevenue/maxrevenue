@@ -40,14 +40,37 @@ describe("rules engine", () => {
     assert.match(sized.reason, /one ticket|already has a fill/i);
   });
 
-  it("locks outside overlap window", () => {
-    const w = passWindow(new Date("2026-09-08T10:00:00Z"));
+    it("locks outside overlap window in strict mode", () => {
+    const w = passWindow(new Date("2026-09-08T10:00:00Z"), DEFAULTS);
     assert.equal(w.ok, false);
   });
 
   it("opens during London/NY overlap outside news", () => {
-    const w = passWindow(new Date("2026-09-08T14:00:00Z"));
+    const w = passWindow(new Date("2026-09-08T14:00:00Z"), DEFAULTS);
     assert.equal(w.ok, true);
+  });
+
+  it("allows off-hours in anytime mode", () => {
+    const settings = { ...DEFAULTS, sessionMode: "anytime" };
+    const early = passWindow(new Date("2026-09-08T10:00:00Z"), settings);
+    const news = passWindow(new Date("2026-09-08T12:30:00Z"), settings);
+    assert.equal(early.ok, true);
+    assert.equal(news.ok, true);
+    const sized = maxSafeRisk(settings, [], 0, new Date("2026-09-08T10:00:00Z"));
+    assert.equal(sized.allowed, true);
+  });
+
+  it("still blocks a second ticket in anytime mode", () => {
+    const settings = { ...DEFAULTS, sessionMode: "anytime" };
+    const trades = [{ id: 1, date: "2026-09-08", pnl: 500, instrument: "EURUSD" }];
+    const sized = maxSafeRisk(settings, trades, 0, new Date("2026-09-08T10:00:00Z"));
+    assert.equal(sized.allowed, false);
+  });
+
+  it("still blocks weekends in anytime mode", () => {
+    const settings = { ...DEFAULTS, sessionMode: "anytime" };
+    const w = passWindow(new Date("2026-09-12T14:00:00Z"), settings); // Saturday
+    assert.equal(w.ok, false);
   });
 
   it("flags consistency when one day is over half of profit", () => {
@@ -82,7 +105,22 @@ describe("fx sizing", () => {
     const lots = sizeLots("EURUSD", 1.1, 1.095, 750, 1.1);
     assert.equal(lots.ok, true);
     assert.ok(lots.lots >= 0.01);
+    assert.ok(lots.lots <= 2);
     assert.equal(priceDistanceToPips("EURUSD", 0.005), 50);
+  });
+
+  it("rejects noise-tight stops under 10 pips", () => {
+    const lots = sizeLots("GBPUSD", 1.35525, 1.35491, 750, 1.35525);
+    assert.equal(lots.ok, false);
+    assert.match(lots.error, /10 pips/i);
+  });
+
+  it("caps lots at pass-mode max of 2.00", () => {
+    // Huge risk + tiny-but-legal 10pip stop would otherwise size >> 2 lots
+    const lots = sizeLots("EURUSD", 1.1, 1.099, 5000, 1.1, { maxLots: 2, minStopPips: 10 });
+    assert.equal(lots.ok, true);
+    assert.equal(lots.lots, 2);
+    assert.equal(lots.cappedByMaxLots, true);
   });
 
   it("sizes USDJPY with JPY quote conversion", () => {
