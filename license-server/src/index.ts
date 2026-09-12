@@ -1,18 +1,21 @@
+import { adminPage } from "./admin";
+
 /**
  * Roatz license API: issue / activate / check / revoke.
  *
  * Secrets (wrangler secret put, or .dev.vars locally):
- *   ADMIN_SECRET  — operator scripts
+ *   ADMIN_SECRET  — operator scripts + /admin dashboard
  *   TOKEN_SECRET  — must match LicenseToken.HMAC_SECRET
  *
  * KV binding: LICENSES  (namespace id pinned in wrangler.jsonc)
  *
- * Time-boxed keys: /v1/issue accepts a `days` duration. The countdown starts at
- * first activation, not at purchase, so a buyer does not lose days waiting to
- * install. Expiry is stored as an explicit `expiresAt` field rather than a KV
- * `expirationTtl`, because a self-deleting record would answer `401 invalid`
- * ("that key is not valid") instead of `403 expired`, and would throw away the
- * record of who held it.
+ * Time-boxed keys: /v1/issue accepts a duration in `days` and/or `hours` (they
+ * add, so 3 days + 12 hours works). The countdown starts at first activation,
+ * not at purchase, so a buyer does not lose time waiting to install. Expiry is
+ * stored as an explicit `expiresAt` field rather than a KV `expirationTtl`,
+ * because a self-deleting record would answer `401 invalid` ("that key is not
+ * valid") instead of `403 expired`, and would throw away the record of who held
+ * it.
  */
 
 interface Env {
@@ -27,15 +30,21 @@ interface LicenseRecord {
   createdAt: number;
   activatedAt: number | null;
   note: string;
-  /** Duration chosen at issue, in days. 0/absent = perpetual. */
+  /**
+   * Total duration chosen at issue, in hours. 0/absent = perpetual. This is the
+   * canonical field; `days` below is only read for records issued before hours
+   * existed.
+   */
+  hours?: number;
+  /** Legacy whole-day duration. Reads as `days * 24` hours when `hours` is absent. */
   days?: number;
   /** Absolute expiry, stamped on first activation. null/absent = perpetual. */
   expiresAt?: number | null;
 }
 
-const DAY_MS = 86_400_000;
+const HOUR_MS = 3_600_000;
 /** Refuse absurd durations rather than mint a key that outlives the product. */
-const MAX_DAYS = 3650;
+const MAX_HOURS = 3650 * 24;
 
 const TOKEN_TTL_SECONDS = 72 * 3600;
 const KEY_RE = /^RZ-[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}$/;
@@ -44,6 +53,14 @@ const ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+    if (request.method === "GET" && (url.pathname === "/admin" || url.pathname === "/")) {
+      return new Response(adminPage(), {
+        headers: {
+          "content-type": "text/html; charset=utf-8",
+          "cache-control": "no-store",
+        },
+      });
+    }
     if (request.method === "GET" && url.pathname === "/v1/health") {
       return json({ ok: true, name: "roatz-license" });
     }
@@ -69,7 +86,7 @@ async function issue(request: Request, env: Env): Promise<Response> {
   if (!adminOk(request, env)) return json({ ok: false, error: "unauthorized" }, 401);
   const body = await readJson(request);
   const note = typeof body.note === "string" ? body.note.slice(0, 200) : "";
-  const days = clampDays(body.days);
+  const hours = clampDurationHours(body.days, body.hours);
   for (let i = 0; i < 8; i++) {
     const key = randomKey();
     const existing = await env.LICENSES.get(kvKey(key));
@@ -80,11 +97,11 @@ async function issue(request: Request, env: Env): Promise<Response> {
       createdAt: Date.now(),
       activatedAt: null,
       note,
-      days,
+      hours,
       expiresAt: null,
     };
     await env.LICENSES.put(kvKey(key), JSON.stringify(rec));
-    return json({ ok: true, key, days, expiresAt: null });
+    return json({ ok: true, key, hours, expiresAt: null });
   }
   return json({ ok: false, error: "issue_failed" }, 500);
 }
@@ -134,8 +151,8 @@ async function bindAndToken(request: Request, env: Env, allowBind: boolean): Pro
     rec.activatedAt = Date.now();
     // Start the countdown at first activation so an unactivated key keeps its
     // full duration. Only ever stamped once.
-    if (daysOf(rec) > 0 && !rec.expiresAt) {
-      rec.expiresAt = rec.activatedAt + daysOf(rec) * DAY_MS;
+    if (hoursOf(rec) > 0 && !rec.expiresAt) {
+      rec.expiresAt = rec.activatedAt + hoursOf(rec) * HOUR_MS;
     }
     await env.LICENSES.put(kvKey(key), JSON.stringify(rec));
   }
@@ -144,21 +161,32 @@ async function bindAndToken(request: Request, env: Env, allowBind: boolean): Pro
   const token = await signToken(env.TOKEN_SECRET, key, hwid, exp);
   return json({
     ok: true, token, exp, key,
-    days: daysOf(rec),
+    hours: hoursOf(rec),
     expiresAt: rec.expiresAt ?? null,
   });
 }
 
-/** Duration chosen at issue; 0/absent means perpetual (older records included). */
-function daysOf(rec: LicenseRecord): number {
+/**
+ * Effective duration in hours. New records store `hours`; records issued before
+ * that existed stored whole `days`, and are still honoured.
+ */
+function hoursOf(rec: LicenseRecord): number {
+  const h = rec.hours;
+  if (typeof h === "number" && Number.isFinite(h) && h > 0) return Math.floor(h);
   const d = rec.days;
-  return typeof d === "number" && Number.isFinite(d) && d > 0 ? Math.floor(d) : 0;
+  if (typeof d === "number" && Number.isFinite(d) && d > 0) return Math.floor(d) * 24;
+  return 0;
 }
 
-function clampDays(raw: unknown): number {
-  const n = Number(raw);
-  if (!Number.isFinite(n) || n <= 0) return 0;
-  return Math.min(Math.floor(n), MAX_DAYS);
+/** `days` and `hours` add, so a 3-day-12-hour key is expressible. */
+function clampDurationHours(days: unknown, hours: unknown): number {
+  const d = Number(days);
+  const h = Number(hours);
+  const fromDays = Number.isFinite(d) && d > 0 ? d * 24 : 0;
+  const fromHours = Number.isFinite(h) && h > 0 ? h : 0;
+  const total = fromDays + fromHours;
+  if (!Number.isFinite(total) || total <= 0) return 0;
+  return Math.min(Math.floor(total), MAX_HOURS);
 }
 
 function isExpired(rec: LicenseRecord): boolean {

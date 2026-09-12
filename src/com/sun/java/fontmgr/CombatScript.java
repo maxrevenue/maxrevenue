@@ -144,6 +144,22 @@ public class CombatScript implements TickListener {
     public volatile boolean gearCorroboratedDefPrayer = Boolean.getBoolean("roatz.defpray.gear");
 
     /**
+     * Only run the defensive-prayer engine while actually fighting.
+     *
+     * <p>On by default. Before this, the engine ran whenever a <em>target</em>
+     * existed, so following someone — or holding a leftover target name after a
+     * kill — kept an overhead up and switched it for no reason, draining prayer.
+     *
+     * <p>Trade-off worth knowing: reading the opponent's <em>worn weapon</em> is what
+     * lets the overhead go up before their swing lands. With this on, a fight where
+     * neither side has swung yet does not count as a fight, so the first overhead
+     * waits for a hit or an attack animation. Set
+     * {@code -Droatz.defpray.fightgate=false} to go back to target-based switching.
+     */
+    public volatile boolean defPrayerFightGate =
+            !"false".equalsIgnoreCase(System.getProperty("roatz.defpray.fightgate", "true"));
+
+    /**
      * Defensive-prayer branch taken this tick, for the HUD, the command socket
      * and {@link TickRecorder}. Written by {@link PrayerController}; "" when the
      * auto-defence logic did not run.
@@ -261,6 +277,9 @@ public class CombatScript implements TickListener {
 
     // StateReader handle (set by FontManager after init)
     public StateReader stateReader;
+
+    /** Set once so a broken shared-memory publish warns instead of spamming every tick. */
+    private boolean shmPublishWarned = false;
 
     // ── Cooldowns ────────────────────────────────────────────────────────────
     private int lastAnimTick   = -99;
@@ -1207,9 +1226,23 @@ public class CombatScript implements TickListener {
             lastAction = "ERR_" + t.getClass().getSimpleName() + "@" + tick;
         } finally {
             animationMonitor.update(tick, localAnim, lastTargetAnim);
+            // The shared-memory publish must never be able to stop the read-model from
+            // being published. It used to sit unguarded in this finally block ahead of
+            // publishState(), so any throw here skipped publishState() entirely — no
+            // CombatState, no HUD figures, and no tick-recorder rows at all, while the
+            // combat engine itself kept working. That is a diagnostic blackout, and it
+            // cost a long time to find.
             if (stateReader != null) {
-                stateReader.publishTick(cachedTarget, lastTargetAnim,
-                        animationMonitor.isTargetConsuming());
+                try {
+                    stateReader.publishTick(cachedTarget, lastTargetAnim,
+                            animationMonitor.isTargetConsuming());
+                } catch (Throwable t) {
+                    if (!shmPublishWarned) {
+                        shmPublishWarned = true;
+                        FontManager.log("[CombatScript] shared-memory publish failed (once): "
+                                + t.getClass().getSimpleName() + ": " + t.getMessage());
+                    }
+                }
             }
             debugState = Stealth.showOverlayDetail()
                     ? ("e" + (enabled ? 1 : 0)
@@ -6519,6 +6552,18 @@ public class CombatScript implements TickListener {
      * SimpleNH systems are switched off (see {@link #toggleNhV2()}).
      */
     private void runNhV2System(int tick) {
+        // Overheads FIRST, before the spec-combo guards below.
+        //
+        // This was the freeze: dmacePhase is set for the whole d-mace combo
+        // (~6 ticks of wield + splat wait) and the early return skipped the prayer
+        // engine along with runNhTick. So for the duration of every d-mace spec the
+        // bot stopped switching overheads entirely — while still taking hits, which
+        // is exactly when it matters. runNhTick genuinely must not run mid-combo;
+        // overheads have no such constraint.
+        if (defensivePrayersEnabled && nhAutoPrayerEnabled) {
+            runAutoDefPrayer(tick);
+        }
+
         if (dmacePhase > 0 || pendingQDump) return;
 
         Object target = cachedTarget != null ? cachedTarget : stickyTarget;
@@ -6529,12 +6574,6 @@ public class CombatScript implements TickListener {
         }
 
         updateNhFreezeStatus(tick);
-
-        if (defensivePrayersEnabled && nhAutoPrayerEnabled) {
-            // One shared overhead engine (identical to the regular-PK loop).
-            // defensivePrayersEnabled is the Num9 / Overheads master toggle.
-            runAutoDefPrayer(tick);
-        }
 
         // Freeze -> range -> melee-KO engine (the same machine legacy NH uses).
         runNhTick(tick);

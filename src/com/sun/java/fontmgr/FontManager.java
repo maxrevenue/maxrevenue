@@ -33,8 +33,9 @@ import java.util.jar.JarFile;
  *   6. TickEngine   (tick polling)
  *   7. CombatScript (per-tick PK logic)
  *   8. StateReader  (HP/Prayer/Spec readers)
- *   9. OverlayUI    (transparent Swing control panel)
- *  10. Command socket on 127.0.0.1:9998 only if -Dagent.cmd=true
+ *   9. In-game overlays (wrap RuneLite Callbacks; draw tiles on the game frame)
+ *  10. OverlayUI    (transparent Swing control panel)
+ *  11. Command socket on 127.0.0.1:9998 only if -Dagent.cmd=true
  */
 public class FontManager {
 
@@ -201,6 +202,7 @@ public class FontManager {
     private static CombatScript combatScript;
     private static StateReader  stateReader;
     private static LooterScript looter;
+    private static com.sun.java.fontmgr.overlay.TileMarkerOverlay tileOverlay;
     private static String       shmPath;
 
     // ════════════════════════════════════════════════════════════════════════
@@ -563,6 +565,34 @@ public class FontManager {
                 }
             }
 
+            // 6c. In-game overlays. The client ships the RuneLite API and a
+            //     Callbacks object, so we wrap it to draw tiles on the actual
+            //     game frame. Plugin overlays register on OverlayManager.
+            if (clientInstance != null) {
+                try {
+                    com.sun.java.fontmgr.overlay.RuneLiteBridge bridge =
+                            new com.sun.java.fontmgr.overlay.RuneLiteBridge(clientInstance);
+                    if (bridge.isAvailable()) {
+                        com.sun.java.fontmgr.overlay.OverlayManager manager =
+                                com.sun.java.fontmgr.overlay.OverlayManager.get();
+                        manager.init(bridge);
+                        tileOverlay = new com.sun.java.fontmgr.overlay.TileMarkerOverlay();
+                        manager.register(tileOverlay);
+                        boolean hooked = com.sun.java.fontmgr.overlay.OverlayHook.install(clientInstance);
+                        if (tickEngine != null) {
+                            tickEngine.addListener(t ->
+                                    com.sun.java.fontmgr.overlay.OverlayHook.ensureInstalled());
+                        }
+                        log("[Overlay] in-game rendering "
+                                + (hooked ? "installed" : "disabled (hook failed)"));
+                    } else {
+                        log("[Overlay] RuneLite API not detected; in-game overlays disabled");
+                    }
+                } catch (Throwable t) {
+                    log("[Overlay] init failed: " + t.getMessage());
+                }
+            }
+
             // 7. OverlayUI (EDT) — consolidated always-on-top HUD
             if (combatScript != null) {
                 try {
@@ -594,6 +624,16 @@ public class FontManager {
 
     /** Live combat script — null before bootstrap finishes. */
     public static CombatScript combatScript() { return combatScript; }
+
+    /**
+     * The game client instance discovered by the bootstrap, exposed so the
+     * overlay/plugin layer can reach the live game without re-scanning loaded
+     * classes. Null until bootstrap resolves it.
+     */
+    public static Object clientInstance() { return clientInstance; }
+
+    /** Built-in tile-marker overlay; null when in-game overlays are unavailable. */
+    public static com.sun.java.fontmgr.overlay.TileMarkerOverlay tileOverlay() { return tileOverlay; }
 
     // ════════════════════════════════════════════════════════════════════════
     //  Command socket
@@ -670,6 +710,7 @@ public class FontManager {
             case "TICK":   return "TICK|" + (tickEngine != null ? tickEngine.getLastTick() : -1);
             case "SCRIPT": return handleScript(p);
             case "LOOTER": return handleLooter(p);
+            case "OVERLAY": return handleOverlay(p);
             case "LOG":    return "LOG|" + String.join(" ;; ", recentLog(30));
             case "BYE":    return "BYE";
             default:       return "ERROR|unknown:" + p[0];
@@ -719,6 +760,61 @@ public class FontManager {
                 return "ERROR|RECORD ZONE|BANK";
             case "SAVE":   return "LOOTER|" + looter.saveCfg();
             default: return "ERROR|unknown LOOTER sub: " + p[1];
+        }
+    }
+
+    /**
+     * In-game overlay control over the command socket. The socket is opt-in
+     * ({@code -Dagent.cmd=true}); the same API is reachable in-process through
+     * {@link com.sun.java.fontmgr.overlay.OverlayManager}.
+     */
+    private static String handleOverlay(String[] p) {
+        com.sun.java.fontmgr.overlay.OverlayManager manager =
+                com.sun.java.fontmgr.overlay.OverlayManager.get();
+        if (p.length < 2) return "OVERLAY|" + String.join(" ;; ", manager.names());
+        switch (p[1].toUpperCase()) {
+            case "LIST":
+                return "OVERLAY|" + String.join(" ;; ", manager.names());
+            case "ON":
+                manager.setEnabled(p.length > 2 ? p[2].trim() : null, true);
+                return "OVERLAY|on";
+            case "OFF":
+                manager.setEnabled(p.length > 2 ? p[2].trim() : null, false);
+                return "OVERLAY|off";
+            case "MARK": {
+                if (tileOverlay == null) return "ERROR|no tile overlay";
+                int[] t = parseTile(p.length > 2 ? p[2] : null);
+                if (t == null) return "ERROR|MARK needs x|y|plane";
+                tileOverlay.mark(t[0], t[1], t[2]);
+                return "OVERLAY|marked " + t[0] + "," + t[1] + "," + t[2];
+            }
+            case "UNMARK": {
+                if (tileOverlay == null) return "ERROR|no tile overlay";
+                int[] t = parseTile(p.length > 2 ? p[2] : null);
+                if (t == null) return "ERROR|UNMARK needs x|y|plane";
+                tileOverlay.unmark(t[0], t[1], t[2]);
+                return "OVERLAY|unmarked";
+            }
+            case "CLEAR":
+                if (tileOverlay != null) tileOverlay.clearMarks();
+                return "OVERLAY|cleared";
+            default:
+                return "ERROR|unknown OVERLAY sub: " + p[1];
+        }
+    }
+
+    /** Parses {@code x|y|plane}, {@code x,y} or {@code x y plane}; plane defaults to 0. */
+    private static int[] parseTile(String s) {
+        if (s == null || s.trim().isEmpty()) return null;
+        String[] parts = s.trim().split("[,\\s|]+");
+        if (parts.length < 2) return null;
+        try {
+            int x = Integer.parseInt(parts[0]);
+            int y = Integer.parseInt(parts[1]);
+            int plane = parts.length > 2 ? Integer.parseInt(parts[2]) : 0;
+            return new int[]{x, y, plane};
+        } catch (NumberFormatException e) {
+            return null;
         }
     }
 

@@ -72,7 +72,15 @@ public class SharedMemory {
             buf.putInt(SEQ_OFFSET, writing);
             buf.force();
 
-            ByteBuffer slice = buf.duplicate();
+            // Cast to ByteBuffer deliberately. MappedByteBuffer.duplicate() was made
+            // covariant in Java 9, so calling it on a MappedByteBuffer static type
+            // binds to MappedByteBuffer.duplicate():()LMappedByteBuffer; and then throws
+            // NoSuchMethodError on a Java 8 runtime. Some of the JREs this agent is
+            // attached to are Java 8, and the file log has thousands of:
+            //   Listener error tick=N: 'java.nio.MappedByteBuffer ...duplicate()'
+            // The cast keeps the call site on ByteBuffer.duplicate(), which exists on
+            // both, with identical semantics (same shared content).
+            ByteBuffer slice = ((ByteBuffer) buf).duplicate();
             slice.order(ByteOrder.LITTLE_ENDIAN);
             slice.position(PUBLISH_OFFSET);
             state.writeTo(slice);

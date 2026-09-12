@@ -108,6 +108,7 @@ public final class CombatState {
      * Which branch the defensive-prayer logic took this tick — a short, stable
      * token ({@code anim}, {@code gear-mage}, {@code gear-stable},
      * {@code gear-corr}, {@code bait-hold}, {@code hit}, {@code hit-mem},
+     * {@code no-fight} (a target but no fight — the engine did not run),
      * {@code raw}, {@code held}, {@code none}), or "" when it did not run.
      * Never null.
      *

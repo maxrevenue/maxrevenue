@@ -290,6 +290,15 @@ public final class LauncherApp extends JFrame {
         cancelAutoAttach();
         attachedOk = false;
         setBusy(true);
+        // Say what diagnostics are being forwarded before the game starts, so the
+        // recording path is visible rather than something you have to guess at.
+        AgentFlags.Parsed flags = AgentFlags.fromEnv();
+        if (!flags.isEmpty()) {
+            log("Forwarding to the game: " + String.join(" ", flags.accepted));
+        }
+        for (String bad : flags.rejected) {
+            log("Ignoring unsupported flag: " + bad);
+        }
         io.submit(() -> {
             try {
                 refreshRoat();

@@ -33,71 +33,80 @@ does not lock out an already-activated buyer.
 
 ## License server: production runbook
 
+> **Always start from the repo root:**
+> `cd C:\Users\Alec\Desktop\RoatzBot`
+> Then `cd license-server` only for wrangler commands. Issuing keys no longer
+> needs PowerShell — use the admin page below.
+
 Currently deployed Worker (`license-server/`):
 
 | | |
 |---|---|
 | URL | `https://roatz-license.alec-5c7.workers.dev` |
+| **Admin dashboard** | `https://roatz-license.alec-5c7.workers.dev/admin` |
 | Worker name | `roatz-license` |
 | KV binding | `LICENSES` → `roatz-license-licenses` (`c9073d13ebe4413a8fa832bd2ed31cf0`) |
 | Secrets | `TOKEN_SECRET`, `ADMIN_SECRET` |
 
-The `LICENSES` binding is pinned to the namespace id in `wrangler.jsonc`, so
-redeploys resolve the same KV store instead of provisioning a new one. (The id
-was auto-provisioned by the first deploy and is now committed.)
-
-### 1. Deploy (one time)
+### Issue / revoke (easiest)
 
 ```powershell
-cd license-server
+# From anywhere:
+Start-Process https://roatz-license.alec-5c7.workers.dev/admin
+# or from the repo:
+.\scripts\open-admin.ps1
+```
+
+Paste your `ADMIN_SECRET` once (Remember in this browser), then Issue / Revoke.
+Do **not** put that secret in Discord or the buyer-facing app.
+
+### 1. Deploy (one time — already done for alec-5c7)
+
+```powershell
+cd C:\Users\Alec\Desktop\RoatzBot\license-server
 npm install
 npx wrangler login
 
-# TOKEN_SECRET must equal LicenseToken.HMAC_SECRET
-# (src\com\sun\java\fontmgr\LicenseToken.java). If they differ, activation
-# succeeds but every token fails verification in the client.
-'<paste HMAC_SECRET>' | npx wrangler secret put TOKEN_SECRET
+# TOKEN_SECRET must equal LicenseToken.HMAC_SECRET in
+# src\com\sun\java\fontmgr\LicenseToken.java
+Get-Content ..\src\com\sun\java\fontmgr\LicenseToken.java |
+  Select-String 'HMAC_SECRET ='
 
-# ADMIN_SECRET guards /v1/issue and /v1/revoke. Generate a strong one, keep it
-# in a password manager, and never ship it to buyers.
-node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))" | npx wrangler secret put ADMIN_SECRET
+# Example (use the real string from LicenseToken.java, not this placeholder):
+# "RoatzLicense-v1-...." | npx wrangler secret put TOKEN_SECRET --name roatz-license
 
-npx wrangler deploy      # prints https://roatz-license.<account>.workers.dev
-npx wrangler secret list
+node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))" |
+  npx wrangler secret put ADMIN_SECRET --name roatz-license
+
+npx wrangler deploy
 ```
-
-Rotating `TOKEN_SECRET` is just another `secret put`. Tokens already cached by
-buyers stay valid until their 72h TTL expires, after which `/v1/check` re-issues
-from the new secret. No installer rebuild is needed for secret rotation.
 
 ### 2. Verify the live Worker
 
 ```powershell
 Invoke-RestMethod https://roatz-license.alec-5c7.workers.dev/v1/health
-# ok   name
-# ---- -----
-# True roatz-license
 ```
 
-Expected `POST /v1/activate` answers for a bad key or wrong machine:
-`401 invalid`, `403 revoked`, `409 other_pc`.
-
-### 3. Issue and revoke
+### 3. Issue and revoke (PowerShell alternative)
 
 ```powershell
+cd C:\Users\Alec\Desktop\RoatzBot
 $env:ROATZ_LICENSE_API  = "https://roatz-license.alec-5c7.workers.dev"
 $env:ROATZ_ADMIN_SECRET = "<ADMIN_SECRET>"
 
-.\scripts\issue-key.ps1 -Note "buyer@example"             # -> RZ-XXXX-XXXX-XXXX (perpetual)
+.\scripts\issue-key.ps1 -Note "buyer@example"             # perpetual
 .\scripts\issue-key.ps1 -Note "buyer@example" -Days 30     # 30-day key
+.\scripts\issue-key.ps1 -Note "buyer@example" -Hours 24    # 24h trial
+.\scripts\issue-key.ps1 -Note "buyer@example" -Days 3 -Hours 12
 .\scripts\revoke-key.ps1 RZ-XXXX-XXXX-XXXX
 ```
 
-**Time-boxed keys.** `-Days N` starts the countdown at *first activation*, not at
-purchase, so a buyer does not lose days waiting to install. An unactivated key
-keeps its full duration indefinitely (issuance is manual and tied to a payment,
-so that shelf life is not a leak risk). `-Days 0` (the default) is perpetual, as
-are records written before this existed. Durations are clamped to 3650 days.
+**Time-boxed keys.** `-Days N` and/or `-Hours N` — they add, so `-Days 3 -Hours 12`
+is 84 hours. The countdown starts at *first activation*, not at purchase, so a
+buyer does not lose time waiting to install. An unactivated key keeps its full
+duration indefinitely (issuance is manual and tied to a payment, so that shelf
+life is not a leak risk). No duration (the default) is perpetual, as are records
+written before any of this existed. Total duration is clamped to 3650 days.
 
 Two details worth knowing before promising a duration to a buyer:
 
@@ -234,6 +243,54 @@ agent once in-game so the telemetry patches don't interfere with login.
 # or, by PID:
 .\attach-agent.cmd <pid>
 ```
+
+## Recording a session (diagnostics)
+
+The agent can record one TSV row per tick, which is how you answer "why did it do
+that" with data instead of a description. Off by default.
+
+```powershell
+# 1. Set the flag in the SAME shell that launches the launcher — the env var is
+#    read by the launcher process, then forwarded to the game JVM.
+$env:ROATZ_AGENT_FLAGS = "-Droatz.rec=true"
+
+# 2. Launch normally and play. The launcher's Details log prints:
+#       Forwarding to the game: -Droatz.rec=true
+#    Output: %APPDATA%\Roatz\ticks\combat-<stamp>.tsv
+
+# 3. Summarise it (newest recording by default)
+.\scripts\analyze-ticks.ps1
+```
+
+The `defpray` column names the defensive-prayer branch taken each tick (`anim`,
+`gear-corr`, `gear-stable`, `bait-hold`, `raw`, `held`, `none`, `no-fight`), and `oh` is our
+own live overhead. `analyze-ticks.ps1` reports the distribution plus time-to-correct
+-overhead, which is the number that decides whether gear-based prayer is worth
+having on.
+
+### Forwarding flags to the game JVM
+
+`ROATZ_AGENT_FLAGS` accepts a **space-separated allow-list**, not a general
+passthrough, and anything else is refused and reported in the Details log:
+
+| Allowed | Purpose |
+|---|---|
+| `roatz.rec` | tick recorder |
+| `roatz.defpray.gear` | gear-corroborated defensive prayer |
+| `roatz.defpray.fightgate` | `=false` to make defensive prayer switch on a target instead of only during a fight |
+| `agent.filelog`, `agent.debug` | agent file logging |
+| `agent.cmd` | command socket |
+| `fontmgr.debug`, `fontmgr.praylog`, `fontmgr.overlay.detail`, `fontmgr.attach.verbose` | diagnostics |
+
+**Why an allow-list.** The agent honours `-Dfontmgr.license.bypass=true`, which
+`launch.ps1` uses for the dev loop. This launcher ships to buyers, so a general
+passthrough would let any buyer set one environment variable and run without a
+licence. Any token mentioning `license` or `bypass` is refused even if it were
+ever added to the list. Values containing spaces are not supported, so use
+`-Droatz.rec=true` and the default output path.
+
+For the dev loop (`launch.ps1 -Attach`) you can pass properties directly instead;
+it already sets `-Dfontmgr.license.bypass=true` for you.
 
 ## Command socket (optional, off by default)
 

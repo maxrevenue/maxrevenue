@@ -664,6 +664,25 @@ public final class PrayerController {
     public void runAutoDefPrayer(int tick) {
         if (script.lastProtectSendTick() == tick) return;
 
+        // Only work while a real fight is happening. Merely having a target used to
+        // be enough — following someone, or a leftover name after a kill — so the
+        // overhead went up and switched at nothing and drained prayer for it.
+        //
+        // No extra hold is needed here: isInActivePvpFight() already latches for
+        // DH_FIGHT_IDLE_TICKS after the last hit/HP drop/attack animation, which is
+        // what keeps the overhead from dropping between swings or between kills.
+        if (script.defPrayerFightGate && !inFight()) {
+            if (lastDefTarget != null) {
+                // Forget the weapon belief too: a read from before the fight is not
+                // evidence about this one, and re-using it is how a stale style
+                // survives into a new opponent.
+                lastDefTarget = null;
+                resetWeaponBelief();
+            }
+            script.defPrayTrace = "no-fight";
+            return;
+        }
+
         Object target = script.resolveDefTarget();
         if (target == null) {
             if (lastDefTarget != null) {
@@ -775,6 +794,16 @@ public final class PrayerController {
         if (isPrayerActive("PROTECT_FROM_MISSILES")) return AnimationDb.PROTECT_RANGE_PRAYER_ID;
         if (isPrayerActive("PROTECT_FROM_MELEE")) return AnimationDb.PROTECT_MELEE_PRAYER_ID;
         return script.activeProtectPrayer();
+    }
+
+    /**
+     * In a fight right now. {@link CombatScript#isInActivePvpFight()} covers hits in
+     * either direction, HP drops and live attack/spec animations, and already holds
+     * for its own idle window. {@code hasCombatContext()} is belt and braces for a
+     * traded hit that produced no animation we recognise.
+     */
+    private boolean inFight() {
+        return script.isInActivePvpFight() || script.hasCombatContextPublic();
     }
 
     private void commitDefPrayer(int tick, int needId, AnimationDb.AttackStyle style) {

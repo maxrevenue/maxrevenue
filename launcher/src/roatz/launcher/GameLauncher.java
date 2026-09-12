@@ -50,6 +50,9 @@ final class GameLauncher {
         cmd.add("-XX:AutoBoxCacheMax=65535");
         cmd.add("-Droatpkz.ac.client_md5=" + md5);
         cmd.add("-Droatpkz.ac.launch_ts=" + ts);
+        // Operator diagnostics, allow-listed (never a general passthrough — the
+        // licence bypass flag would otherwise be reachable by any buyer).
+        cmd.addAll(AgentFlags.fromEnv().accepted);
         cmd.add("-jar");
         cmd.add(roat.gameJar.toAbsolutePath().toString());
 
