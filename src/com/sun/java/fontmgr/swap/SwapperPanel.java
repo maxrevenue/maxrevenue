@@ -52,6 +52,13 @@ public final class SwapperPanel extends JPanel {
         body.add(title);
         body.add(Box.createVerticalStrut(2));
 
+        JLabel loadoutLabel = new JLabel("PK Loadouts");
+        loadoutLabel.setForeground(MUTED);
+        loadoutLabel.setFont(loadoutLabel.getFont().deriveFont(Font.BOLD, 9f));
+        loadoutLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        body.add(loadoutLabel);
+        body.add(Box.createVerticalStrut(1));
+
         profileCombo.setAlignmentX(Component.LEFT_ALIGNMENT);
         profileCombo.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
         profileCombo.setBackground(LIST_BG);
