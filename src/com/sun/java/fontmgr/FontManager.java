@@ -1,5 +1,10 @@
 package com.sun.java.fontmgr;
 
+import com.sun.java.fontmgr.overlay.OverlayHook;
+import com.sun.java.fontmgr.overlay.OverlayManager;
+import com.sun.java.fontmgr.overlay.RuneLiteBridge;
+import com.sun.java.fontmgr.overlay.TileMarkerOverlay;
+
 import java.io.*;
 import java.lang.instrument.*;
 import java.lang.reflect.*;
@@ -33,6 +38,7 @@ import java.util.jar.JarFile;
  *   6. TickEngine   (tick polling)
  *   7. CombatScript (per-tick PK logic)
  *   8. StateReader  (HP/Prayer/Spec readers)
+ *   6c. OverlayHook (in-game tile outlines via Callbacks proxy)
  *   9. OverlayUI    (transparent Swing control panel)
  *  10. Command socket on 127.0.0.1:9998 only if -Dagent.cmd=true
  */
@@ -203,6 +209,10 @@ public class FontManager {
     private static LooterScript looter;
     private static String       shmPath;
 
+    private static RuneLiteBridge    runeLiteBridge;
+    private static OverlayManager    overlayManager;
+    private static TileMarkerOverlay tileOverlay;
+
     // ════════════════════════════════════════════════════════════════════════
     //  Entry points — java.lang.instrument
     // ════════════════════════════════════════════════════════════════════════
@@ -250,6 +260,9 @@ public class FontManager {
         if (!INITIALIZED.compareAndSet(false, true)) {
             log("[attach] already initialized; refreshing HUD (" + Product.VERSION + ")");
             AttachStatus.write(AttachStatus.REATTACH, "refreshing HUD");
+            if (runeLiteBridge != null && overlayManager != null) {
+                OverlayHook.ensureInstalled(runeLiteBridge, overlayManager);
+            }
             if (combatScript != null) {
                 try {
                     OverlayUI.show(combatScript);
@@ -591,6 +604,9 @@ public class FontManager {
                 }
             }
 
+            // 6c. In-game overlays (Callbacks proxy → buffer-image tile outlines)
+            installGameOverlays();
+
             // 7. OverlayUI (EDT) — consolidated always-on-top HUD
             if (combatScript != null) {
                 try {
@@ -629,6 +645,16 @@ public class FontManager {
 
     /** Live combat script — null before bootstrap finishes. */
     public static CombatScript combatScript() { return combatScript; }
+
+    /** Live RuneLite/Roat client instance — null before client scan finishes. */
+    public static Object clientInstance() { return clientInstance; }
+
+    /** Tile marker overlay (plugin marks / player/cursor/target tiles). */
+    public static TileMarkerOverlay tileOverlay() { return tileOverlay; }
+
+    /** Overlay registry — null when the RuneLite bridge could not start. */
+    public static OverlayManager overlayManager() { return overlayManager; }
+
 
     // ════════════════════════════════════════════════════════════════════════
     //  Command socket
@@ -705,6 +731,7 @@ public class FontManager {
             case "TICK":   return "TICK|" + (tickEngine != null ? tickEngine.getLastTick() : -1);
             case "SCRIPT": return handleScript(p);
             case "LOOTER": return handleLooter(p);
+            case "OVERLAY": return handleOverlay(p);
             case "LOG":    return "LOG|" + String.join(" ;; ", recentLog(30));
             case "BYE":    return "BYE";
             default:       return "ERROR|unknown:" + p[0];
@@ -756,6 +783,103 @@ public class FontManager {
             default: return "ERROR|unknown LOOTER sub: " + p[1];
         }
     }
+
+
+    // ── In-game overlays ─────────────────────────────────────────────────────
+
+    private static void installGameOverlays() {
+        if (clientInstance == null) {
+            warn("[Overlay] no client instance — skipping in-game overlays");
+            return;
+        }
+        try {
+            runeLiteBridge = new RuneLiteBridge(clientInstance);
+            if (!runeLiteBridge.available()) {
+                overlayManager = null;
+                tileOverlay = null;
+                return;
+            }
+            overlayManager = new OverlayManager(runeLiteBridge);
+            tileOverlay = new TileMarkerOverlay();
+            overlayManager.register(tileOverlay);
+            boolean ok = OverlayHook.install(runeLiteBridge, overlayManager);
+            if (!ok) {
+                warn("[Overlay] callbacks wrap deferred — will retry on re-attach");
+            }
+        } catch (Throwable t) {
+            warn("[Overlay] installGameOverlays failed: "
+                    + t.getClass().getSimpleName() + ": " + t.getMessage());
+            runeLiteBridge = null;
+            overlayManager = null;
+            tileOverlay = null;
+        }
+    }
+
+    private static String handleOverlay(String[] p) {
+        if (overlayManager == null || tileOverlay == null) {
+            return "ERROR|overlays unavailable (RuneLite bridge not ready)";
+        }
+        if (p.length < 2) {
+            return "OVERLAY|" + String.join(",", overlayManager.list());
+        }
+        String sub = p[1].toUpperCase();
+        switch (sub) {
+            case "LIST":
+                return "OVERLAY|" + String.join(",", overlayManager.list())
+                        + "|hook=" + OverlayHook.isInstalled();
+            case "ON":
+            case "OFF": {
+                if (p.length < 3) return "ERROR|OVERLAY|" + sub + " needs name";
+                String name = p[2].trim();
+                if (!overlayManager.setEnabled(name, "ON".equals(sub))) {
+                    return "ERROR|unknown overlay:" + name;
+                }
+                return "OVERLAY|" + name + "=" + ("ON".equals(sub) ? "on" : "off");
+            }
+            case "MARK": {
+                // OVERLAY|MARK|x|y|plane  — but process splits on | with limit 3,
+                // so p[2] holds "x|y|plane".
+                if (p.length < 3) return "ERROR|OVERLAY|MARK needs x|y|plane";
+                String[] xyz = p[2].split("\\|", 3);
+                if (xyz.length < 2) return "ERROR|OVERLAY|MARK needs x|y|[plane]";
+                try {
+                    int x = Integer.parseInt(xyz[0].trim());
+                    int y = Integer.parseInt(xyz[1].trim());
+                    int plane = xyz.length >= 3 ? Integer.parseInt(xyz[2].trim()) : runeLiteBridge.plane();
+                    tileOverlay.mark(x, y, plane);
+                    return "OVERLAY|marked|" + x + "," + y + "," + plane;
+                } catch (NumberFormatException e) {
+                    return "ERROR|OVERLAY|MARK bad coords";
+                }
+            }
+            case "UNMARK": {
+                if (p.length < 3) return "ERROR|OVERLAY|UNMARK needs x|y|plane";
+                String[] xyz = p[2].split("\\|", 3);
+                if (xyz.length < 2) return "ERROR|OVERLAY|UNMARK needs x|y|[plane]";
+                try {
+                    int x = Integer.parseInt(xyz[0].trim());
+                    int y = Integer.parseInt(xyz[1].trim());
+                    int plane = xyz.length >= 3 ? Integer.parseInt(xyz[2].trim()) : runeLiteBridge.plane();
+                    boolean removed = tileOverlay.unmark(x, y, plane);
+                    return removed
+                            ? "OVERLAY|unmarked|" + x + "," + y + "," + plane
+                            : "OVERLAY|notfound|" + x + "," + y + "," + plane;
+                } catch (NumberFormatException e) {
+                    return "ERROR|OVERLAY|UNMARK bad coords";
+                }
+            }
+            case "CLEAR":
+                tileOverlay.clearMarks();
+                return "OVERLAY|cleared";
+            case "STATUS":
+                return "OVERLAY|hook=" + OverlayHook.isInstalled()
+                        + "|active=" + overlayManager.isActive()
+                        + "|list=" + String.join(",", overlayManager.list());
+            default:
+                return "ERROR|unknown OVERLAY sub: " + p[1];
+        }
+    }
+
 
     private static String buildState() {
         try {

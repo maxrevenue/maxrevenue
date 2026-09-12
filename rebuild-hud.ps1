@@ -149,10 +149,10 @@ Write-Host ("  Exe:   {0}" -f $exe)
 Write-Host ("  Agent: {0} ({1} KB, {2})" -f $agent, $agentKb, $agentInfo.LastWriteTime)
 Write-Host ''
 Write-Host 'After Attach, Swapper must show:' -ForegroundColor Cyan
-Write-Host "  - title 'Gear Swapper · v1.0.2'"
+Write-Host "  - title 'Gear Swapper · v1.0.3'"
 Write-Host "  - 'PK Loadouts (switch full gear sets here)' + dropdown"
 Write-Host '  - New / Save As / Rename / Delete'
-Write-Host 'Launcher footer must say v1.0.2.'
+Write-Host 'Launcher footer must say v1.0.3.'
 Write-Host ''
 
 Start-Process -FilePath $exe
