@@ -177,6 +177,7 @@ function render() {
   renderRules(snap);
   renderBot(sized, snap, plan);
   renderDayLock(snap, sized);
+  renderConsistencyWarn(snap);
   renderCoach(snap, sized, plan, session);
   $("calcRisk").value =
     state.guardOn && sized.allowed ? Math.round(sized.riskPct * 100) / 100 : state.settings.risk;
@@ -304,6 +305,38 @@ function renderDayLock(snap, sized) {
     return;
   }
   box.hidden = true;
+}
+
+
+function renderConsistencyWarn(snap) {
+  const box = $("consistencyBanner");
+  if (!box) return;
+  const floatPnl = Number(state.floatingPnl) || 0;
+  const today = R.utcDateStr();
+  let closedTotal = 0;
+  let todayClosed = 0;
+  for (const t of state.trades) {
+    const pnl = Number(t.pnl) || 0;
+    closedTotal += pnl;
+    if (t.date === today) todayClosed += pnl;
+  }
+  const todayProfit = R.money(todayClosed + floatPnl);
+  const totalProfit = R.money(closedTotal + floatPnl);
+  if (todayProfit <= 0 || totalProfit <= 0) {
+    box.hidden = true;
+    box.innerHTML = "";
+    return;
+  }
+  const share = todayProfit / totalProfit;
+  if (share > 0.5 + 1e-12) {
+    box.hidden = false;
+    box.innerHTML =
+      "<b>Consistency warning</b> Closing now may violate the 50% consistency rule — consider partial close." +
+      " Today would be " + (share * 100).toFixed(0) + "% of total profit.";
+  } else {
+    box.hidden = true;
+    box.innerHTML = "";
+  }
 }
 
 function renderSprint(plan, session) {
@@ -573,16 +606,39 @@ function renderPick() {
   const body = $("pickBody");
   if (!lastPick) return;
   if (lastPick.sitOut) {
-    pill.textContent = lastPick.status === "passed" ? "Passed" : "Wait";
-    pill.className = "pill " + (lastPick.status === "passed" ? "passed" : "need-days");
+    const locked = lastPick.status === "locked" || lastPick.action === "locked";
+    pill.textContent = lastPick.status === "passed" ? "Passed" : locked ? "Locked" : "Wait";
+    pill.className = "pill " + (lastPick.status === "passed" ? "passed" : locked ? "failed" : "need-days");
+    let extra = `<p class="note">Do not force a setup. Check again in 30–60 minutes. If you already closed a Pivex trade today, save it in step 1.</p>`;
+    if (locked) {
+      extra =
+        `<div class="override-box">` +
+        `<div>Day is locked after a logged fill. Override is only for repair mistakes — not a second ticket by default.</div>` +
+        `<button class="btn ghost" id="overrideLockBtn" type="button">Confirm override — check anyway</button>` +
+        `</div>`;
+    }
+    if (lastPick.consistency && lastPick.consistency.warn) {
+      extra =
+        `<div class="consistency-warn"><b>Consistency warning</b> ${escapeHtml(
+          lastPick.consistency.message
+        )}</div>` + extra;
+    }
     body.innerHTML =
       `<div class="result" style="margin-top:0"><div class="r-main">${escapeHtml(
-        lastPick.status === "passed" ? "You passed" : "No trade — wait"
+        lastPick.status === "passed" ? "You passed" : locked ? "Day locked" : "No trade — wait"
       )}</div><div class="r-sub">${escapeHtml(
-        plainReason(lastPick.detail) || lastPick.detail || ""
-      )}</div></div>` +
-      `<p class="note">Do not force a setup. Check again in 30–60 minutes. If you already closed a Pivex trade today, save it in step 1.</p>`;
+        plainReason(lastPick.detail || lastPick.message) || lastPick.detail || lastPick.message || ""
+      )}</div></div>` + extra;
     renderCoach(snapNow(), sizedNow(), planNow(), R.sessionClock(new Date(), state.settings));
+    const btn = $("overrideLockBtn");
+    if (btn) {
+      btn.addEventListener("click", () => {
+        const ok = window.confirm(
+          "Override the daily lock? This is only for repair mistakes. It is NOT a free second ticket."
+        );
+        if (ok) fetchPicks({ force: true, override: true });
+      });
+    }
     return;
   }
   const p = lastPick.pick;
@@ -646,6 +702,7 @@ async function fetchPicks(opts = {}) {
         floatingPnl: state.floatingPnl,
         exclude: state.skipped || [],
         refresh: opts.refresh !== false,
+        override: opts.override === true,
       }),
     });
     if (!res.ok) throw new Error("Scanner HTTP " + res.status);
@@ -710,6 +767,7 @@ $("floatingPnl").addEventListener("input", async (e) => {
   state.floatingPnl = parseFloat(e.target.value) || 0;
   await persist();
   render();
+  renderConsistencyWarn();
 });
 
 $("calcBtn").addEventListener("click", () => {
