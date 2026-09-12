@@ -183,13 +183,18 @@ public final class OpponentLoadout {
         if (wid <= 0) return AnimationDb.AttackStyle.UNKNOWN;
         String name = names[SLOT_WEAPON];
         String n = InventoryTracker.stripName(name);
-        if (n.contains("bow") || n.contains("crossbow") || n.contains("ballista")
+        // Eclipse atlatl / bows first — special is magic via AnimationDb, not gear.
+        if (InventoryTracker.isEclipseAtlatl(wid, name)
+                || n.contains("bow") || n.contains("crossbow") || n.contains("ballista")
                 || n.contains("atlatl") || n.contains("thrownaxe") || n.contains("knife")
                 || n.contains("javelin") || n.contains("chinchompa") || n.contains("blowpipe")
                 || n.contains("dart")) {
             return AnimationDb.AttackStyle.RANGED;
         }
-        if (InventoryTracker.isNonAutocastStaff(wid, name) || InventoryTracker.isAutocastStaff(wid, name)
+        // Blue moon spear is a bladed staff (name has "spear") — treat as MAGIC for NH.
+        if (InventoryTracker.isMageStaff(wid, name) || InventoryTracker.isBlueMoonSpear(wid, name)
+                || InventoryTracker.isNonAutocastStaff(wid, name)
+                || InventoryTracker.isAutocastStaff(wid, name)
                 || n.contains("staff") || n.contains("wand") || n.contains("trident")
                 || n.contains("sanguinesti") || n.contains("sceptre")) {
             return AnimationDb.AttackStyle.MAGIC;

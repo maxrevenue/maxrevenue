@@ -16,8 +16,9 @@ public final class LicenseToken {
 
     /**
      * Must match the Worker's {@code TOKEN_SECRET} (wrangler secret / {@code .dev.vars}).
+     * Rotated 2026-09-11 after public-repo exposure of the previous value.
      */
-    public static final String HMAC_SECRET = "RoatzLicense-v1-8f3c2a91e6b74d0a9c15f28e4b7d63a0";
+    public static final String HMAC_SECRET = "RoatzLicense-v2-38341a071aebbbeebb37aad6c0289f48752f6fbf94319edd";
 
     private LicenseToken() {}
 

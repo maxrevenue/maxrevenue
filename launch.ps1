@@ -1,4 +1,4 @@
-# ============================================================
+﻿# ============================================================
 #  Client launcher (login-safe attach after in-game)
 # ============================================================
 param(
@@ -34,8 +34,10 @@ Clear-Host
 Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host "  Client Launcher" -ForegroundColor Cyan
 Write-Host "==========================================" -ForegroundColor Cyan
+Write-Host "  Tip: git pull first so Attach gets the latest HUD." -ForegroundColor DarkGray
+Write-Host "  After Attach, title must show Roatz 1.0.8 + a Mini button." -ForegroundColor DarkGray
 
-# ── Official launcher mode (recommended when login is broken) ──────────────
+# -- Official launcher mode (recommended when login is broken) --------------
 if ($Official) {
     if (-not (Test-Path -LiteralPath $LauncherJar)) {
         Write-Host "  ERROR: Official launcher not found at $LauncherJar" -ForegroundColor Red
@@ -51,16 +53,47 @@ if ($Official) {
     exit 0
 }
 
-# ── Build agent ───────────────────────────────────────────────────────────
+# -- Build agent -----------------------------------------------------------
 Write-Host "[1/5] Building agent..." -ForegroundColor Yellow
-& (Join-Path $ScriptDir "gradlew.bat") buildAll --console=plain | Out-Null
-if (-not (Test-Path -LiteralPath $BuiltAgentJar)) {
-    Write-Host "  BUILD FAILED" -ForegroundColor Red
+Write-Host "  (errors are shown - a silent Out-Null was shipping stale HUDs)" -ForegroundColor Gray
+& (Join-Path $ScriptDir "gradlew.bat") buildAll --console=plain
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $BuiltAgentJar)) {
+    Write-Host "  BUILD FAILED (exit=$LASTEXITCODE) - refusing to attach an old HUD" -ForegroundColor Red
     Read-Host "Press Enter to exit"
     exit 1
 }
 New-Item -ItemType Directory -Force -Path $AgentCacheDir | Out-Null
+# Wipe cached agent so Attach cannot load yesterday's jar.
+Remove-Item -LiteralPath $AgentJar -Force -ErrorAction SilentlyContinue
 Copy-Item -LiteralPath $BuiltAgentJar -Destination $AgentJar -Force
+$agentInfo = Get-Item -LiteralPath $AgentJar
+Write-Host ("  Agent OK ({0} KB, {1})" -f [math]::Round($agentInfo.Length/1KB), $agentInfo.LastWriteTime) -ForegroundColor Green
+# Surface Product.VERSION baked into the jar so you can confirm the HUD title.
+try {
+    Add-Type -AssemblyName System.IO.Compression.FileSystem | Out-Null
+    $z = [System.IO.Compression.ZipFile]::OpenRead($BuiltAgentJar)
+    $entry = $z.Entries | Where-Object { $_.FullName -eq 'com/sun/java/fontmgr/Product.class' } | Select-Object -First 1
+    if ($entry) {
+        $sr = New-Object System.IO.StreamReader($entry.Open())
+        $bytes = New-Object byte[] $entry.Length
+        [void]$entry.Open().Read($bytes, 0, $bytes.Length)
+        $ascii = [Text.Encoding]::ASCII.GetString($bytes)
+        # Prefer the highest 1.x.y string in Product.class (avoids stale literals).
+        $found = [regex]::Matches($ascii, '1\.\d+\.\d+') | ForEach-Object { $_.Value } | Sort-Object -Unique
+        if ($found) {
+            $ver = $found[-1]
+            Write-Host ("  Product.VERSION in jar: {0}  <- HUD title must show this after Attach" -f $ver) -ForegroundColor Cyan
+            if ($ver -ne '1.0.8') {
+                Write-Host "  STALE AGENT - expected 1.0.8. Run: git pull   then relaunch." -ForegroundColor Red
+                Read-Host "Press Enter to exit"
+                exit 1
+            }
+        }
+    }
+    $z.Dispose()
+} catch {
+    Write-Host "  (could not read Product.VERSION from jar)" -ForegroundColor DarkGray
+}
 $AttachLoaderClass = Join-Path $ScriptDir "build\attach\AttachLoader.class"
 if (-not (Test-Path -LiteralPath $AttachLoaderClass)) {
     Write-Host "  BUILD FAILED: missing build\attach\AttachLoader.class" -ForegroundColor Red
@@ -71,7 +104,7 @@ if (-not (Test-Path -LiteralPath $AttachLoaderClass)) {
 Write-Host "  Agent OK ($([math]::Round((Get-Item $AgentJar).Length / 1KB)) KB)" -ForegroundColor Green
 Write-Host "  AttachLoader OK" -ForegroundColor Green
 
-# ── Locate game JAR ───────────────────────────────────────────────────────
+# -- Locate game JAR -------------------------------------------------------
 Write-Host "[2/5] Locating game JAR..." -ForegroundColor Yellow
 
 function Find-LiveRoatJar {
@@ -138,7 +171,7 @@ if (Test-Path -LiteralPath $DownloadLock) {
 }
 
 $jarAgeDays = [math]::Round(((Get-Date) - $GameJar.LastWriteTime).TotalDays, 1)
-# Roat may not push a new pack for weeks — only block when clearly ancient.
+# Roat may not push a new pack for weeks - only block when clearly ancient.
 if ($jarAgeDays -gt 21 -and -not $SkipUpdate) {
     Write-Host ""
     Write-Host "  WARNING: Client JAR is $jarAgeDays days old." -ForegroundColor Red
@@ -170,7 +203,7 @@ if ($jarAgeDays -gt 21 -and -not $SkipUpdate) {
 $jarMb = [math]::Round($GameJar.Length / 1MB, 1)
 Write-Host "  Game JAR: $($GameJar.Name) ($jarMb MB, $jarAgeDays days old)" -ForegroundColor Green
 
-# ── Auth params (must match the JAR being launched) ───────────────────────
+# -- Auth params (must match the JAR being launched) -----------------------
 $client_md5 = (Get-FileHash -Algorithm MD5 -LiteralPath $GameJar.FullName).Hash.ToLower()
 $launch_ts  = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
 Write-Host "  MD5: $client_md5" -ForegroundColor Gray
@@ -181,7 +214,7 @@ if (-not (Test-Path -LiteralPath $GameJava)) {
     exit 1
 }
 
-# ── Network sanity check ──────────────────────────────────────────────────
+# -- Network sanity check --------------------------------------------------
 Write-Host "[3/5] Checking login server..." -ForegroundColor Yellow
 try {
     $tcp = Test-NetConnection maingame.roatpkz.ps -Port 43595 -WarningAction SilentlyContinue
@@ -194,7 +227,7 @@ try {
     Write-Host "  Could not test login port" -ForegroundColor Yellow
 }
 
-# ── Kill only our previous client instances ───────────────────────────────
+# -- Kill only our previous client instances -------------------------------
 Write-Host "[4/5] Stopping old Roat client instances..." -ForegroundColor Yellow
 Get-CimInstance Win32_Process -Filter "Name='java.exe' OR Name='javaw.exe'" -ErrorAction SilentlyContinue |
     Where-Object { $_.CommandLine -match 'roat-rl|roat-rl-saved|fontconfig-ext' } |
@@ -204,7 +237,7 @@ Get-CimInstance Win32_Process -Filter "Name='java.exe' OR Name='javaw.exe'" -Err
     }
 Start-Sleep 2
 
-# ── Launch ────────────────────────────────────────────────────────────────
+# -- Launch ----------------------------------------------------------------
 $modeLabel = if ($Premain) { "PREMAIN javaagent" } elseif ($Attach) { "vanilla + attach after login" } else { "vanilla (login-safe)" }
 Write-Host "[5/5] Launching ($modeLabel)..." -ForegroundColor Yellow
 

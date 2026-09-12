@@ -72,6 +72,7 @@ public class OverlayUI {
     private JToggleButton pkAutoEatToggle, dhAutoEatToggle;
     private JButton pkSpecModeBtn;
     private JToggleButton staffLcToggle;
+    private JLabel iceLcStatusLabel;
 
     // NH
     private JToggleButton nhModeToggle, nhDefPrayToggle;
@@ -84,13 +85,28 @@ public class OverlayUI {
     // Settings / advanced
     private javax.swing.JTextField tfAnimId, tfDmgMin, tfAgsMin, tfDmaceMin;
     private JToggleButton cbAnimTrig, cbDmgTrig;
+    private JPanel hkSpecBtn, hkGmaulBtn, hkVengBtn, hkSetupBtn;
     /** Preset buttons, one per {@link Presets.Mode}; restyled each tick. */
     private JButton[] presetBtns;
 
     private int activeTab = 0;
     private boolean collapsed = false;
+    /** Tiny restore handle — smaller than collapsed title bar. */
+    private boolean minimized = false;
     private Point dragOffset = null;
     private final java.nio.file.Path cfgPath;
+
+    private static final int FRAME_W = 400;
+    private static final int FRAME_H = 920;
+    private static final int FRAME_H_COLLAPSED = 40;
+    private static final int FRAME_W_MINI = 52;
+    private static final int FRAME_H_MINI = 28;
+
+    private JPanel titleBar;
+    private JButton collapseBtn;
+    private JPanel expandableChrome;
+    private RoundedPanel footerBar;
+    private RoundedPanel rootPanel;
 
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
         Thread t = new Thread(r, "HUD-" + java.util.concurrent.ThreadLocalRandom.current().nextInt(100_000));
@@ -99,9 +115,29 @@ public class OverlayUI {
     });
     private final java.util.Timer animationTimer = new java.util.Timer(true);
 
+    private static volatile OverlayUI INSTANCE;
+
     public static void show(CombatScript script) {
         if (script == null) return;
-        SwingUtilities.invokeLater(() -> new OverlayUI(script).frame.setVisible(true));
+        SwingUtilities.invokeLater(() -> {
+            OverlayUI existing = INSTANCE;
+            if (existing != null && existing.frame != null && existing.frame.isDisplayable()) {
+                if (existing.minimized || existing.collapsed) {
+                    existing.minimized = false;
+                    existing.collapsed = false;
+                    existing.applyCollapse();
+                }
+                existing.frame.setVisible(true);
+                existing.frame.toFront();
+                existing.frame.setAlwaysOnTop(true);
+                existing.frame.requestFocus();
+                return;
+            }
+            OverlayUI ui = new OverlayUI(script);
+            INSTANCE = ui;
+            ui.frame.setVisible(true);
+            ui.frame.toFront();
+        });
     }
 
     public OverlayUI(CombatScript script) {
@@ -121,36 +157,40 @@ public class OverlayUI {
         frame.setType(Window.Type.UTILITY);
         frame.setTitle(Product.NAME + " " + Product.VERSION);
         frame.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
+        // User can drag the bottom edge taller so Fight never has to squash controls.
+        frame.setResizable(true);
 
         RoundedPanel root = new RoundedPanel(14, BG_DARK);
         root.setLayout(new BorderLayout(6, 6));
         root.setBorder(new EmptyBorder(6, 8, 8, 8));
+        rootPanel = root;
 
         // Title bar
-        JPanel titleBar = new JPanel(new BorderLayout(6, 0));
+        titleBar = new JPanel(new BorderLayout(6, 0));
         titleBar.setOpaque(true);
         titleBar.setBackground(TITLE_BG);
         titleBar.setBorder(new EmptyBorder(4, 8, 4, 8));
-        JPanel brand = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 0));
+        JPanel brand = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
         brand.setOpaque(false);
-        JLabel appTitle = new JLabel(Product.NAME);
+        // Single label so "1.0.8" cannot clip to "1." next to Mini/ARMED.
+        JLabel appTitle = new JLabel(Product.NAME + " " + Product.VERSION);
         appTitle.setForeground(ACCENT_GOLD);
-        appTitle.setFont(appTitle.getFont().deriveFont(Font.BOLD, 11.5f));
+        appTitle.setFont(appTitle.getFont().deriveFont(Font.BOLD, 12f));
         brand.add(appTitle);
-        brand.add(createLabel("v" + Product.VERSION, FG_MUTED, 9f, false));
         titleBar.add(brand, BorderLayout.WEST);
 
         JPanel titleRight = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 0));
         titleRight.setOpaque(false);
-        JButton collapseBtn = new JButton(collapsed ? "▴" : "▾");
+        collapseBtn = new JButton(collapsed ? "▴" : "Mini");
         collapseBtn.setFocusable(false);
         collapseBtn.setBorder(null);
         collapseBtn.setContentAreaFilled(false);
         collapseBtn.setForeground(FG_BRIGHT);
+        collapseBtn.setToolTipText("Collapse -> again = tiny pill -> restore");
         collapseBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         collapseBtn.addActionListener(e -> toggleCollapse());
         titleRight.add(collapseBtn);
-        masterToggle = new JToggleButton(script.actions().masterEnabled() ? "LIVE" : "ARMED");
+        masterToggle = new JToggleButton(script.actions().masterEnabled() ? "ON" : "ARM");
         masterToggle.setSelected(script.actions().masterEnabled());
         masterToggle.setFocusPainted(false);
         masterToggle.setFont(masterToggle.getFont().deriveFont(Font.BOLD, 10f));
@@ -198,44 +238,60 @@ public class OverlayUI {
 
         RoundedPanel vitals = new RoundedPanel(8, CARD_BG);
         vitals.setLayout(new BoxLayout(vitals, BoxLayout.Y_AXIS));
-        vitals.setBorder(new EmptyBorder(6, 8, 6, 8));
-        vitals.add(hpBar); vitals.add(Box.createVerticalStrut(4));
-        vitals.add(prayBar); vitals.add(Box.createVerticalStrut(4));
+        vitals.setBorder(new EmptyBorder(4, 6, 4, 6));
+        vitals.add(hpBar); vitals.add(Box.createVerticalStrut(2));
+        vitals.add(prayBar); vitals.add(Box.createVerticalStrut(2));
         vitals.add(specBar);
 
         RoundedPanel targetP = new RoundedPanel(8, CARD_BG);
         targetP.setLayout(new BoxLayout(targetP, BoxLayout.Y_AXIS));
-        targetP.setBorder(new EmptyBorder(6, 8, 6, 8));
+        targetP.setBorder(new EmptyBorder(3, 6, 3, 6));
+        // One compact row — old 3-row target ate the Fight viewport.
         targetP.add(splitRow(targetNameLabel, targetHpLabel));
-        targetP.add(Box.createVerticalStrut(1));
-        targetP.add(splitRow(targetWeaponLabel, null));
-        targetP.add(Box.createVerticalStrut(3));
         targetP.add(chipRow(fightStateLabel, koLabel, specReadyLabel));
+        targetWeaponLabel.setVisible(false);
+
+        expandableChrome = new JPanel();
+        expandableChrome.setLayout(new BoxLayout(expandableChrome, BoxLayout.Y_AXIS));
+        expandableChrome.setOpaque(false);
+        expandableChrome.add(header);
+        expandableChrome.add(Box.createVerticalStrut(4));
+        expandableChrome.add(vitals);
+        expandableChrome.add(Box.createVerticalStrut(4));
+        expandableChrome.add(targetP);
 
         JPanel north = new JPanel();
         north.setLayout(new BoxLayout(north, BoxLayout.Y_AXIS));
         north.setOpaque(false);
-        north.add(titleBar); north.add(header);
-        north.add(Box.createVerticalStrut(4)); north.add(vitals);
-        north.add(Box.createVerticalStrut(4)); north.add(targetP);
+        north.add(titleBar);
+        north.add(expandableChrome);
         root.add(north, BorderLayout.NORTH);
 
         body = new JPanel(cards);
         body.setOpaque(false);
+        // Swapper scrolls internally; Fight/DH use an outer scroll page.
         body.add(buildSwapperHubPage(), "SWAP");
-        body.add(buildFightPage(), "FIGHT");
-        body.add(buildDhPage(), "DH");
+        body.add(scrollPage(buildFightPage()), "FIGHT");
+        body.add(scrollPage(buildDhPage()), "DH");
         root.add(body, BorderLayout.CENTER);
 
-        RoundedPanel footer = new RoundedPanel(8, CARD_BG);
-        footer.setLayout(new BoxLayout(footer, BoxLayout.Y_AXIS));
-        footer.setBorder(new EmptyBorder(4, 6, 4, 6));
-        footer.add(actionTickerLabel);
-        root.add(footer, BorderLayout.SOUTH);
+        footerBar = new RoundedPanel(8, CARD_BG);
+        footerBar.setLayout(new BoxLayout(footerBar, BoxLayout.Y_AXIS));
+        footerBar.setBorder(new EmptyBorder(4, 6, 4, 6));
+        footerBar.add(actionTickerLabel);
+        root.add(footerBar, BorderLayout.SOUTH);
 
         frame.setContentPane(root);
+        // showTab expands if collapsed/minimized — restore saved chrome after first layout.
+        boolean startCollapsed = collapsed;
+        boolean startMinimized = minimized;
+        collapsed = false;
+        minimized = false;
         showTab(activeTab);
-        frame.setSize(300, 480);
+        collapsed = startCollapsed;
+        minimized = startMinimized;
+        if (minimized) collapsed = false;
+        applyCollapse();
         frame.setLocation(60, 60);
         frame.setBackground(new Color(0, 0, 0, 0));
 
@@ -259,40 +315,130 @@ public class OverlayUI {
         frame.addWindowListener(new java.awt.event.WindowAdapter() {
             @Override public void windowClosed(java.awt.event.WindowEvent e) {
                 scheduler.shutdownNow(); animationTimer.cancel();
+                if (INSTANCE == OverlayUI.this) INSTANCE = null;
             }
         });
     }
 
     // ── Pages ─────────────────────────────────────────────────────────────────
 
+    /** Wrap a tab page so tall content (Swapper loadouts, Fight toggles) can scroll. */
+    private JPanel scrollPage(JPanel page) {
+        // Seal nested sections so BoxLayout cannot compress them into each other
+        // when the viewport is short (that was the overlapping Fight controls).
+        sealBoxChildren(page);
+        JPanel view = new ScrollView(page);
+        JScrollPane scroll = new JScrollPane(view);
+        scroll.setBorder(null);
+        scroll.setOpaque(false);
+        scroll.getViewport().setOpaque(false);
+        scroll.getViewport().setScrollMode(JViewport.SIMPLE_SCROLL_MODE);
+        JScrollBar vbar = scroll.getVerticalScrollBar();
+        vbar.setUnitIncrement(24);
+        vbar.setPreferredSize(new Dimension(12, 0));
+        // Always show the bar so Fight/DH content is obviously scrollable.
+        scroll.setVerticalScrollBarPolicy(ScrollPaneConstants.VERTICAL_SCROLLBAR_ALWAYS);
+        scroll.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
+        JPanel wrap = new JPanel(new BorderLayout());
+        wrap.setOpaque(false);
+        wrap.add(scroll, BorderLayout.CENTER);
+        return wrap;
+    }
+
+    /** Prevent BoxLayout Y from squashing children below their preferred height. */
+    private static void sealBoxChildren(JComponent root) {
+        for (Component c : root.getComponents()) {
+            if (!(c instanceof JComponent)) continue;
+            JComponent jc = (JComponent) c;
+            // Recurse into nested box panels (PK / NH sections).
+            if (jc.getLayout() instanceof BoxLayout) {
+                sealBoxChildren(jc);
+            }
+            Dimension pref = jc.getPreferredSize();
+            int h = Math.max(pref.height, 8);
+            jc.setMinimumSize(new Dimension(0, h));
+            // Cap max height at preferred so nested box panels do not steal/crush siblings.
+            if (jc.getLayout() instanceof BoxLayout || jc instanceof JPanel) {
+                Dimension max = jc.getMaximumSize();
+                int maxH = max.height;
+                // Keep horizontal stretch; lock vertical to preferred for section panels.
+                if (jc.getLayout() instanceof BoxLayout) {
+                    jc.setMaximumSize(new Dimension(Integer.MAX_VALUE, h));
+                } else if (maxH > 0 && maxH < Integer.MAX_VALUE / 4) {
+                    jc.setMinimumSize(new Dimension(0, Math.min(h, maxH)));
+                } else {
+                    jc.setMaximumSize(new Dimension(Integer.MAX_VALUE, h));
+                }
+            }
+        }
+        Dimension pref = root.getPreferredSize();
+        root.setMinimumSize(new Dimension(0, pref.height));
+        root.setPreferredSize(pref);
+    }
+
+    /**
+     * Scrollable view that tracks viewport WIDTH only. Height follows preferred size
+     * so a short HUD scrolls instead of overlapping controls.
+     */
+    private static final class ScrollView extends JPanel implements Scrollable {
+        ScrollView(JComponent content) {
+            super(new BorderLayout());
+            setOpaque(false);
+            add(content, BorderLayout.NORTH);
+        }
+        @Override public Dimension getPreferredScrollableViewportSize() {
+            return getPreferredSize();
+        }
+        @Override public int getScrollableUnitIncrement(Rectangle visible, int orientation, int direction) {
+            return 24;
+        }
+        @Override public int getScrollableBlockIncrement(Rectangle visible, int orientation, int direction) {
+            return Math.max(visible.height - 24, 24);
+        }
+        @Override public boolean getScrollableTracksViewportWidth() { return true; }
+        @Override public boolean getScrollableTracksViewportHeight() { return false; }
+    }
+
     /** Swapper is the hub — everything for NH pking is driven from here. */
     private JPanel buildSwapperHubPage() {
-        JPanel page = vbox();
-        JLabel t = createLabel("Swapper Hub", ACCENT_GOLD, 12f, true);
-        t.setAlignmentX(Component.LEFT_ALIGNMENT);
-        page.add(t);
-        page.add(Box.createVerticalStrut(2));
-        JLabel sub = createLabel("Make swaps, snapshot NH gear, bind hotkeys. Fight toggles on the Fight tab.",
-                FG_MUTED, 9.5f, false);
-        sub.setAlignmentX(Component.LEFT_ALIGNMENT);
-        page.add(sub);
-        page.add(Box.createVerticalStrut(4));
+        // BorderLayout fill so SwapperPanel's internal scroll gets a bounded height
+        // (BoxLayout would grow to preferred height and clip inside the fixed frame).
+        JPanel page = new JPanel(new BorderLayout());
+        page.setOpaque(false);
         swapperPanel = new com.sun.java.fontmgr.swap.SwapperPanel(swapManager, swapDispatcher, script);
         HotkeyManager.get().setSwapFlush(swapperPanel::flushEditorIfEditing);
-        page.add(swapperPanel);
+        page.add(swapperPanel, BorderLayout.CENTER);
         return page;
     }
 
     /** Fight = the few combat switches you actually use. */
     private JPanel buildFightPage() {
-        JPanel page = vbox();
-        page.add(buildPresetRow());
-        page.add(Box.createVerticalStrut(4));
-        page.add(buildPkPage());
-        page.add(Box.createVerticalStrut(3));
+        // GridBag rows never overlap — BoxLayout was crushing Fight controls
+        // into each other whenever the viewport was shorter than content.
+        JPanel page = new JPanel(new GridBagLayout());
+        page.setOpaque(false);
+        GridBagConstraints gc = new GridBagConstraints();
+        gc.gridx = 0;
+        gc.gridy = 0;
+        gc.weightx = 1;
+        gc.weighty = 0;
+        gc.fill = GridBagConstraints.HORIZONTAL;
+        gc.anchor = GridBagConstraints.NORTHWEST;
+        gc.insets = new Insets(2, 0, 2, 0);
+
+        page.add(buildPresetRow(), gc);
+
+        gc.gridy++;
+        page.add(buildPkPage(), gc);
+
+        // Staff LC + Pin ABOVE NH
+        JPanel staffBlock = new JPanel();
+        staffBlock.setLayout(new BoxLayout(staffBlock, BoxLayout.Y_AXIS));
+        staffBlock.setOpaque(false);
+        staffBlock.setAlignmentX(Component.LEFT_ALIGNMENT);
 
         staffLcToggle = miniToggle("Staff = L-Click Barrage", script.actions().staffLeftClickCast(),
-                "While a staff/wand is equipped (by item id), Ice Barrage stays left-click armed");
+                "While a mage staff/wand/Blue moon spear is equipped, Ice Barrage stays left-click armed");
         staffLcToggle.setAlignmentX(Component.LEFT_ALIGNMENT);
         staffLcToggle.setMaximumSize(new Dimension(Integer.MAX_VALUE, 26));
         staffLcToggle.addActionListener(e -> {
@@ -300,19 +446,41 @@ public class OverlayUI {
             styleMiniToggle(staffLcToggle, script.actions().staffLeftClickCast());
             saveConfig();
         });
-        page.add(staffLcToggle);
-        page.add(Box.createVerticalStrut(3));
-        page.add(stepper("Auto-spec on your hit ≥ (dmg)", script.actions().damageTriggerMin(), 1, 99, 5,
+        staffBlock.add(staffLcToggle);
+        iceLcStatusLabel = createLabel("Ice LC: --", FG_MUTED, 9.5f, false);
+        iceLcStatusLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        staffBlock.add(iceLcStatusLabel);
+        JButton pinMageBtn = new JButton("Pin current weapon as Ice staff");
+        styleBtn(pinMageBtn, ACCENT_GOLD);
+        pinMageBtn.setAlignmentX(Component.LEFT_ALIGNMENT);
+        pinMageBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 26));
+        pinMageBtn.setToolTipText("Wield Blue moon spear, then click — fixes Roat custom item ids");
+        pinMageBtn.addActionListener(e -> {
+            script.learnCurrentWeaponAsMagePublic();
+            if (iceLcStatusLabel != null) iceLcStatusLabel.setText(script.iceLcStatusPublic());
+        });
+        staffBlock.add(pinMageBtn);
+        staffBlock.add(Box.createVerticalStrut(3));
+        staffBlock.add(stepper("Auto-spec on your hit >= (dmg)", script.actions().damageTriggerMin(), 1, 99, 5,
                 v -> { script.actions().setDamageTriggerMin(v); saveConfig(); }));
-        page.add(Box.createVerticalStrut(3));
+
+        gc.gridy++;
+        page.add(staffBlock, gc);
+
+        gc.gridy++;
+        page.add(buildNhPage(), gc);
+
+        // Trailing glue so rows pack to the top instead of stretching/overlapping.
+        gc.gridy++;
+        gc.weighty = 1;
+        gc.fill = GridBagConstraints.BOTH;
+        JPanel glue = new JPanel();
+        glue.setOpaque(false);
+        page.add(glue, gc);
         return page;
     }
 
-    /**
-     * Quiz-free starting points (#4). Three buttons that flip existing toggles;
-     * the one whose flags still all hold is highlighted, so the row never claims a
-     * preset is active after the user has changed something.
-     */
+
     private JPanel buildPresetRow() {
         JPanel wrap = new JPanel();
         wrap.setLayout(new BoxLayout(wrap, BoxLayout.Y_AXIS));
@@ -387,7 +555,8 @@ public class OverlayUI {
         page.add(pkSpecModeBtn);
         page.add(Box.createVerticalStrut(4));
 
-        pkAutoSpecBtn = miniToggle("Auto Spec", script.actions().autoSpecEnabled(), "Dump spec with target + energy");
+        pkAutoSpecBtn = miniToggle("Auto Spec", script.actions().autoSpecEnabled(),
+                "OFF recommended for NH — auto AGS was yanking your Blue moon spear. Dump with Spec hotkey (R) instead");
         pkAutoSpecBtn.addActionListener(e -> { script.actions().setAutoSpec(pkAutoSpecBtn.isSelected()); styleMiniToggle(pkAutoSpecBtn, script.actions().autoSpecEnabled()); saveConfig(); });
         pkPunishToggle = miniToggle("Eat Punish", script.actions().eatPunishEnabled(), "Spec punish when they eat");
         pkPunishToggle.addActionListener(e -> { script.actions().setEatPunish(pkPunishToggle.isSelected()); styleMiniToggle(pkPunishToggle, script.actions().eatPunishEnabled()); saveConfig(); });
@@ -406,7 +575,7 @@ public class OverlayUI {
 
         JPanel grid = new JPanel(new GridLayout(4, 2, 4, 4));
         grid.setOpaque(false);
-        grid.setMaximumSize(new Dimension(Integer.MAX_VALUE, 88));
+        grid.setMaximumSize(new Dimension(Integer.MAX_VALUE, 200));
         grid.add(pkAutoSpecBtn); grid.add(pkVengToggle);
         grid.add(pkComboEatToggle); grid.add(pkAutoEatToggle);
         grid.add(pkDefPrayToggle); grid.add(pkProtectItemToggle);
@@ -414,7 +583,7 @@ public class OverlayUI {
         page.add(grid);
         page.add(Box.createVerticalStrut(4));
 
-        JLabel hint = createLabel("1-4 eat · Q spec · G gmaul · V veng · R setup · Space ice · Num9 pray · Num5 auto-eat · Z/X/C overheads · other keys = your swaps", FG_MUTED, 9f, false);
+        JLabel hint = createLabel("1-4 eat · R spec · G gmaul · V veng · F cycle setup · Space ice · Num9 pray · Num5 auto-eat · Z/X/C overheads · QWE = your swaps", FG_MUTED, 9f, false);
         hint.setAlignmentX(Component.LEFT_ALIGNMENT);
         page.add(hint);
         return page;
@@ -457,10 +626,18 @@ public class OverlayUI {
             saveConfig();
         });
         
-        JToggleButton autoBarrageToggle = miniToggle("Auto Barrage", script.actions().nhAutoBarrageEnabled(), "Automatic ice barrage casting");
+        JToggleButton autoBarrageToggle = miniToggle("Auto Barrage", script.actions().nhAutoBarrageEnabled(), "Automatic ice barrage casting + mage gear at freeze");
         autoBarrageToggle.addActionListener(e -> {
             script.actions().toggleNhAutoBarrage();
             styleMiniToggle(autoBarrageToggle, script.actions().nhAutoBarrageEnabled());
+            saveConfig();
+        });
+
+        JToggleButton autoGearToggle = miniToggle("Auto Gear", script.actions().nhAutoGearEnabled(),
+                "OFF = no auto range/melee swaps after freeze. Hotkeys and Equip still work. Turn ON only if you want NH to gear for you.");
+        autoGearToggle.addActionListener(e -> {
+            script.actions().toggleNhAutoGear();
+            styleMiniToggle(autoGearToggle, script.actions().nhAutoGearEnabled());
             saveConfig();
         });
         
@@ -470,6 +647,10 @@ public class OverlayUI {
         featureRow.add(autoPrayerToggle);
         featureRow.add(autoBarrageToggle);
         page.add(featureRow);
+        page.add(Box.createVerticalStrut(4));
+        autoGearToggle.setAlignmentX(Component.LEFT_ALIGNMENT);
+        autoGearToggle.setMaximumSize(new Dimension(Integer.MAX_VALUE, 26));
+        page.add(autoGearToggle);
         page.add(Box.createVerticalStrut(4));
         
         // Auto walk-under toggle
@@ -495,19 +676,8 @@ public class OverlayUI {
         page.add(utilRow);
         page.add(Box.createVerticalStrut(4));
 
-        // Staff = left-click Ice Barrage (never staff-bash while a staff is on).
-        JToggleButton staffLcToggle = miniToggle("Staff = L-Click Barrage", script.actions().staffLeftClickCast(),
-                "While a staff/wand is equipped (by item id), Ice Barrage stays left-click armed");
-        staffLcToggle.setAlignmentX(Component.LEFT_ALIGNMENT);
-        staffLcToggle.setMaximumSize(new Dimension(Integer.MAX_VALUE, 26));
-        staffLcToggle.addActionListener(e -> {
-            script.actions().setStaffLeftClickCast(staffLcToggle.isSelected());
-            styleMiniToggle(staffLcToggle, script.actions().staffLeftClickCast());
-            saveConfig();
-        });
-        page.add(staffLcToggle);
-        page.add(Box.createVerticalStrut(6));
-        
+        // Staff LC lives on Fight (above NH) so it is not buried under this block.
+
         // Manual controls
         JButton forceBarrageBtn = new JButton("Test Barrage");
         styleBtn(forceBarrageBtn, ACCENT_BLUE);
@@ -616,6 +786,35 @@ public class OverlayUI {
 
     private JPanel buildSettingsPage() {
         JPanel page = vbox();
+
+        page.add(createLabel("Combat hotkeys", FG_BRIGHT, 11f, true));
+        page.add(infoLine("Click a bind, then press a key. Q/W/E stay free for Swapper."));
+        page.add(Box.createVerticalStrut(2));
+        hkSpecBtn = hotkeyBindRow("Spec dump (AGS/claws…)", HotkeyManager.get().specKeyName(),
+                HotkeyManager.get()::setSpecKey);
+        hkGmaulBtn = hotkeyBindRow("Gmaul follow", HotkeyManager.get().gmaulKeyName(),
+                HotkeyManager.get()::setGmaulKey);
+        hkVengBtn = hotkeyBindRow("Vengeance", HotkeyManager.get().vengKeyName(),
+                HotkeyManager.get()::setVengKey);
+        hkSetupBtn = hotkeyBindRow("Cycle spec setup", HotkeyManager.get().setupKeyName(),
+                HotkeyManager.get()::setSetupKey);
+        page.add(hkSpecBtn);
+        page.add(hkGmaulBtn);
+        page.add(hkVengBtn);
+        page.add(hkSetupBtn);
+        JButton resetHk = new JButton("Reset hotkeys (Spec=R)");
+        styleBtn(resetHk, ACCENT_GOLD);
+        resetHk.setAlignmentX(Component.LEFT_ALIGNMENT);
+        resetHk.setMaximumSize(new Dimension(Integer.MAX_VALUE, 26));
+        resetHk.addActionListener(e -> {
+            HotkeyManager.get().resetCombatHotkeys();
+            refreshHotkeyLabels();
+        });
+        page.add(Box.createVerticalStrut(2));
+        page.add(resetHk);
+        HotkeyManager.get().setHotkeyChangeListener(this::refreshHotkeyLabels);
+
+        page.add(Box.createVerticalStrut(8));
         cbAnimTrig = miniToggle("Anim Trigger", script.actions().animTriggerEnabled(), "Spec on target animation");
         cbAnimTrig.addActionListener(e -> { script.actions().setAnimTrigger(cbAnimTrig.isSelected()); styleMiniToggle(cbAnimTrig, script.actions().animTriggerEnabled()); saveConfig(); });
         cbDmgTrig = miniToggle("Damage Trigger", script.actions().damageTriggerEnabled(), "Spec on incoming damage");
@@ -639,6 +838,59 @@ public class OverlayUI {
         page.add(infoLine("Damage Trigger: dump spec when you take a hit >= min damage."));
         page.add(infoLine("INSERT toggles HUD · Ctrl+Shift+R toggles HUD"));
         return page;
+    }
+
+    /** Click → capture next keypress → persist via {@link HotkeyManager}. */
+    private JPanel hotkeyBindRow(String label, String currentKey,
+                                 java.util.function.IntConsumer onKey) {
+        JPanel row = new JPanel(new BorderLayout(6, 0));
+        row.setOpaque(false);
+        row.setAlignmentX(Component.LEFT_ALIGNMENT);
+        row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 26));
+        JLabel lab = createLabel(label, FG_MUTED, 10f, false);
+        lab.setPreferredSize(new Dimension(150, 22));
+        row.add(lab, BorderLayout.WEST);
+        JButton btn = new JButton(currentKey);
+        styleBtn(btn, ACCENT_BLUE);
+        btn.setPreferredSize(new Dimension(90, 22));
+        btn.setToolTipText("Click, then press the key you want");
+        btn.putClientProperty("hkLabel", label);
+        btn.putClientProperty("hkSetter", onKey);
+        btn.addActionListener(e -> captureCombatHotkey(btn, onKey));
+        row.add(btn, BorderLayout.EAST);
+        row.putClientProperty("hkBtn", btn);
+        return row;
+    }
+
+    private void captureCombatHotkey(JButton btn, java.util.function.IntConsumer onKey) {
+        btn.setText("Press key…");
+        btn.setForeground(ACCENT_GOLD);
+        HotkeyManager.get().setCaptureSink(e -> SwingUtilities.invokeLater(() -> {
+            int code = e.getKeyCode();
+            if (code == java.awt.event.KeyEvent.VK_ESCAPE
+                    || code == java.awt.event.KeyEvent.VK_UNDEFINED) {
+                refreshHotkeyLabels();
+                return;
+            }
+            onKey.accept(code);
+            refreshHotkeyLabels();
+        }));
+    }
+
+    private void refreshHotkeyLabels() {
+        if (hkSpecBtn != null) setHotkeyBtnText(hkSpecBtn, HotkeyManager.get().specKeyName());
+        if (hkGmaulBtn != null) setHotkeyBtnText(hkGmaulBtn, HotkeyManager.get().gmaulKeyName());
+        if (hkVengBtn != null) setHotkeyBtnText(hkVengBtn, HotkeyManager.get().vengKeyName());
+        if (hkSetupBtn != null) setHotkeyBtnText(hkSetupBtn, HotkeyManager.get().setupKeyName());
+    }
+
+    private void setHotkeyBtnText(JPanel row, String text) {
+        Object b = row.getClientProperty("hkBtn");
+        if (b instanceof JButton) {
+            JButton btn = (JButton) b;
+            btn.setText(text);
+            btn.setForeground(ACCENT_BLUE);
+        }
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -703,8 +955,20 @@ public class OverlayUI {
         JPanel p = new JPanel();
         p.setLayout(new BoxLayout(p, BoxLayout.Y_AXIS));
         p.setOpaque(false);
-        p.add(Box.createVerticalStrut(6));
+        p.add(Box.createVerticalStrut(4));
         return p;
+    }
+
+    /** Lock a section's height to its preferred size so Fight scroll never overlaps rows. */
+    private JComponent seal(JComponent section) {
+        section.setAlignmentX(Component.LEFT_ALIGNMENT);
+        section.invalidate();
+        Dimension pref = section.getPreferredSize();
+        int h = Math.max(pref.height, 12);
+        section.setPreferredSize(new Dimension(Math.max(pref.width, 100), h));
+        section.setMinimumSize(new Dimension(0, h));
+        section.setMaximumSize(new Dimension(Integer.MAX_VALUE, h));
+        return section;
     }
 
     private JLabel infoLine(String text) {
@@ -731,11 +995,74 @@ public class OverlayUI {
         HotkeyManager.get().setOverlayMode(
                 TAB_KEYS[tab].equals("SWAP") ? HotkeyManager.OverlayMode.SWAP
                                              : HotkeyManager.OverlayMode.PK);
-        if (collapsed) collapsed = false;
+        if (collapsed || minimized) {
+            collapsed = false;
+            minimized = false;
+            applyCollapse();
+        }
         saveConfig();
     }
 
-    private void toggleCollapse() { collapsed = !collapsed; saveConfig(); }
+    private void toggleCollapse() {
+        // Cycle: expanded → title bar → tiny pill → expanded.
+        if (minimized) {
+            minimized = false;
+            collapsed = false;
+        } else if (collapsed) {
+            collapsed = false;
+            minimized = true;
+        } else {
+            collapsed = true;
+            minimized = false;
+        }
+        applyCollapse();
+        saveConfig();
+    }
+
+    /** Hide chrome + body when collapsed; tiny restore handle when minimized. */
+    private void applyCollapse() {
+        boolean tiny = minimized;
+        boolean show = !collapsed && !minimized;
+        if (expandableChrome != null) expandableChrome.setVisible(show);
+        if (body != null) body.setVisible(show);
+        if (footerBar != null) footerBar.setVisible(show);
+        // Title bar stays for collapsed; shrink to a pill when minimized.
+        if (titleBar != null) {
+            for (java.awt.Component c : titleBar.getComponents()) {
+                // Keep only a restore affordance when minimized.
+                if (tiny) {
+                    c.setVisible(c == collapseBtn || (c instanceof JPanel && ((JPanel) c).isAncestorOf(collapseBtn)));
+                } else {
+                    c.setVisible(true);
+                }
+            }
+            titleBar.setVisible(true);
+        }
+        if (collapseBtn != null) {
+            collapseBtn.setVisible(true);
+            collapseBtn.setText(minimized ? "▣" : (collapsed ? "▴" : "Mini"));
+            collapseBtn.setToolTipText(minimized
+                    ? "Click to restore HUD"
+                    : (collapsed ? "Click again to fully minimize to a tiny pill" : "Collapse to title bar (again = tiny pill)"));
+        }
+        if (masterToggle != null) masterToggle.setVisible(!tiny);
+        if (tiny) {
+            frame.setSize(FRAME_W_MINI, FRAME_H_MINI);
+            frame.setMinimumSize(new Dimension(FRAME_W_MINI, FRAME_H_MINI));
+            if (rootPanel != null) rootPanel.setBorder(new EmptyBorder(2, 2, 2, 2));
+        } else if (collapsed) {
+            frame.setSize(FRAME_W, FRAME_H_COLLAPSED);
+            frame.setMinimumSize(new Dimension(FRAME_W, FRAME_H_COLLAPSED));
+            if (rootPanel != null) rootPanel.setBorder(new EmptyBorder(6, 8, 8, 8));
+        } else {
+            // Tall enough for vitals + a usable Fight scroll viewport.
+            frame.setSize(FRAME_W, FRAME_H);
+            frame.setMinimumSize(new Dimension(300, 480));
+            if (rootPanel != null) rootPanel.setBorder(new EmptyBorder(6, 8, 8, 8));
+        }
+        frame.revalidate();
+        frame.repaint();
+    }
 
     private JLabel createLabel(String text, Color color, float size, boolean bold) {
         JLabel l = new JLabel(text);
@@ -761,7 +1088,7 @@ public class OverlayUI {
     }
 
     private void styleMasterToggle(JToggleButton b, boolean on) {
-        b.setText(on ? "LIVE" : "ARMED");
+        b.setText(on ? "ON" : "ARM");
         b.setBackground(on ? new Color(40, 140, 60) : new Color(50, 53, 60));
         b.setForeground(on ? Color.WHITE : FG_MUTED);
         b.setBorder(BorderFactory.createLineBorder(on ? ACCENT_GREEN : BTN_BORDER));
@@ -907,6 +1234,12 @@ public class OverlayUI {
                         dhSwapStatusLabel.setForeground(FG_MUTED);
                     }
                     actionTickerLabel.setText("Action: " + lastAction);
+                    if (iceLcStatusLabel != null) {
+                        String ice = script.iceLcStatusPublic();
+                        iceLcStatusLabel.setText(ice);
+                        iceLcStatusLabel.setForeground(ice.startsWith("Ice LC: READY")
+                                ? ACCENT_GREEN : FG_MUTED);
+                    }
                     syncToggle(pkAutoSpecBtn, act.autoSpecEnabled());
                     syncToggle(pkPunishToggle, act.eatPunishEnabled());
                     syncToggle(pkVengToggle, act.autoVengEnabled());
@@ -952,6 +1285,9 @@ public class OverlayUI {
                 java.util.Properties p = new java.util.Properties();
                 try (java.io.InputStream in = java.nio.file.Files.newInputStream(cfgPath)) { p.load(in); }
                 collapsed = "true".equalsIgnoreCase(p.getProperty("collapsed"));
+                minimized = "true".equalsIgnoreCase(p.getProperty("minimized"));
+                // Tiny pill and title-bar collapse are exclusive.
+                if (minimized) collapsed = false;
                 String tab = p.getProperty("tab", "SWAP");
                 if ("SWAP".equalsIgnoreCase(tab)) activeTab = 0;
                 else if ("FIGHT".equalsIgnoreCase(tab) || "PK".equalsIgnoreCase(tab)
@@ -972,6 +1308,7 @@ public class OverlayUI {
                 if (p.containsKey("nhv2")) script.nhV2Enabled = "true".equalsIgnoreCase(p.getProperty("nhv2"));
                 if (p.containsKey("nhpray")) script.nhAutoPrayerEnabled = "true".equalsIgnoreCase(p.getProperty("nhpray"));
                 if (p.containsKey("nhbarrage")) script.nhAutoBarrageEnabled = "true".equalsIgnoreCase(p.getProperty("nhbarrage"));
+                if (p.containsKey("nhgear")) script.nhAutoGearEnabled = "true".equalsIgnoreCase(p.getProperty("nhgear"));
                 if (p.containsKey("nhwalk")) script.nhAutoWalkUnderEnabled = "true".equalsIgnoreCase(p.getProperty("nhwalk"));
                 if (p.containsKey("stafflc")) script.staffLcCast = "true".equalsIgnoreCase(p.getProperty("stafflc"));
                 // NH engines are exclusive — NH V2 wins when both were persisted.
@@ -1001,6 +1338,7 @@ public class OverlayUI {
                 try (java.io.InputStream in = java.nio.file.Files.newInputStream(cfgPath)) { p.load(in); }
             }
             p.setProperty("collapsed", Boolean.toString(collapsed));
+            p.setProperty("minimized", Boolean.toString(minimized));
             p.setProperty("tab", TAB_KEYS[activeTab >= 0 && activeTab < TAB_KEYS.length ? activeTab : 0]);
             p.setProperty("dh", Boolean.toString(script.dharokEnabled));
             p.setProperty("pun", Boolean.toString(script.eatPunishEnabled));
@@ -1015,6 +1353,7 @@ public class OverlayUI {
             p.setProperty("nhv2", Boolean.toString(script.nhV2Enabled));
             p.setProperty("nhpray", Boolean.toString(script.nhAutoPrayerEnabled));
             p.setProperty("nhbarrage", Boolean.toString(script.nhAutoBarrageEnabled));
+            p.setProperty("nhgear", Boolean.toString(script.nhAutoGearEnabled));
             p.setProperty("nhwalk", Boolean.toString(script.nhAutoWalkUnderEnabled));
             p.setProperty("stafflc", Boolean.toString(script.staffLcCast));
             p.setProperty("nhkohp", Integer.toString(script.nhKoHp));
@@ -1055,8 +1394,8 @@ public class OverlayUI {
         private final Color defaultFill, lowFill;
         SmoothBar(String label, Color defaultFill, Color lowFill) {
             this.label = label; this.defaultFill = defaultFill; this.lowFill = lowFill;
-            setPreferredSize(new Dimension(220, 16));
-            setMinimumSize(new Dimension(120, 14));
+            setPreferredSize(new Dimension(220, 12));
+            setMinimumSize(new Dimension(120, 10));
         }
         void setValues(int cur, int max) { this.curValue = Math.max(0, cur); this.maxValue = Math.max(1, max); }
         void tick() {

@@ -126,6 +126,8 @@ public final class SwapDispatcher {
             }
             if (InventoryTracker.isAmmo(id, name)) continue;
             if (!InventoryTracker.isMageStaff(id, name)
+                    && !InventoryTracker.isBlueMoonSpear(id, name)
+                    && !InventoryTracker.looksLikeMageWeaponName(name)
                     && !InventoryTracker.isNhMainWeapon(id, name)) {
                 continue;
             }

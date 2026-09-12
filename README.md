@@ -250,9 +250,13 @@ SCRIPT|SPEC     -> SCRIPT|spec_fired
 SCRIPT|STATUS   -> SCRIPT_STATUS|enabled=..|tick=..|autoEat=..
 LOG             -> LOG|<last 30 log/warn lines, " ;; " separated>
 LOOTER|...      -> LOOTER|...
+OVERLAY|LIST    -> OVERLAY|tiles=on|...
+OVERLAY|ON|tiles / OVERLAY|OFF|tiles
+OVERLAY|MARK|x|y|plane / OVERLAY|UNMARK|x|y|plane / OVERLAY|CLEAR
 BYE             -> BYE
 ```
 
+See also [`docs/overlays.md`](docs/overlays.md) for the in-game tile overlay API.
 Optional hardening: set `-Dagent.cmd.token=<secret>` and every connection must
 send `AUTH|<secret>` first (the `READY` banner then advertises `auth=required`).
 Without that property the socket stays open to any local process, as before.

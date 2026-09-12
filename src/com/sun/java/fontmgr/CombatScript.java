@@ -101,7 +101,7 @@ public class CombatScript implements TickListener {
     public volatile boolean    autoSpecEnabled      = false;
  
     /** Which spec weapon to use when a trigger fires. */
-    public volatile SpecWeapon selectedSpec = SpecWeapon.CLAWS_GMAUL;
+    public volatile SpecWeapon selectedSpec = SpecWeapon.AGS_GMAUL;
 
     // AGS-specific: require minimum spec energy before attempting AGS spec
     public volatile int        agsMinSpecPct = 50;
@@ -432,6 +432,12 @@ public class CombatScript implements TickListener {
      * target — the bot must never force a mage gear switch on its own.
      */
     public volatile boolean nhAutoBarrageEnabled = false;
+    /**
+     * When ON, NH auto-swaps into range after a freeze and melee near KO / freeze
+     * end. Default OFF — hotkeys / Equip / NH snapshot buttons still work.
+     * Without this gate, enabling NH V2 (or Edge NH preset) yanked gear mid-fight.
+     */
+    public volatile boolean nhAutoGearEnabled = false;
     /**
      * Staff = left-click Ice Barrage. While any mage staff/wand is equipped
      * Ice stays selected via opcode 626 (the only doAction that returns before
@@ -1535,17 +1541,18 @@ public class CombatScript implements TickListener {
     }
 
     /**
-     * Manual spec hotkey (Q / F) — fires the currently-selected spec setup
-     * (Gmaul, Claws→Gmaul, AGS→Gmaul, DMace→Gmaul, VLS, DBow+Axes).
+     * Manual spec hotkey (default R, configurable in Settings) — fires the
+     * currently-selected spec setup (Gmaul, Claws→Gmaul, AGS→Gmaul, DMace→Gmaul,
+     * VLS, DBow+Axes).
      */
     public void triggerSpecNow() {
         forceGmaulFollow = true;
         pendingQDump = true;
         lastAction = "Q_" + comboSetupName();
-        FontManager.log("[CombatScript] Q → " + comboSetupName());
+        FontManager.log("[CombatScript] SPEC → " + comboSetupName());
     }
 
-    /** Q / hotkey: wield claws, spec, then gmaul — not gated on splat size. */
+    /** Spec hotkey path: wield claws, spec, then gmaul — not gated on splat size. */
     public void triggerClawsGmaulNow() {
         selectedSpec = SpecWeapon.CLAWS_GMAUL;
         forceGmaulFollow = true;
@@ -1585,11 +1592,19 @@ public class CombatScript implements TickListener {
         dbowComboEnergyEst = -1;
         primaryWieldTries = 0;
         forceGmaulFollow = false;
+        pendingQDump = false;
         clearPendingDhGmaul();
     }
 
-    private void startManualCombo(int tick) {
+    public void abortComboStatePublic() {
         abortComboState();
+    }
+
+    private void startManualCombo(int tick) {
+        // abortComboState clears forceGmaulFollow — restore it so AGS/DMace
+        // Q dumps still gmaul on a low or missed splat (triggerSpecNow set it).
+        abortComboState();
+        forceGmaulFollow = true;
         lastHeadlessSpecTick = -99;
         if (isGmaulOnly()) {
             executeGmaulSpec();
@@ -1615,16 +1630,14 @@ public class CombatScript implements TickListener {
         }
         if (isClawsCombo()) {
             WeaponRef claws = findClawsWeapon();
-            if (claws == null) {
-                lastAction = "NO_CLAWS@" + tick;
-                logMissingWeapon("Claws", false);
-                logInventorySnapshot("NO_CLAWS");
+            if (claws != null) {
+                // Gmaul follows ONLY when the claws splat is >= 50 (clawsHighHitMin).
+                forceGmaulFollow = false;
+                executeAgsGmaulCombo(true);
                 return;
             }
-            // Gmaul follows ONLY when the claws splat is >= 50 (clawsHighHitMin).
-            forceGmaulFollow = false;
-            executeAgsGmaulCombo(true);
-            return;
+            // No claws — fall through to AGS/DMace instead of aborting the dump.
+            FontManager.log("[CombatScript] Q: no claws — trying AGS/DMace");
         }
         WeaponRef mace = findDragonMaceWeapon();
         WeaponRef ags = findAgsWeapon();
@@ -1675,6 +1688,11 @@ public class CombatScript implements TickListener {
 
     /** Same-tick gmaul wield + spec (server-side equip is instant). Returns false if skipped. */
     private boolean fireGmaulSameTick(String label) {
+        // Spec energy field can lag a tick after AGS — re-read so a stale 0
+        // does not skip the gmaul half of a 100% dump.
+        try {
+            if (specEnergyField != null) specEnergy = specEnergyField.getInt(clientInstance);
+        } catch (Exception ignored) {}
         if (specEnergy >= 0 && specEnergy < 50) {
             lastAction = "GMAUL_NOENERGY@" + currentTick;
             return false;
@@ -1765,6 +1783,12 @@ public class CombatScript implements TickListener {
      */
     private boolean tryAutoSpecDump(int tick) {
         if (!autoSpecEnabled || dharokEnabled) return false;
+        // Never yank Blue moon / staff mid-Ice — Auto Spec was re-equipping AGS every fight.
+        // Manual Spec hotkey (R) still dumps via triggerSpecNow → executeSpec.
+        if (isMageStaffEquipped()) {
+            FontManager.debug("[CombatScript] Auto spec skipped — mage weapon equipped");
+            return false;
+        }
         if (isSpecSequenceBusy()) return false;
         if (tick - lastHeadlessSpecTick <= SPEC_COOLDOWN) return false;
         int energy = specEnergy;
@@ -1776,8 +1800,15 @@ public class CombatScript implements TickListener {
         if (!liveInteractThisTick && recentTarget() == null && !isInActivePvpFight()) return false;
 
         lastHeadlessSpecTick = tick;
-        if (findClawsWeapon() != null) selectedSpec = SpecWeapon.CLAWS_GMAUL;
-        else selectedSpec = comboSpec();
+        // Respect an explicit AGS/DMace setup — Edge NH wants AGS→gmaul, not claws.
+        if (selectedSpec == SpecWeapon.AGS_GMAUL || selectedSpec == SpecWeapon.AGS
+                || selectedSpec == SpecWeapon.DMACE_GMAUL || selectedSpec == SpecWeapon.DMACE) {
+            // keep selection
+        } else if (findClawsWeapon() != null) {
+            selectedSpec = SpecWeapon.CLAWS_GMAUL;
+        } else {
+            selectedSpec = comboSpec();
+        }
         forceGmaulFollow = true;
         lastAction = "AUTO_" + comboSetupName() + "@" + tick;
         FontManager.log("[CombatScript] Auto spec → " + comboSetupName() + " energy=" + energy);
@@ -1793,6 +1824,7 @@ public class CombatScript implements TickListener {
      */
     public boolean tryEnqueueSpecIfReady(int tick, int specialEnergy, int lastHitDmg) {
         if (!autoSpecEnabled) return false;
+        if (isMageStaffEquipped()) return false;
         if (isSpecSequenceBusy()) return false;
         // Respect the stronger SPEC cooldown window
         if (tick - lastHeadlessSpecTick <= SPEC_COOLDOWN) return false;
@@ -1835,6 +1867,7 @@ public class CombatScript implements TickListener {
      */
     public boolean tryEnqueueAgsGmaulComboIfReady(int tick, int specialEnergy, int lastHitDmg) {
         if (!autoSpecEnabled) return false;
+        if (isMageStaffEquipped()) return false;
         if (isSpecSequenceBusy()) return false;
         if (tick - lastHeadlessSpecTick <= SPEC_COOLDOWN) return false;
         boolean energyOk = specialEnergy < 0 || specialEnergy >= primaryMinSpecPct();
@@ -2456,6 +2489,10 @@ public class CombatScript implements TickListener {
     /** AGS is 2h — never try to pair it with defender. Wield, then spec next tick if needed. */
     private void beginAgsDump(WeaponRef primary) {
         String label = primarySpecLabel();
+        FontManager.log("[Combat] AGS wield ← " + label
+                + " auto=" + autoSpecEnabled
+                + " manualQ=" + pendingQDump
+                + " staff=" + isMageStaffEquipped());
         if (primary.equipped || primaryCurrentlyEquipped()) {
             fireAgsSpecNow();
             return;
@@ -4379,7 +4416,18 @@ public class CombatScript implements TickListener {
     boolean isMageStaffEquipped() {
         int wid = readEquippedWeaponId();
         if (wid <= 0) return false;
-        return InventoryTracker.isMageStaff(wid, resolveItemName(wid));
+        String name = resolveItemName(wid);
+        return InventoryTracker.isMageStaff(wid, name)
+                || InventoryTracker.isBlueMoonSpear(wid, name)
+                || InventoryTracker.isLearnedMageWeapon(wid);
+    }
+
+    public String iceLcStatusPublic() {
+        return leftClickCast.iceStatusLine();
+    }
+
+    public void learnCurrentWeaponAsMagePublic() {
+        leftClickCast.learnCurrentWeaponAsMage();
     }
 
     public boolean isSpellSelectedPublic() {
@@ -6069,6 +6117,12 @@ public class CombatScript implements TickListener {
     private void equipLoadoutPiece(NhLoadout.Piece piece) {
         if (piece == null || doActionMethod == null) return;
         if (isPieceWorn(piece)) return;
+        // NH loadouts must never yank AGS — that is Spec-hotkey only. Melee
+        // snapshots often include AGS from when you snapped gear mid-fight.
+        if (InventoryTracker.isAgs(piece.itemId, piece.nameKey)) {
+            FontManager.log("[NH] skip AGS in loadout (use Spec hotkey / R) id=" + piece.itemId);
+            return;
+        }
         int slot = findSlotForPiece(piece);
         if (slot < 0) return;
         equipFromSlot(slot);
@@ -6336,7 +6390,8 @@ public class CombatScript implements TickListener {
     }
 
     private void runNhTick(int tick) {
-        if (dmacePhase > 0 || pendingQDump) return;
+        // Don't yank mage/range gear while an AGS→gmaul (or claws) dump is mid-flight.
+        if (dmacePhase > 0 || pendingQDump || isSpecSequenceBusy()) return;
         if (nhSwitchBusy()) return;
 
         int left = freezeTicksLeft();
@@ -6366,22 +6421,26 @@ public class CombatScript implements TickListener {
         }
 
         nhPhaseName = "FZ" + left;
-        if (!nhRangedThisFreeze && tick - lastBarrageTick >= BARRAGE_CAST_TICKS + 1) {
-            nhRangedThisFreeze = true;
-            nhSwitchRange();
-            return;
-        }
-        if (nhRangedThisFreeze && !nhMeleedThisFreeze) {
-            if (targetHp > 0 && targetHp <= nhKoHp) {
-                nhMeleedThisFreeze = true;
-                nhSwitchMelee();
-                nhPhaseName = "KO_MELEE";
+        // Range/melee loadouts only when Auto Gear is explicitly on. Manual NH
+        // (hotkeys / Equip / snapshot buttons) still calls nhSwitch* directly.
+        if (nhAutoGearEnabled) {
+            if (!nhRangedThisFreeze && tick - lastBarrageTick >= BARRAGE_CAST_TICKS + 1) {
+                nhRangedThisFreeze = true;
+                nhSwitchRange();
                 return;
             }
-            if (left <= Humanizer.nhMeleePrepTicks()) {
-                nhMeleedThisFreeze = true;
-                nhSwitchMelee();
-                nhPhaseName = "PRE_MELEE";
+            if (nhRangedThisFreeze && !nhMeleedThisFreeze) {
+                if (targetHp > 0 && targetHp <= nhKoHp) {
+                    nhMeleedThisFreeze = true;
+                    nhSwitchMelee();
+                    nhPhaseName = "KO_MELEE";
+                    return;
+                }
+                if (left <= Humanizer.nhMeleePrepTicks()) {
+                    nhMeleedThisFreeze = true;
+                    nhSwitchMelee();
+                    nhPhaseName = "PRE_MELEE";
+                }
             }
         }
         
@@ -6519,7 +6578,8 @@ public class CombatScript implements TickListener {
      * SimpleNH systems are switched off (see {@link #toggleNhV2()}).
      */
     private void runNhV2System(int tick) {
-        if (dmacePhase > 0 || pendingQDump) return;
+        // Same gate as DH — never interrupt wield→spec→gmaul with NH gear swaps.
+        if (dmacePhase > 0 || pendingQDump || isSpecSequenceBusy()) return;
 
         Object target = cachedTarget != null ? cachedTarget : stickyTarget;
         if (target == null) {
@@ -7417,8 +7477,10 @@ public class CombatScript implements TickListener {
     public boolean isNhV2EnabledPublic()              { return nhV2Enabled; }
     public boolean isNhAutoPrayerEnabledPublic()      { return nhAutoPrayerEnabled; }
     public boolean isNhAutoBarrageEnabledPublic()     { return nhAutoBarrageEnabled; }
+    public boolean isNhAutoGearEnabledPublic()        { return nhAutoGearEnabled; }
     public void toggleNhAutoPrayerPublic() { nhAutoPrayerEnabled = !nhAutoPrayerEnabled; }
     public void toggleNhAutoBarragePublic() { nhAutoBarrageEnabled = !nhAutoBarrageEnabled; }
+    public void toggleNhAutoGearPublic() { nhAutoGearEnabled = !nhAutoGearEnabled; }
     public void testPrayerSwitchPublic() { testPrayerSwitch(); }
     
     // Simple NH System
