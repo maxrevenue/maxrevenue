@@ -96,6 +96,9 @@
       <span id="utcNow">UTC —</span>
       <span id="utcReset">Reset in —</span>
     </div>
+    <label class="field-label" for="floatingPnlMain">Open / floating P&amp;L ($)</label>
+    <input type="number" id="floatingPnlMain" value="0" step="any" inputmode="decimal">
+    <div id="consistencyBanner" class="consistency-warn" hidden></div>
   </section>
 
   <div id="dayLockBanner" class="day-lock" hidden></div>
@@ -135,7 +138,6 @@
 
       <label class="field-label" for="floatingPnl">Open trade profit right now ($)</label>
       <input type="number" id="floatingPnl" value="0" step="any" inputmode="decimal">
-      <div id="consistencyBanner" class="consistency-warn" hidden></div>
 
       <h2 style="margin-top:18px">Rules checklist</h2>
       <div class="rules-grid">

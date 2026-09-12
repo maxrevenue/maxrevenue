@@ -97,6 +97,7 @@ async function loadState() {
   loaded = true;
   hydrateSettings();
   $("floatingPnl").value = state.floatingPnl || 0;
+  if ($("floatingPnlMain")) $("floatingPnlMain").value = state.floatingPnl || 0;
   $("guardOn").checked = state.guardOn;
   if (repaired) await persist();
   render();
@@ -177,6 +178,7 @@ function render() {
   renderRules(snap);
   renderBot(sized, snap, plan);
   renderDayLock(snap, sized);
+  if ($("floatingPnlMain")) $("floatingPnlMain").value = state.floatingPnl || 0;
   renderConsistencyWarn(snap);
   renderCoach(snap, sized, plan, session);
   $("calcRisk").value =
@@ -763,12 +765,16 @@ $("guardOn").addEventListener("change", async (e) => {
   render();
 });
 
-$("floatingPnl").addEventListener("input", async (e) => {
+async function onFloatingPnlInput(e) {
   state.floatingPnl = parseFloat(e.target.value) || 0;
+  if ($("floatingPnl")) $("floatingPnl").value = state.floatingPnl;
+  if ($("floatingPnlMain")) $("floatingPnlMain").value = state.floatingPnl;
   await persist();
   render();
   renderConsistencyWarn();
-});
+}
+$("floatingPnl").addEventListener("input", onFloatingPnlInput);
+if ($("floatingPnlMain")) $("floatingPnlMain").addEventListener("input", onFloatingPnlInput);
 
 $("calcBtn").addEventListener("click", () => {
   const entry = parseFloat($("calcEntry").value);
@@ -1087,6 +1093,7 @@ $("setImport").addEventListener("change", async (e) => {
     await persist();
     hydrateSettings();
     $("floatingPnl").value = state.floatingPnl || 0;
+  if ($("floatingPnlMain")) $("floatingPnlMain").value = state.floatingPnl || 0;
     $("guardOn").checked = state.guardOn;
     render();
     fetchPicks({ force: true });
