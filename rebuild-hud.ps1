@@ -5,6 +5,57 @@ $ErrorActionPreference = 'Stop'
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location -LiteralPath $Root
 
+function Stop-RoatzLocks {
+    Write-Host 'Stopping old Roatz / Roat clients...' -ForegroundColor Yellow
+
+    # Hard kill by image name (covers locked jpackage exe even when CIM lags).
+    foreach ($im in @('Roatz.exe', 'RoatzBot.exe')) {
+        & taskkill.exe /F /IM $im /T 2>$null | Out-Null
+    }
+
+    Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+        Where-Object {
+            $name = [string]$_.Name
+            $cmd = [string]$_.CommandLine
+            $exe = [string]$_.ExecutablePath
+            if ($name -match '^(?i)Roatz\.exe$') { return $true }
+            if ($exe -match '(?i)[\\/]Roatz\.exe$') { return $true }
+            if ($exe -match '(?i)build[\\/]jpackage[\\/]Roatz') { return $true }
+            if ($name -match '^(?i)(java|javaw)\.exe$' -and
+                $cmd -match '(?i)roat-rl|roat-rl-saved|rpkz|roatpkz|roatpkz_runelite|fontconfig-ext|fontmanager-windows|\\Roatz\\') {
+                return $true
+            }
+            return $false
+        } |
+        ForEach-Object {
+            Write-Host ("  kill pid {0} {1}" -f $_.ProcessId, $_.Name)
+            Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+            & taskkill.exe /F /PID $_.ProcessId /T 2>$null | Out-Null
+        }
+
+    # Give Windows time to release file handles on Roatz.exe
+    Start-Sleep -Seconds 2
+}
+
+function Remove-TreeWithRetry {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [int]$Attempts = 8
+    )
+    if (-not (Test-Path -LiteralPath $Path)) { return $true }
+    for ($i = 1; $i -le $Attempts; $i++) {
+        try {
+            Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop
+            if (-not (Test-Path -LiteralPath $Path)) { return $true }
+        } catch {
+            Write-Host ("  delete retry {0}/{1}: {2}" -f $i, $Attempts, $_.Exception.Message) -ForegroundColor Yellow
+            Stop-RoatzLocks
+            Start-Sleep -Seconds ([Math]::Min(2 * $i, 8))
+        }
+    }
+    return -not (Test-Path -LiteralPath $Path)
+}
+
 Write-Host '=== Roatz HUD rebuild ===' -ForegroundColor Cyan
 Write-Host "Folder: $Root"
 
@@ -27,19 +78,7 @@ if ($src -notmatch 'PK Loadouts') {
 }
 Write-Host 'Source OK: PK Loadouts present' -ForegroundColor Green
 
-Write-Host 'Stopping old Roatz / Roat clients...' -ForegroundColor Yellow
-Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
-    Where-Object {
-        ($_.Name -eq 'Roatz.exe') -or (
-            $_.Name -match '^(java|javaw)\.exe$' -and
-            $_.CommandLine -match 'roat-rl|roat-rl-saved|rpkzclient|roatpkz|fontconfig-ext|fontmanager-windows|Roatz'
-        )
-    } |
-    ForEach-Object {
-        Write-Host ("  kill pid {0} {1}" -f $_.ProcessId, $_.Name)
-        Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
-    }
-Start-Sleep -Seconds 2
+Stop-RoatzLocks
 
 $cacheJar = Join-Path $env:TEMP '.cache\fontconfig-ext.jar'
 $status = Join-Path $env:TEMP '.cache\fontconfig-attach.status'
@@ -51,9 +90,21 @@ if (Test-Path -LiteralPath $status) {
     Remove-Item -LiteralPath $status -Force -ErrorAction SilentlyContinue
 }
 
+$jpackageDir = Join-Path $Root 'build\jpackage'
+Write-Host 'Clearing locked jpackage output...' -ForegroundColor Yellow
+if (-not (Remove-TreeWithRetry -Path $jpackageDir)) {
+    Write-Host 'ERROR: still cannot delete build\jpackage — Roatz.exe is locked.' -ForegroundColor Red
+    Write-Host 'Close Roatz from the taskbar/tray, then run:' -ForegroundColor Red
+    Write-Host '  taskkill /F /IM Roatz.exe /T'
+    Write-Host '  powershell -ExecutionPolicy Bypass -File .\rebuild-hud.ps1'
+    exit 1
+}
+
 Write-Host 'Building jpackage image (this takes a bit)...' -ForegroundColor Yellow
 & (Join-Path $Root 'gradlew.bat') --stop | Out-Null
-& (Join-Path $Root 'gradlew.bat') clean jpackageImage --console=plain
+# Skip full :clean — it fails whenever anything under build\ is locked.
+# jpackageImage alone is enough after we wiped build\jpackage.
+& (Join-Path $Root 'gradlew.bat') jpackageImage --console=plain
 if ($LASTEXITCODE -ne 0) {
     Write-Host 'BUILD FAILED' -ForegroundColor Red
     exit $LASTEXITCODE
@@ -81,9 +132,8 @@ Write-Host 'After Attach, Swapper must show:' -ForegroundColor Cyan
 Write-Host "  - title 'Gear Swapper · v1.0.2'"
 Write-Host "  - 'PK Loadouts (switch full gear sets here)' + dropdown"
 Write-Host '  - New / Save As / Rename / Delete'
-Write-Host "Launcher footer must say v1.0.2. If Attach says Live with no HUD, expand Details."
-Write-Host "If you still see 'Swapper Hub' or v1.0.1, close Roat fully and Play again."
+Write-Host 'Launcher footer must say v1.0.2.'
 Write-Host ''
 
 Start-Process -FilePath $exe
-Write-Host 'Launched Roatz. Press Play (not an already-open Roat), log in, then wait for Attach.' -ForegroundColor Green
+Write-Host 'Launched Roatz. Press Play, log in, then wait for Attach (or Attach now).' -ForegroundColor Green
