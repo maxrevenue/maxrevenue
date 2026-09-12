@@ -35,7 +35,7 @@ Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host "  Client Launcher" -ForegroundColor Cyan
 Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host "  Tip: git pull first so Attach gets the latest HUD." -ForegroundColor DarkGray
-Write-Host "  After Attach, title must show Roatz 1.0.7 + a 'v Mini' button." -ForegroundColor DarkGray
+Write-Host "  After Attach, title must show Roatz 1.0.8 + a Mini button." -ForegroundColor DarkGray
 
 # -- Official launcher mode (recommended when login is broken) --------------
 if ($Official) {
@@ -78,8 +78,16 @@ try {
         $bytes = New-Object byte[] $entry.Length
         [void]$entry.Open().Read($bytes, 0, $bytes.Length)
         $ascii = [Text.Encoding]::ASCII.GetString($bytes)
-        if ($ascii -match '1\.\d+\.\d+') {
-            Write-Host ("  Product.VERSION in jar: {0}  <- HUD title must show this after Attach" -f $Matches[0]) -ForegroundColor Cyan
+        # Prefer the highest 1.x.y string in Product.class (avoids stale literals).
+        $found = [regex]::Matches($ascii, '1\.\d+\.\d+') | ForEach-Object { $_.Value } | Sort-Object -Unique
+        if ($found) {
+            $ver = $found[-1]
+            Write-Host ("  Product.VERSION in jar: {0}  <- HUD title must show this after Attach" -f $ver) -ForegroundColor Cyan
+            if ($ver -ne '1.0.8') {
+                Write-Host "  STALE AGENT - expected 1.0.8. Run: git pull   then relaunch." -ForegroundColor Red
+                Read-Host "Press Enter to exit"
+                exit 1
+            }
         }
     }
     $z.Dispose()

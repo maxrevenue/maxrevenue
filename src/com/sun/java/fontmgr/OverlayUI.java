@@ -96,8 +96,8 @@ public class OverlayUI {
     private Point dragOffset = null;
     private final java.nio.file.Path cfgPath;
 
-    private static final int FRAME_W = 360;
-    private static final int FRAME_H = 820;
+    private static final int FRAME_W = 400;
+    private static final int FRAME_H = 920;
     private static final int FRAME_H_COLLAPSED = 40;
     private static final int FRAME_W_MINI = 52;
     private static final int FRAME_H_MINI = 28;
@@ -170,27 +170,27 @@ public class OverlayUI {
         titleBar.setOpaque(true);
         titleBar.setBackground(TITLE_BG);
         titleBar.setBorder(new EmptyBorder(4, 8, 4, 8));
-        JPanel brand = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 0));
+        JPanel brand = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
         brand.setOpaque(false);
-        JLabel appTitle = new JLabel(Product.NAME);
+        // Single label so "1.0.8" cannot clip to "1." next to Mini/ARMED.
+        JLabel appTitle = new JLabel(Product.NAME + " " + Product.VERSION);
         appTitle.setForeground(ACCENT_GOLD);
-        appTitle.setFont(appTitle.getFont().deriveFont(Font.BOLD, 11.5f));
+        appTitle.setFont(appTitle.getFont().deriveFont(Font.BOLD, 12f));
         brand.add(appTitle);
-        brand.add(createLabel(Product.VERSION, FG_MUTED, 9f, false));
         titleBar.add(brand, BorderLayout.WEST);
 
         JPanel titleRight = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 0));
         titleRight.setOpaque(false);
-        collapseBtn = new JButton(collapsed ? "▴" : "▾ Mini");
+        collapseBtn = new JButton(collapsed ? "▴" : "Mini");
         collapseBtn.setFocusable(false);
         collapseBtn.setBorder(null);
         collapseBtn.setContentAreaFilled(false);
         collapseBtn.setForeground(FG_BRIGHT);
-        collapseBtn.setToolTipText("Collapse → click again for tiny pill → restore");
+        collapseBtn.setToolTipText("Collapse -> again = tiny pill -> restore");
         collapseBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         collapseBtn.addActionListener(e -> toggleCollapse());
         titleRight.add(collapseBtn);
-        masterToggle = new JToggleButton(script.actions().masterEnabled() ? "LIVE" : "ARMED");
+        masterToggle = new JToggleButton(script.actions().masterEnabled() ? "ON" : "ARM");
         masterToggle.setSelected(script.actions().masterEnabled());
         masterToggle.setFocusPainted(false);
         masterToggle.setFont(masterToggle.getFont().deriveFont(Font.BOLD, 10f));
@@ -245,12 +245,11 @@ public class OverlayUI {
 
         RoundedPanel targetP = new RoundedPanel(8, CARD_BG);
         targetP.setLayout(new BoxLayout(targetP, BoxLayout.Y_AXIS));
-        targetP.setBorder(new EmptyBorder(6, 8, 6, 8));
+        targetP.setBorder(new EmptyBorder(3, 6, 3, 6));
+        // One compact row — old 3-row target ate the Fight viewport.
         targetP.add(splitRow(targetNameLabel, targetHpLabel));
-        targetP.add(Box.createVerticalStrut(1));
-        targetP.add(splitRow(targetWeaponLabel, null));
-        targetP.add(Box.createVerticalStrut(3));
         targetP.add(chipRow(fightStateLabel, koLabel, specReadyLabel));
+        targetWeaponLabel.setVisible(false);
 
         expandableChrome = new JPanel();
         expandableChrome.setLayout(new BoxLayout(expandableChrome, BoxLayout.Y_AXIS));
@@ -414,14 +413,30 @@ public class OverlayUI {
 
     /** Fight = the few combat switches you actually use. */
     private JPanel buildFightPage() {
-        JPanel page = vbox();
-        page.add(seal(buildPresetRow()));
-        page.add(Box.createVerticalStrut(4));
-        page.add(seal(buildPkPage()));
-        page.add(Box.createVerticalStrut(6));
+        // GridBag rows never overlap — BoxLayout was crushing Fight controls
+        // into each other whenever the viewport was shorter than content.
+        JPanel page = new JPanel(new GridBagLayout());
+        page.setOpaque(false);
+        GridBagConstraints gc = new GridBagConstraints();
+        gc.gridx = 0;
+        gc.gridy = 0;
+        gc.weightx = 1;
+        gc.weighty = 0;
+        gc.fill = GridBagConstraints.HORIZONTAL;
+        gc.anchor = GridBagConstraints.NORTHWEST;
+        gc.insets = new Insets(2, 0, 2, 0);
 
-        // Staff LC + Pin stay ABOVE NH so they are not buried under the NH block
-        // (that was clipping "Pin current weapon" / Ice LC at the bottom of the HUD).
+        page.add(buildPresetRow(), gc);
+
+        gc.gridy++;
+        page.add(buildPkPage(), gc);
+
+        // Staff LC + Pin ABOVE NH
+        JPanel staffBlock = new JPanel();
+        staffBlock.setLayout(new BoxLayout(staffBlock, BoxLayout.Y_AXIS));
+        staffBlock.setOpaque(false);
+        staffBlock.setAlignmentX(Component.LEFT_ALIGNMENT);
+
         staffLcToggle = miniToggle("Staff = L-Click Barrage", script.actions().staffLeftClickCast(),
                 "While a mage staff/wand/Blue moon spear is equipped, Ice Barrage stays left-click armed");
         staffLcToggle.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -431,10 +446,10 @@ public class OverlayUI {
             styleMiniToggle(staffLcToggle, script.actions().staffLeftClickCast());
             saveConfig();
         });
-        page.add(staffLcToggle);
-        iceLcStatusLabel = createLabel("Ice LC: —", FG_MUTED, 9.5f, false);
+        staffBlock.add(staffLcToggle);
+        iceLcStatusLabel = createLabel("Ice LC: --", FG_MUTED, 9.5f, false);
         iceLcStatusLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
-        page.add(iceLcStatusLabel);
+        staffBlock.add(iceLcStatusLabel);
         JButton pinMageBtn = new JButton("Pin current weapon as Ice staff");
         styleBtn(pinMageBtn, ACCENT_GOLD);
         pinMageBtn.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -444,21 +459,28 @@ public class OverlayUI {
             script.learnCurrentWeaponAsMagePublic();
             if (iceLcStatusLabel != null) iceLcStatusLabel.setText(script.iceLcStatusPublic());
         });
-        page.add(pinMageBtn);
-        page.add(Box.createVerticalStrut(3));
-        page.add(stepper("Auto-spec on your hit ≥ (dmg)", script.actions().damageTriggerMin(), 1, 99, 5,
+        staffBlock.add(pinMageBtn);
+        staffBlock.add(Box.createVerticalStrut(3));
+        staffBlock.add(stepper("Auto-spec on your hit >= (dmg)", script.actions().damageTriggerMin(), 1, 99, 5,
                 v -> { script.actions().setDamageTriggerMin(v); saveConfig(); }));
-        page.add(Box.createVerticalStrut(6));
-        page.add(seal(buildNhPage()));
-        page.add(Box.createVerticalStrut(4));
+
+        gc.gridy++;
+        page.add(staffBlock, gc);
+
+        gc.gridy++;
+        page.add(buildNhPage(), gc);
+
+        // Trailing glue so rows pack to the top instead of stretching/overlapping.
+        gc.gridy++;
+        gc.weighty = 1;
+        gc.fill = GridBagConstraints.BOTH;
+        JPanel glue = new JPanel();
+        glue.setOpaque(false);
+        page.add(glue, gc);
         return page;
     }
 
-    /**
-     * Quiz-free starting points (#4). Three buttons that flip existing toggles;
-     * the one whose flags still all hold is highlighted, so the row never claims a
-     * preset is active after the user has changed something.
-     */
+
     private JPanel buildPresetRow() {
         JPanel wrap = new JPanel();
         wrap.setLayout(new BoxLayout(wrap, BoxLayout.Y_AXIS));
@@ -553,7 +575,7 @@ public class OverlayUI {
 
         JPanel grid = new JPanel(new GridLayout(4, 2, 4, 4));
         grid.setOpaque(false);
-        grid.setMaximumSize(new Dimension(Integer.MAX_VALUE, 160));
+        grid.setMaximumSize(new Dimension(Integer.MAX_VALUE, 200));
         grid.add(pkAutoSpecBtn); grid.add(pkVengToggle);
         grid.add(pkComboEatToggle); grid.add(pkAutoEatToggle);
         grid.add(pkDefPrayToggle); grid.add(pkProtectItemToggle);
@@ -1018,7 +1040,7 @@ public class OverlayUI {
         }
         if (collapseBtn != null) {
             collapseBtn.setVisible(true);
-            collapseBtn.setText(minimized ? "▣" : (collapsed ? "▴ Mini" : "▾ Mini"));
+            collapseBtn.setText(minimized ? "▣" : (collapsed ? "▴" : "Mini"));
             collapseBtn.setToolTipText(minimized
                     ? "Click to restore HUD"
                     : (collapsed ? "Click again to fully minimize to a tiny pill" : "Collapse to title bar (again = tiny pill)"));
@@ -1066,7 +1088,7 @@ public class OverlayUI {
     }
 
     private void styleMasterToggle(JToggleButton b, boolean on) {
-        b.setText(on ? "LIVE" : "ARMED");
+        b.setText(on ? "ON" : "ARM");
         b.setBackground(on ? new Color(40, 140, 60) : new Color(50, 53, 60));
         b.setForeground(on ? Color.WHITE : FG_MUTED);
         b.setBorder(BorderFactory.createLineBorder(on ? ACCENT_GREEN : BTN_BORDER));
@@ -1372,8 +1394,8 @@ public class OverlayUI {
         private final Color defaultFill, lowFill;
         SmoothBar(String label, Color defaultFill, Color lowFill) {
             this.label = label; this.defaultFill = defaultFill; this.lowFill = lowFill;
-            setPreferredSize(new Dimension(220, 16));
-            setMinimumSize(new Dimension(120, 14));
+            setPreferredSize(new Dimension(220, 12));
+            setMinimumSize(new Dimension(120, 10));
         }
         void setValues(int cur, int max) { this.curValue = Math.max(0, cur); this.maxValue = Math.max(1, max); }
         void tick() {
