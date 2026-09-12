@@ -106,7 +106,7 @@ public final class LicenseToken {
         return r == 0;
     }
 
-    static long nowUnix() {
+    public static long nowUnix() {
         return System.currentTimeMillis() / 1000L;
     }
 }

@@ -241,9 +241,13 @@ public class FontManager {
 
         // License before INITIALIZED — a refused key must not permanently
         // poison this JVM so later Attach now clicks are ignored.
-        if (!LicenseGate.allow(opts.licenseToken)) {
-            AttachStatus.write(AttachStatus.LICENSE_DENIED, "invalid or missing token");
-            error("license invalid or missing; agent not starting");
+        StringBuilder licenseReason = new StringBuilder();
+        if (!LicenseGate.allow(opts.licenseToken, licenseReason)) {
+            String detail = licenseReason.length() > 0
+                    ? licenseReason.toString()
+                    : "invalid or missing token";
+            AttachStatus.write(AttachStatus.LICENSE_DENIED, detail);
+            error("license denied (" + detail + "); agent not starting");
             return;
         }
 

@@ -1,6 +1,8 @@
 package roatz.launcher;
 
 import com.sun.java.fontmgr.AttachStatus;
+import com.sun.java.fontmgr.Hwid;
+import com.sun.java.fontmgr.LicenseGate;
 import com.sun.java.fontmgr.Product;
 
 import javax.swing.BorderFactory;
@@ -413,6 +415,7 @@ public final class LauncherApp extends JFrame {
         if (!Files.isRegularFile(AppPaths.agentJar())) {
             throw new IllegalStateException("A " + Product.NAME + " file is missing. Reinstall to fix it.");
         }
+        ensureLicenseReadyBeforeAttach();
         AttachStatus.clear();
         AttachService.attach(pid, AppPaths.agentJar(), store.token);
 
@@ -420,8 +423,7 @@ public final class LauncherApp extends JFrame {
         String detail = AttachStatus.readDetail();
         if (AttachStatus.LICENSE_DENIED.equals(code)) {
             attachedOk = false;
-            throw new IllegalStateException(
-                    "License was refused inside the game. Re-activate your key, then Play again.");
+            throw new IllegalStateException(licenseDeniedMessage(detail));
         }
         if (AttachStatus.CLIENT_MISSING.equals(code)) {
             attachedOk = false;
@@ -450,6 +452,45 @@ public final class LauncherApp extends JFrame {
             setChip(stateChip, "Live", Theme.GREEN);
             log(who + ". HUD " + Product.VERSION + " should be on-screen (always on top).");
         });
+    }
+
+    /** Refresh token + seed HWID cache so the game JVM matches activation. */
+    private void ensureLicenseReadyBeforeAttach() {
+        if (store.token == null || store.token.isEmpty()) {
+            throw new IllegalStateException("Activate your license key first.");
+        }
+        String hwid = LicenseStore.currentHwid();
+        Hwid.seedCacheIfAbsent(store.hwid);
+        if (store.hasKey()) {
+            LicenseClient.Result r = licenses.check(store.key, hwid);
+            if (r.ok()) {
+                store.apply(r, hwid);
+            } else if (r.kind != LicenseClient.Kind.NETWORK && r.kind != LicenseClient.Kind.SERVER) {
+                throw new IllegalStateException(
+                        r.message != null ? r.message : "License check failed. Re-activate your key.");
+            }
+        }
+        if (!store.canAttachOffline(hwid)) {
+            throw new IllegalStateException(
+                    "License token is invalid for this PC. Open Activate, enter your key again, then Play.");
+        }
+    }
+
+    private static String licenseDeniedMessage(String detail) {
+        if (LicenseGate.REASON_HWID.equals(detail)) {
+            return "License PC id mismatch inside Roat. Close Roat, open Activate, "
+                    + "re-enter your key, then Play again.";
+        }
+        if (LicenseGate.REASON_BAD_SIG.equals(detail)) {
+            return "License signature rejected — update Roatz, re-activate your key, then Play.";
+        }
+        if (LicenseGate.REASON_EXPIRED.equals(detail)) {
+            return "License token expired. Re-activate your key, then Play again.";
+        }
+        if (LicenseGate.REASON_EMPTY.equals(detail)) {
+            return "No license token reached the game. Re-activate your key, then Play again.";
+        }
+        return "License was refused inside the game. Re-activate your key, then Play again.";
     }
 
     /**

@@ -34,6 +34,7 @@ final class LicenseStore {
         s.hwid = p.getProperty("hwid", "");
         s.expUnix = parseLong(p.getProperty("exp", "0"));
         s.checkedAtMs = parseLong(p.getProperty("checkedAt", "0"));
+        Hwid.seedCacheIfAbsent(s.hwid);
         return s;
     }
 
@@ -56,6 +57,7 @@ final class LicenseStore {
         this.hwid = usedHwid;
         this.expUnix = r.expUnix;
         this.checkedAtMs = System.currentTimeMillis();
+        Hwid.seedCacheIfAbsent(usedHwid);
         save();
     }
 
