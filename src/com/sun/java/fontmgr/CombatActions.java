@@ -85,6 +85,7 @@ public final class CombatActions {
     public void setNhV2(boolean on)             { if (on != script.nhV2Enabled) script.toggleNhV2(); }
     public void setNhAutoPrayer(boolean on)     { script.nhAutoPrayerEnabled = on; }
     public void setNhAutoBarrage(boolean on)    { script.nhAutoBarrageEnabled = on; }
+    public void setNhAutoGear(boolean on)       { script.nhAutoGearEnabled = on; }
     public void setNhAutoWalkUnder(boolean on)  { if (on != script.nhAutoWalkUnderEnabled) script.toggleNhAutoWalkUnder(); }
     public void setLegacyNh(boolean on)         { script.nhEnabled = on; }
     public void setSimpleNh(boolean on)         { script.simpleNHEnabled = on; }
@@ -121,6 +122,7 @@ public final class CombatActions {
     public boolean nhV2Enabled()              { return script.nhV2Enabled; }
     public boolean nhAutoPrayerEnabled()      { return script.nhAutoPrayerEnabled; }
     public boolean nhAutoBarrageEnabled()     { return script.nhAutoBarrageEnabled; }
+    public boolean nhAutoGearEnabled()        { return script.nhAutoGearEnabled; }
     public boolean nhAutoWalkUnderEnabled()   { return script.nhAutoWalkUnderEnabled; }
     public int damageTriggerMin()            { return script.damageTriggerMin; }
     public int animTriggerAnim()              { return script.animTriggerAnim; }
@@ -137,6 +139,7 @@ public final class CombatActions {
     public void toggleNhV2()              { script.toggleNhV2(); }
     public void toggleNhAutoPrayer()      { script.nhAutoPrayerEnabled = !script.nhAutoPrayerEnabled; }
     public void toggleNhAutoBarrage()     { script.nhAutoBarrageEnabled = !script.nhAutoBarrageEnabled; }
+    public void toggleNhAutoGear()        { script.nhAutoGearEnabled = !script.nhAutoGearEnabled; }
     public void toggleNhAutoWalkUnder()   { script.toggleNhAutoWalkUnder(); }
     public void toggleDefensivePrayers()   { script.defensivePrayersEnabled = !script.defensivePrayersEnabled; }
     public void toggleAutoSpec() {

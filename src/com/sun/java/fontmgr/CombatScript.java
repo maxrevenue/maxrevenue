@@ -433,6 +433,12 @@ public class CombatScript implements TickListener {
      */
     public volatile boolean nhAutoBarrageEnabled = false;
     /**
+     * When ON, NH auto-swaps into range after a freeze and melee near KO / freeze
+     * end. Default OFF — hotkeys / Equip / NH snapshot buttons still work.
+     * Without this gate, enabling NH V2 (or Edge NH preset) yanked gear mid-fight.
+     */
+    public volatile boolean nhAutoGearEnabled = false;
+    /**
      * Staff = left-click Ice Barrage. While any mage staff/wand is equipped
      * Ice stays selected via opcode 626 (the only doAction that returns before
      * clearing {@code spellSelected}). Eat/wield must 626 again. Attack-last
@@ -6401,22 +6407,26 @@ public class CombatScript implements TickListener {
         }
 
         nhPhaseName = "FZ" + left;
-        if (!nhRangedThisFreeze && tick - lastBarrageTick >= BARRAGE_CAST_TICKS + 1) {
-            nhRangedThisFreeze = true;
-            nhSwitchRange();
-            return;
-        }
-        if (nhRangedThisFreeze && !nhMeleedThisFreeze) {
-            if (targetHp > 0 && targetHp <= nhKoHp) {
-                nhMeleedThisFreeze = true;
-                nhSwitchMelee();
-                nhPhaseName = "KO_MELEE";
+        // Range/melee loadouts only when Auto Gear is explicitly on. Manual NH
+        // (hotkeys / Equip / snapshot buttons) still calls nhSwitch* directly.
+        if (nhAutoGearEnabled) {
+            if (!nhRangedThisFreeze && tick - lastBarrageTick >= BARRAGE_CAST_TICKS + 1) {
+                nhRangedThisFreeze = true;
+                nhSwitchRange();
                 return;
             }
-            if (left <= Humanizer.nhMeleePrepTicks()) {
-                nhMeleedThisFreeze = true;
-                nhSwitchMelee();
-                nhPhaseName = "PRE_MELEE";
+            if (nhRangedThisFreeze && !nhMeleedThisFreeze) {
+                if (targetHp > 0 && targetHp <= nhKoHp) {
+                    nhMeleedThisFreeze = true;
+                    nhSwitchMelee();
+                    nhPhaseName = "KO_MELEE";
+                    return;
+                }
+                if (left <= Humanizer.nhMeleePrepTicks()) {
+                    nhMeleedThisFreeze = true;
+                    nhSwitchMelee();
+                    nhPhaseName = "PRE_MELEE";
+                }
             }
         }
         
@@ -7452,8 +7462,10 @@ public class CombatScript implements TickListener {
     public boolean isNhV2EnabledPublic()              { return nhV2Enabled; }
     public boolean isNhAutoPrayerEnabledPublic()      { return nhAutoPrayerEnabled; }
     public boolean isNhAutoBarrageEnabledPublic()     { return nhAutoBarrageEnabled; }
+    public boolean isNhAutoGearEnabledPublic()        { return nhAutoGearEnabled; }
     public void toggleNhAutoPrayerPublic() { nhAutoPrayerEnabled = !nhAutoPrayerEnabled; }
     public void toggleNhAutoBarragePublic() { nhAutoBarrageEnabled = !nhAutoBarrageEnabled; }
+    public void toggleNhAutoGearPublic() { nhAutoGearEnabled = !nhAutoGearEnabled; }
     public void testPrayerSwitchPublic() { testPrayerSwitch(); }
     
     // Simple NH System

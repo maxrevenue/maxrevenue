@@ -41,23 +41,24 @@ public final class SwapperPanel extends JPanel {
         setLayout(new BorderLayout(4, 4));
         setBorder(new EmptyBorder(2, 0, 0, 0));
 
-        JPanel body = new JPanel();
-        body.setOpaque(false);
-        body.setLayout(new BoxLayout(body, BoxLayout.Y_AXIS));
+        // ── Always-visible PK loadout chrome (NORTH) ─────────────────────────
+        JPanel pinned = new JPanel();
+        pinned.setOpaque(false);
+        pinned.setLayout(new BoxLayout(pinned, BoxLayout.Y_AXIS));
 
         JLabel title = new JLabel("Gear Swapper · v" + com.sun.java.fontmgr.Product.VERSION);
         title.setForeground(ACCENT);
         title.setFont(title.getFont().deriveFont(Font.BOLD, 11f));
         title.setAlignmentX(Component.LEFT_ALIGNMENT);
-        body.add(title);
-        body.add(Box.createVerticalStrut(2));
+        pinned.add(title);
+        pinned.add(Box.createVerticalStrut(2));
 
         JLabel loadoutLabel = new JLabel("PK Loadouts (switch full gear sets here)");
         loadoutLabel.setForeground(ACCENT);
         loadoutLabel.setFont(loadoutLabel.getFont().deriveFont(Font.BOLD, 10f));
         loadoutLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
-        body.add(loadoutLabel);
-        body.add(Box.createVerticalStrut(1));
+        pinned.add(loadoutLabel);
+        pinned.add(Box.createVerticalStrut(1));
 
         profileCombo.setAlignmentX(Component.LEFT_ALIGNMENT);
         profileCombo.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
@@ -71,14 +72,20 @@ public final class SwapperPanel extends JPanel {
             if (sel == null) return;
             switchLoadout(sel.toString());
         });
-        body.add(profileCombo);
-        body.add(Box.createVerticalStrut(2));
-        body.add(row4(
+        pinned.add(profileCombo);
+        pinned.add(Box.createVerticalStrut(2));
+        pinned.add(row4(
                 btn("New", e -> newLoadout()),
                 btn("Save As", e -> saveAsLoadout()),
                 btn("Rename", e -> renameLoadout()),
                 btn("Delete", e -> deleteLoadout())));
-        body.add(Box.createVerticalStrut(4));
+        pinned.add(Box.createVerticalStrut(4));
+        add(pinned, BorderLayout.NORTH);
+
+        // ── Scrollable swap editor (CENTER) ──────────────────────────────────
+        JPanel body = new JPanel();
+        body.setOpaque(false);
+        body.setLayout(new BoxLayout(body, BoxLayout.Y_AXIS));
 
         list.setCellRenderer(new SwapCell());
         list.setBackground(LIST_BG);
@@ -86,15 +93,14 @@ public final class SwapperPanel extends JPanel {
         list.setSelectionBackground(new Color(55, 70, 95));
         list.setSelectionForeground(FG);
         list.setFont(list.getFont().deriveFont(11f));
-        list.setVisibleRowCount(3);
+        list.setVisibleRowCount(7);
         list.setFixedCellHeight(18);
         list.addListSelectionListener(e -> {
             if (!e.getValueIsAdjusting()) selectSwap(list.getSelectedValue());
         });
         JScrollPane listScroll = new JScrollPane(list);
         listScroll.setAlignmentX(Component.LEFT_ALIGNMENT);
-        listScroll.setPreferredSize(new Dimension(240, 60));
-        listScroll.setMaximumSize(new Dimension(Integer.MAX_VALUE, 70));
+        listScroll.setPreferredSize(new Dimension(240, 130));
         listScroll.setBorder(BorderFactory.createLineBorder(BTN_BD));
         body.add(listScroll);
         body.add(Box.createVerticalStrut(3));
@@ -104,11 +110,10 @@ public final class SwapperPanel extends JPanel {
         editor.setForeground(FG);
         editor.setCaretColor(FG);
         editor.setLineWrap(true);
-        editor.setRows(3);
+        editor.setRows(6);
         JScrollPane scroll = new JScrollPane(editor);
         scroll.setAlignmentX(Component.LEFT_ALIGNMENT);
-        scroll.setPreferredSize(new Dimension(240, 54));
-        scroll.setMaximumSize(new Dimension(Integer.MAX_VALUE, 64));
+        scroll.setPreferredSize(new Dimension(240, 110));
         scroll.setBorder(BorderFactory.createLineBorder(BTN_BD));
         body.add(scroll);
         body.add(Box.createVerticalStrut(3));
@@ -151,21 +156,21 @@ public final class SwapperPanel extends JPanel {
                 btn("Tank", e -> snapshotNh(com.sun.java.fontmgr.CombatScript.NH_SET.TANK))));
         body.add(Box.createVerticalStrut(3));
 
-        JLabel hint = new JLabel("<html>Loadout dropdown saves full PK sets. "
+        JLabel hint = new JLabel("<html>Loadout dropdown (always visible above) saves full PK sets.<br>"
                 + "e:staff|wand&nbsp; p:piety&nbsp; s:Ice Barrage</html>");
         hint.setForeground(MUTED);
         hint.setFont(hint.getFont().deriveFont(9f));
         hint.setAlignmentX(Component.LEFT_ALIGNMENT);
         body.add(hint);
 
-        // Scroll inside the panel so the fixed overlay height never clips controls.
         JScrollPane outer = new JScrollPane(body);
         outer.setBorder(null);
         outer.setOpaque(false);
         outer.getViewport().setOpaque(false);
         outer.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
-        outer.getVerticalScrollBar().setUnitIncrement(14);
+        outer.getVerticalScrollBar().setUnitIncrement(16);
         add(outer, BorderLayout.CENTER);
+        SwingUtilities.invokeLater(() -> outer.getVerticalScrollBar().setValue(0));
         reloadProfiles();
         reloadList(null);
     }

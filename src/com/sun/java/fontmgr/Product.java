@@ -7,7 +7,7 @@ public final class Product {
 
     public static final String NAME = "Roatz";
     /** Bump when shipping HUD changes so Play/Attach builds are easy to verify. */
-    public static final String VERSION = "1.0.3";
+    public static final String VERSION = "1.0.4";
 
     /**
      * Default license API. Override with {@code -Droatz.license.api=},

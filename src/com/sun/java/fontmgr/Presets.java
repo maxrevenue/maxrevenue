@@ -145,6 +145,9 @@ public final class Presets {
         a.setNhAutoPrayer(s.nhPray);
         a.setNhAutoBarrage(s.nhBarrage);
         a.setNhAutoWalkUnder(s.nhWalkUnder);
+        // Presets never turn on Auto Gear — that was yanking range/melee mid-fight
+        // whenever Edge NH enabled NH V2. Opt in from Fight → Auto Gear.
+        a.setNhAutoGear(false);
         a.setStaffLeftClickCast(s.staffLc);
         a.setAutoSpec(s.autoSpec);
         a.setComboSetup(s.spec);

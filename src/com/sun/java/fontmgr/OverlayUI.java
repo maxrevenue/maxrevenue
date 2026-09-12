@@ -91,16 +91,22 @@ public class OverlayUI {
 
     private int activeTab = 0;
     private boolean collapsed = false;
+    /** Tiny restore handle — smaller than collapsed title bar. */
+    private boolean minimized = false;
     private Point dragOffset = null;
     private final java.nio.file.Path cfgPath;
 
-    private static final int FRAME_W = 300;
-    private static final int FRAME_H = 520;
+    private static final int FRAME_W = 320;
+    private static final int FRAME_H = 620;
     private static final int FRAME_H_COLLAPSED = 40;
+    private static final int FRAME_W_MINI = 36;
+    private static final int FRAME_H_MINI = 28;
 
+    private JPanel titleBar;
     private JButton collapseBtn;
     private JPanel expandableChrome;
     private RoundedPanel footerBar;
+    private RoundedPanel rootPanel;
 
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
         Thread t = new Thread(r, "HUD-" + java.util.concurrent.ThreadLocalRandom.current().nextInt(100_000));
@@ -116,6 +122,11 @@ public class OverlayUI {
         SwingUtilities.invokeLater(() -> {
             OverlayUI existing = INSTANCE;
             if (existing != null && existing.frame != null && existing.frame.isDisplayable()) {
+                if (existing.minimized || existing.collapsed) {
+                    existing.minimized = false;
+                    existing.collapsed = false;
+                    existing.applyCollapse();
+                }
                 existing.frame.setVisible(true);
                 existing.frame.toFront();
                 existing.frame.setAlwaysOnTop(true);
@@ -150,9 +161,10 @@ public class OverlayUI {
         RoundedPanel root = new RoundedPanel(14, BG_DARK);
         root.setLayout(new BorderLayout(6, 6));
         root.setBorder(new EmptyBorder(6, 8, 8, 8));
+        rootPanel = root;
 
         // Title bar
-        JPanel titleBar = new JPanel(new BorderLayout(6, 0));
+        titleBar = new JPanel(new BorderLayout(6, 0));
         titleBar.setOpaque(true);
         titleBar.setBackground(TITLE_BG);
         titleBar.setBorder(new EmptyBorder(4, 8, 4, 8));
@@ -268,11 +280,15 @@ public class OverlayUI {
         root.add(footerBar, BorderLayout.SOUTH);
 
         frame.setContentPane(root);
-        // showTab expands if collapsed — restore saved collapse after first layout.
+        // showTab expands if collapsed/minimized — restore saved chrome after first layout.
         boolean startCollapsed = collapsed;
+        boolean startMinimized = minimized;
         collapsed = false;
+        minimized = false;
         showTab(activeTab);
         collapsed = startCollapsed;
+        minimized = startMinimized;
+        if (minimized) collapsed = false;
         applyCollapse();
         frame.setLocation(60, 60);
         frame.setBackground(new Color(0, 0, 0, 0));
@@ -336,6 +352,8 @@ public class OverlayUI {
         page.add(buildPresetRow());
         page.add(Box.createVerticalStrut(4));
         page.add(buildPkPage());
+        page.add(Box.createVerticalStrut(6));
+        page.add(buildNhPage());
         page.add(Box.createVerticalStrut(3));
 
         staffLcToggle = miniToggle("Staff = L-Click Barrage", script.actions().staffLeftClickCast(),
@@ -467,7 +485,7 @@ public class OverlayUI {
 
         JPanel grid = new JPanel(new GridLayout(4, 2, 4, 4));
         grid.setOpaque(false);
-        grid.setMaximumSize(new Dimension(Integer.MAX_VALUE, 88));
+        grid.setMaximumSize(new Dimension(Integer.MAX_VALUE, 160));
         grid.add(pkAutoSpecBtn); grid.add(pkVengToggle);
         grid.add(pkComboEatToggle); grid.add(pkAutoEatToggle);
         grid.add(pkDefPrayToggle); grid.add(pkProtectItemToggle);
@@ -518,10 +536,18 @@ public class OverlayUI {
             saveConfig();
         });
         
-        JToggleButton autoBarrageToggle = miniToggle("Auto Barrage", script.actions().nhAutoBarrageEnabled(), "Automatic ice barrage casting");
+        JToggleButton autoBarrageToggle = miniToggle("Auto Barrage", script.actions().nhAutoBarrageEnabled(), "Automatic ice barrage casting + mage gear at freeze");
         autoBarrageToggle.addActionListener(e -> {
             script.actions().toggleNhAutoBarrage();
             styleMiniToggle(autoBarrageToggle, script.actions().nhAutoBarrageEnabled());
+            saveConfig();
+        });
+
+        JToggleButton autoGearToggle = miniToggle("Auto Gear", script.actions().nhAutoGearEnabled(),
+                "OFF = no auto range/melee swaps after freeze. Hotkeys and Equip still work. Turn ON only if you want NH to gear for you.");
+        autoGearToggle.addActionListener(e -> {
+            script.actions().toggleNhAutoGear();
+            styleMiniToggle(autoGearToggle, script.actions().nhAutoGearEnabled());
             saveConfig();
         });
         
@@ -531,6 +557,10 @@ public class OverlayUI {
         featureRow.add(autoPrayerToggle);
         featureRow.add(autoBarrageToggle);
         page.add(featureRow);
+        page.add(Box.createVerticalStrut(4));
+        autoGearToggle.setAlignmentX(Component.LEFT_ALIGNMENT);
+        autoGearToggle.setMaximumSize(new Dimension(Integer.MAX_VALUE, 26));
+        page.add(autoGearToggle);
         page.add(Box.createVerticalStrut(4));
         
         // Auto walk-under toggle
@@ -874,27 +904,65 @@ public class OverlayUI {
         HotkeyManager.get().setOverlayMode(
                 TAB_KEYS[tab].equals("SWAP") ? HotkeyManager.OverlayMode.SWAP
                                              : HotkeyManager.OverlayMode.PK);
-        if (collapsed) {
+        if (collapsed || minimized) {
             collapsed = false;
+            minimized = false;
             applyCollapse();
         }
         saveConfig();
     }
 
     private void toggleCollapse() {
-        collapsed = !collapsed;
+        // Cycle: expanded → title bar → tiny pill → expanded.
+        if (minimized) {
+            minimized = false;
+            collapsed = false;
+        } else if (collapsed) {
+            collapsed = false;
+            minimized = true;
+        } else {
+            collapsed = true;
+            minimized = false;
+        }
         applyCollapse();
         saveConfig();
     }
 
-    /** Hide chrome + body when collapsed; restore full HUD when expanded. */
+    /** Hide chrome + body when collapsed; tiny restore handle when minimized. */
     private void applyCollapse() {
-        boolean show = !collapsed;
+        boolean tiny = minimized;
+        boolean show = !collapsed && !minimized;
         if (expandableChrome != null) expandableChrome.setVisible(show);
         if (body != null) body.setVisible(show);
         if (footerBar != null) footerBar.setVisible(show);
-        if (collapseBtn != null) collapseBtn.setText(collapsed ? "▴" : "▾");
-        frame.setSize(FRAME_W, collapsed ? FRAME_H_COLLAPSED : FRAME_H);
+        // Title bar stays for collapsed; shrink to a pill when minimized.
+        if (titleBar != null) {
+            for (java.awt.Component c : titleBar.getComponents()) {
+                // Keep only a restore affordance when minimized.
+                if (tiny) {
+                    c.setVisible(c == collapseBtn || (c instanceof JPanel && ((JPanel) c).isAncestorOf(collapseBtn)));
+                } else {
+                    c.setVisible(true);
+                }
+            }
+            titleBar.setVisible(true);
+        }
+        if (collapseBtn != null) {
+            collapseBtn.setVisible(true);
+            collapseBtn.setText(minimized ? "▣" : (collapsed ? "▴" : "▾"));
+            collapseBtn.setToolTipText(minimized
+                    ? "Click to restore HUD"
+                    : (collapsed ? "Click again to fully minimize to a tiny pill" : "Collapse to title bar"));
+        }
+        if (masterToggle != null) masterToggle.setVisible(!tiny);
+        if (tiny) {
+            frame.setSize(FRAME_W_MINI, FRAME_H_MINI);
+            // Keep the restore pill drag-able / clickable near the edge.
+            if (rootPanel != null) rootPanel.setBorder(new EmptyBorder(2, 2, 2, 2));
+        } else {
+            frame.setSize(FRAME_W, collapsed ? FRAME_H_COLLAPSED : FRAME_H);
+            if (rootPanel != null) rootPanel.setBorder(new EmptyBorder(6, 8, 8, 8));
+        }
         frame.revalidate();
         frame.repaint();
     }
@@ -1120,6 +1188,9 @@ public class OverlayUI {
                 java.util.Properties p = new java.util.Properties();
                 try (java.io.InputStream in = java.nio.file.Files.newInputStream(cfgPath)) { p.load(in); }
                 collapsed = "true".equalsIgnoreCase(p.getProperty("collapsed"));
+                minimized = "true".equalsIgnoreCase(p.getProperty("minimized"));
+                // Tiny pill and title-bar collapse are exclusive.
+                if (minimized) collapsed = false;
                 String tab = p.getProperty("tab", "SWAP");
                 if ("SWAP".equalsIgnoreCase(tab)) activeTab = 0;
                 else if ("FIGHT".equalsIgnoreCase(tab) || "PK".equalsIgnoreCase(tab)
@@ -1140,6 +1211,7 @@ public class OverlayUI {
                 if (p.containsKey("nhv2")) script.nhV2Enabled = "true".equalsIgnoreCase(p.getProperty("nhv2"));
                 if (p.containsKey("nhpray")) script.nhAutoPrayerEnabled = "true".equalsIgnoreCase(p.getProperty("nhpray"));
                 if (p.containsKey("nhbarrage")) script.nhAutoBarrageEnabled = "true".equalsIgnoreCase(p.getProperty("nhbarrage"));
+                if (p.containsKey("nhgear")) script.nhAutoGearEnabled = "true".equalsIgnoreCase(p.getProperty("nhgear"));
                 if (p.containsKey("nhwalk")) script.nhAutoWalkUnderEnabled = "true".equalsIgnoreCase(p.getProperty("nhwalk"));
                 if (p.containsKey("stafflc")) script.staffLcCast = "true".equalsIgnoreCase(p.getProperty("stafflc"));
                 // NH engines are exclusive — NH V2 wins when both were persisted.
@@ -1169,6 +1241,7 @@ public class OverlayUI {
                 try (java.io.InputStream in = java.nio.file.Files.newInputStream(cfgPath)) { p.load(in); }
             }
             p.setProperty("collapsed", Boolean.toString(collapsed));
+            p.setProperty("minimized", Boolean.toString(minimized));
             p.setProperty("tab", TAB_KEYS[activeTab >= 0 && activeTab < TAB_KEYS.length ? activeTab : 0]);
             p.setProperty("dh", Boolean.toString(script.dharokEnabled));
             p.setProperty("pun", Boolean.toString(script.eatPunishEnabled));
@@ -1183,6 +1256,7 @@ public class OverlayUI {
             p.setProperty("nhv2", Boolean.toString(script.nhV2Enabled));
             p.setProperty("nhpray", Boolean.toString(script.nhAutoPrayerEnabled));
             p.setProperty("nhbarrage", Boolean.toString(script.nhAutoBarrageEnabled));
+            p.setProperty("nhgear", Boolean.toString(script.nhAutoGearEnabled));
             p.setProperty("nhwalk", Boolean.toString(script.nhAutoWalkUnderEnabled));
             p.setProperty("stafflc", Boolean.toString(script.staffLcCast));
             p.setProperty("nhkohp", Integer.toString(script.nhKoHp));

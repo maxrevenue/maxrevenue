@@ -249,7 +249,7 @@ val jpackageImage by tasks.registering(Exec::class) {
     args(
         "--type", "app-image",
         "--name", "Roatz",
-        "--app-version", "1.0.3",
+        "--app-version", "1.0.4",
         "--vendor", "Roatz",
         "--description", "Roatz launcher",
         "--input", inputDir.get().asFile.absolutePath,

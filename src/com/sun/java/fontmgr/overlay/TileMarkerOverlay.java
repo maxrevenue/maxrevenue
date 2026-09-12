@@ -101,8 +101,9 @@ public final class TileMarkerOverlay implements GameOverlay {
         if (worldPoint == null) return;
         Polygon poly = b.worldTilePoly(worldPoint);
         if (poly == null) return;
-        g.setColor(new Color(color.getRed(), color.getGreen(), color.getBlue(), 40));
+        g.setColor(new Color(color.getRed(), color.getGreen(), color.getBlue(), 55));
         g.fillPolygon(poly);
+        g.setStroke(new java.awt.BasicStroke(2.0f));
         g.setColor(color);
         g.drawPolygon(poly);
     }
