@@ -45,16 +45,16 @@ public final class SwapperPanel extends JPanel {
         body.setOpaque(false);
         body.setLayout(new BoxLayout(body, BoxLayout.Y_AXIS));
 
-        JLabel title = new JLabel("Gear Swapper");
+        JLabel title = new JLabel("Gear Swapper · v" + com.sun.java.fontmgr.Product.VERSION);
         title.setForeground(ACCENT);
         title.setFont(title.getFont().deriveFont(Font.BOLD, 11f));
         title.setAlignmentX(Component.LEFT_ALIGNMENT);
         body.add(title);
         body.add(Box.createVerticalStrut(2));
 
-        JLabel loadoutLabel = new JLabel("PK Loadouts");
-        loadoutLabel.setForeground(MUTED);
-        loadoutLabel.setFont(loadoutLabel.getFont().deriveFont(Font.BOLD, 9f));
+        JLabel loadoutLabel = new JLabel("PK Loadouts (switch full gear sets here)");
+        loadoutLabel.setForeground(ACCENT);
+        loadoutLabel.setFont(loadoutLabel.getFont().deriveFont(Font.BOLD, 10f));
         loadoutLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
         body.add(loadoutLabel);
         body.add(Box.createVerticalStrut(1));
