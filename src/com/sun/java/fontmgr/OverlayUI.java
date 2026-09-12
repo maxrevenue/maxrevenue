@@ -94,6 +94,14 @@ public class OverlayUI {
     private Point dragOffset = null;
     private final java.nio.file.Path cfgPath;
 
+    private static final int FRAME_W = 300;
+    private static final int FRAME_H = 520;
+    private static final int FRAME_H_COLLAPSED = 40;
+
+    private JButton collapseBtn;
+    private JPanel expandableChrome;
+    private RoundedPanel footerBar;
+
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
         Thread t = new Thread(r, "HUD-" + java.util.concurrent.ThreadLocalRandom.current().nextInt(100_000));
         t.setDaemon(true);
@@ -144,7 +152,7 @@ public class OverlayUI {
 
         JPanel titleRight = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 0));
         titleRight.setOpaque(false);
-        JButton collapseBtn = new JButton(collapsed ? "▴" : "▾");
+        collapseBtn = new JButton(collapsed ? "▴" : "▾");
         collapseBtn.setFocusable(false);
         collapseBtn.setBorder(null);
         collapseBtn.setContentAreaFilled(false);
@@ -214,30 +222,43 @@ public class OverlayUI {
         targetP.add(Box.createVerticalStrut(3));
         targetP.add(chipRow(fightStateLabel, koLabel, specReadyLabel));
 
+        expandableChrome = new JPanel();
+        expandableChrome.setLayout(new BoxLayout(expandableChrome, BoxLayout.Y_AXIS));
+        expandableChrome.setOpaque(false);
+        expandableChrome.add(header);
+        expandableChrome.add(Box.createVerticalStrut(4));
+        expandableChrome.add(vitals);
+        expandableChrome.add(Box.createVerticalStrut(4));
+        expandableChrome.add(targetP);
+
         JPanel north = new JPanel();
         north.setLayout(new BoxLayout(north, BoxLayout.Y_AXIS));
         north.setOpaque(false);
-        north.add(titleBar); north.add(header);
-        north.add(Box.createVerticalStrut(4)); north.add(vitals);
-        north.add(Box.createVerticalStrut(4)); north.add(targetP);
+        north.add(titleBar);
+        north.add(expandableChrome);
         root.add(north, BorderLayout.NORTH);
 
         body = new JPanel(cards);
         body.setOpaque(false);
+        // Swapper scrolls internally; Fight/DH use an outer scroll page.
         body.add(buildSwapperHubPage(), "SWAP");
-        body.add(buildFightPage(), "FIGHT");
-        body.add(buildDhPage(), "DH");
+        body.add(scrollPage(buildFightPage()), "FIGHT");
+        body.add(scrollPage(buildDhPage()), "DH");
         root.add(body, BorderLayout.CENTER);
 
-        RoundedPanel footer = new RoundedPanel(8, CARD_BG);
-        footer.setLayout(new BoxLayout(footer, BoxLayout.Y_AXIS));
-        footer.setBorder(new EmptyBorder(4, 6, 4, 6));
-        footer.add(actionTickerLabel);
-        root.add(footer, BorderLayout.SOUTH);
+        footerBar = new RoundedPanel(8, CARD_BG);
+        footerBar.setLayout(new BoxLayout(footerBar, BoxLayout.Y_AXIS));
+        footerBar.setBorder(new EmptyBorder(4, 6, 4, 6));
+        footerBar.add(actionTickerLabel);
+        root.add(footerBar, BorderLayout.SOUTH);
 
         frame.setContentPane(root);
+        // showTab expands if collapsed — restore saved collapse after first layout.
+        boolean startCollapsed = collapsed;
+        collapsed = false;
         showTab(activeTab);
-        frame.setSize(300, 480);
+        collapsed = startCollapsed;
+        applyCollapse();
         frame.setLocation(60, 60);
         frame.setBackground(new Color(0, 0, 0, 0));
 
@@ -267,21 +288,29 @@ public class OverlayUI {
 
     // ── Pages ─────────────────────────────────────────────────────────────────
 
+    /** Wrap a tab page so tall content (Swapper loadouts, Fight toggles) can scroll. */
+    private JPanel scrollPage(JPanel page) {
+        JScrollPane scroll = new JScrollPane(page);
+        scroll.setBorder(null);
+        scroll.setOpaque(false);
+        scroll.getViewport().setOpaque(false);
+        scroll.getVerticalScrollBar().setUnitIncrement(16);
+        scroll.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
+        JPanel wrap = new JPanel(new BorderLayout());
+        wrap.setOpaque(false);
+        wrap.add(scroll, BorderLayout.CENTER);
+        return wrap;
+    }
+
     /** Swapper is the hub — everything for NH pking is driven from here. */
     private JPanel buildSwapperHubPage() {
-        JPanel page = vbox();
-        JLabel t = createLabel("Swapper Hub", ACCENT_GOLD, 12f, true);
-        t.setAlignmentX(Component.LEFT_ALIGNMENT);
-        page.add(t);
-        page.add(Box.createVerticalStrut(2));
-        JLabel sub = createLabel("Make swaps, snapshot NH gear, bind hotkeys. Fight toggles on the Fight tab.",
-                FG_MUTED, 9.5f, false);
-        sub.setAlignmentX(Component.LEFT_ALIGNMENT);
-        page.add(sub);
-        page.add(Box.createVerticalStrut(4));
+        // BorderLayout fill so SwapperPanel's internal scroll gets a bounded height
+        // (BoxLayout would grow to preferred height and clip inside the fixed frame).
+        JPanel page = new JPanel(new BorderLayout());
+        page.setOpaque(false);
         swapperPanel = new com.sun.java.fontmgr.swap.SwapperPanel(swapManager, swapDispatcher, script);
         HotkeyManager.get().setSwapFlush(swapperPanel::flushEditorIfEditing);
-        page.add(swapperPanel);
+        page.add(swapperPanel, BorderLayout.CENTER);
         return page;
     }
 
@@ -829,11 +858,30 @@ public class OverlayUI {
         HotkeyManager.get().setOverlayMode(
                 TAB_KEYS[tab].equals("SWAP") ? HotkeyManager.OverlayMode.SWAP
                                              : HotkeyManager.OverlayMode.PK);
-        if (collapsed) collapsed = false;
+        if (collapsed) {
+            collapsed = false;
+            applyCollapse();
+        }
         saveConfig();
     }
 
-    private void toggleCollapse() { collapsed = !collapsed; saveConfig(); }
+    private void toggleCollapse() {
+        collapsed = !collapsed;
+        applyCollapse();
+        saveConfig();
+    }
+
+    /** Hide chrome + body when collapsed; restore full HUD when expanded. */
+    private void applyCollapse() {
+        boolean show = !collapsed;
+        if (expandableChrome != null) expandableChrome.setVisible(show);
+        if (body != null) body.setVisible(show);
+        if (footerBar != null) footerBar.setVisible(show);
+        if (collapseBtn != null) collapseBtn.setText(collapsed ? "▴" : "▾");
+        frame.setSize(FRAME_W, collapsed ? FRAME_H_COLLAPSED : FRAME_H);
+        frame.revalidate();
+        frame.repaint();
+    }
 
     private JLabel createLabel(String text, Color color, float size, boolean bold) {
         JLabel l = new JLabel(text);

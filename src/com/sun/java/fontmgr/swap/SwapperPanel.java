@@ -50,21 +50,14 @@ public final class SwapperPanel extends JPanel {
         title.setFont(title.getFont().deriveFont(Font.BOLD, 11f));
         title.setAlignmentX(Component.LEFT_ALIGNMENT);
         body.add(title);
-        body.add(Box.createVerticalStrut(3));
-
-        JLabel loadoutTitle = new JLabel("PK Loadouts");
-        loadoutTitle.setForeground(ACCENT);
-        loadoutTitle.setFont(loadoutTitle.getFont().deriveFont(Font.BOLD, 11f));
-        loadoutTitle.setAlignmentX(Component.LEFT_ALIGNMENT);
-        body.add(loadoutTitle);
-        body.add(Box.createVerticalStrut(3));
+        body.add(Box.createVerticalStrut(2));
 
         profileCombo.setAlignmentX(Component.LEFT_ALIGNMENT);
-        profileCombo.setMaximumSize(new Dimension(Integer.MAX_VALUE, 26));
+        profileCombo.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
         profileCombo.setBackground(LIST_BG);
         profileCombo.setForeground(FG);
         profileCombo.setFont(profileCombo.getFont().deriveFont(11f));
-        profileCombo.setToolTipText("Switch between saved PK gear loadouts without deleting swaps");
+        profileCombo.setToolTipText("PK loadout — switch gear sets without deleting swaps");
         profileCombo.addActionListener(e -> {
             if (syncingProfiles) return;
             Object sel = profileCombo.getSelectedItem();
@@ -72,18 +65,13 @@ public final class SwapperPanel extends JPanel {
             switchLoadout(sel.toString());
         });
         body.add(profileCombo);
-        body.add(Box.createVerticalStrut(3));
-        body.add(row(btn("New Loadout", e -> newLoadout()), btn("Save As…", e -> saveAsLoadout())));
-        body.add(Box.createVerticalStrut(3));
-        body.add(row(btn("Rename Loadout", e -> renameLoadout()), btn("Delete Loadout", e -> deleteLoadout())));
-        body.add(Box.createVerticalStrut(6));
-
-        JLabel swapsTitle = new JLabel("Swaps in this loadout");
-        swapsTitle.setForeground(MUTED);
-        swapsTitle.setFont(swapsTitle.getFont().deriveFont(Font.BOLD, 10f));
-        swapsTitle.setAlignmentX(Component.LEFT_ALIGNMENT);
-        body.add(swapsTitle);
-        body.add(Box.createVerticalStrut(3));
+        body.add(Box.createVerticalStrut(2));
+        body.add(row4(
+                btn("New", e -> newLoadout()),
+                btn("Save As", e -> saveAsLoadout()),
+                btn("Rename", e -> renameLoadout()),
+                btn("Delete", e -> deleteLoadout())));
+        body.add(Box.createVerticalStrut(4));
 
         list.setCellRenderer(new SwapCell());
         list.setBackground(LIST_BG);
@@ -91,87 +79,88 @@ public final class SwapperPanel extends JPanel {
         list.setSelectionBackground(new Color(55, 70, 95));
         list.setSelectionForeground(FG);
         list.setFont(list.getFont().deriveFont(11f));
-        list.setVisibleRowCount(4);
-        list.setFixedCellHeight(20);
+        list.setVisibleRowCount(3);
+        list.setFixedCellHeight(18);
         list.addListSelectionListener(e -> {
             if (!e.getValueIsAdjusting()) selectSwap(list.getSelectedValue());
         });
         JScrollPane listScroll = new JScrollPane(list);
         listScroll.setAlignmentX(Component.LEFT_ALIGNMENT);
-        listScroll.setPreferredSize(new Dimension(240, 88));
-        listScroll.setMaximumSize(new Dimension(Integer.MAX_VALUE, 100));
+        listScroll.setPreferredSize(new Dimension(240, 60));
+        listScroll.setMaximumSize(new Dimension(Integer.MAX_VALUE, 70));
         listScroll.setBorder(BorderFactory.createLineBorder(BTN_BD));
         body.add(listScroll);
-        body.add(Box.createVerticalStrut(4));
+        body.add(Box.createVerticalStrut(3));
 
         editor.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 11));
         editor.setBackground(LIST_BG);
         editor.setForeground(FG);
         editor.setCaretColor(FG);
         editor.setLineWrap(true);
+        editor.setRows(3);
         JScrollPane scroll = new JScrollPane(editor);
         scroll.setAlignmentX(Component.LEFT_ALIGNMENT);
-        scroll.setPreferredSize(new Dimension(240, 72));
-        scroll.setMaximumSize(new Dimension(Integer.MAX_VALUE, 90));
+        scroll.setPreferredSize(new Dimension(240, 54));
+        scroll.setMaximumSize(new Dimension(Integer.MAX_VALUE, 64));
         scroll.setBorder(BorderFactory.createLineBorder(BTN_BD));
         body.add(scroll);
-        body.add(Box.createVerticalStrut(4));
+        body.add(Box.createVerticalStrut(3));
 
         styleBtn(hotkeyBtn);
         hotkeyBtn.setAlignmentX(Component.LEFT_ALIGNMENT);
-        hotkeyBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+        hotkeyBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
         hotkeyBtn.setForeground(ACCENT);
-        hotkeyBtn.setToolTipText("Click, then press the key you want for this swap");
+        hotkeyBtn.setToolTipText("Click to bind · right-click to clear");
         hotkeyBtn.addActionListener(e -> bindHotkey());
+        hotkeyBtn.addMouseListener(new java.awt.event.MouseAdapter() {
+            @Override public void mousePressed(java.awt.event.MouseEvent e) {
+                if (SwingUtilities.isRightMouseButton(e)) clearHotkey();
+            }
+        });
         body.add(hotkeyBtn);
-        body.add(Box.createVerticalStrut(4));
+        body.add(Box.createVerticalStrut(3));
 
-        body.add(row(btn("Save", e -> saveString()), btn("New", e -> createSwap())));
-        body.add(Box.createVerticalStrut(3));
+        body.add(row(btn("Save", e -> saveString()), btn("New Swap", e -> createSwap())));
+        body.add(Box.createVerticalStrut(2));
         body.add(row(btn("Save Gear", e -> saveCurrentGear()), btn("Delete", e -> deleteSwap())));
-        body.add(Box.createVerticalStrut(3));
+        body.add(Box.createVerticalStrut(2));
         body.add(row(btn("Equip", e -> { flushEditorToCurrent(); if (current != null) dispatcher.run(current); }),
                 btn("Clone", e -> cloneCurrent())));
-        body.add(Box.createVerticalStrut(3));
-        body.add(row(btn("Rename Swap", e -> renameSwap()), btn("Clear Hotkey", e -> clearHotkey())));
+        body.add(Box.createVerticalStrut(2));
+        body.add(row(btn("Rename Swap", e -> renameSwap()),
+                btn("Arm Ice LC", e -> armIce())));
         body.add(Box.createVerticalStrut(4));
 
-        JButton iceBtn = btn("Arm Ice Barrage (left-click)", e -> armIce());
-        iceBtn.setAlignmentX(Component.LEFT_ALIGNMENT);
-        iceBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 26));
-        iceBtn.setForeground(ACCENT);
-        body.add(iceBtn);
-        body.add(Box.createVerticalStrut(6));
-
-        // NH gear loadouts — snapshot currently-equipped gear into each NH set.
-        JLabel nhTitle = new JLabel("NH Loadouts (snapshot current gear)");
+        JLabel nhTitle = new JLabel("NH snapshots");
         nhTitle.setForeground(ACCENT);
-        nhTitle.setFont(nhTitle.getFont().deriveFont(Font.BOLD, 11f));
+        nhTitle.setFont(nhTitle.getFont().deriveFont(Font.BOLD, 10f));
         nhTitle.setAlignmentX(Component.LEFT_ALIGNMENT);
         body.add(nhTitle);
-        body.add(Box.createVerticalStrut(3));
-        body.add(row(
+        body.add(Box.createVerticalStrut(2));
+        body.add(row4(
                 btn("Mage", e -> snapshotNh(com.sun.java.fontmgr.CombatScript.NH_SET.MAGE)),
-                btn("Range", e -> snapshotNh(com.sun.java.fontmgr.CombatScript.NH_SET.RANGE))));
-        body.add(Box.createVerticalStrut(3));
-        body.add(row(
+                btn("Range", e -> snapshotNh(com.sun.java.fontmgr.CombatScript.NH_SET.RANGE)),
                 btn("Melee", e -> snapshotNh(com.sun.java.fontmgr.CombatScript.NH_SET.MELEE)),
                 btn("Tank", e -> snapshotNh(com.sun.java.fontmgr.CombatScript.NH_SET.TANK))));
-        body.add(Box.createVerticalStrut(4));
+        body.add(Box.createVerticalStrut(3));
 
-        JLabel hint = new JLabel("<html>Save each PK setup as a loadout (e.g. Tribrid, DH).<br>"
-                + "Switch the dropdown to change gear sets — nothing is deleted.<br>"
-                + "PvP swap example: e:staff|wand&nbsp; p:piety&nbsp; s:Ice Barrage<br>"
-                + "Worn/missing e: lines are skipped. Weapon equips first.</html>");
+        JLabel hint = new JLabel("<html>Loadout dropdown saves full PK sets. "
+                + "e:staff|wand&nbsp; p:piety&nbsp; s:Ice Barrage</html>");
         hint.setForeground(MUTED);
         hint.setFont(hint.getFont().deriveFont(9f));
         hint.setAlignmentX(Component.LEFT_ALIGNMENT);
         body.add(hint);
 
-        add(body, BorderLayout.NORTH);
+        // Scroll inside the panel so the fixed overlay height never clips controls.
+        JScrollPane outer = new JScrollPane(body);
+        outer.setBorder(null);
+        outer.setOpaque(false);
+        outer.getViewport().setOpaque(false);
+        outer.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
+        outer.getVerticalScrollBar().setUnitIncrement(14);
+        add(outer, BorderLayout.CENTER);
         reloadProfiles();
         reloadList(null);
-        // Equip button and matching hotkeys flush the editor before run.
     }
 
     private void armIce() {
@@ -188,9 +177,21 @@ public final class SwapperPanel extends JPanel {
         JPanel p = new JPanel(new GridLayout(1, 2, 4, 0));
         p.setOpaque(false);
         p.setAlignmentX(Component.LEFT_ALIGNMENT);
-        p.setMaximumSize(new Dimension(Integer.MAX_VALUE, 26));
+        p.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
         p.add(a);
         p.add(b);
+        return p;
+    }
+
+    private JPanel row4(JButton a, JButton b, JButton c, JButton d) {
+        JPanel p = new JPanel(new GridLayout(1, 4, 3, 0));
+        p.setOpaque(false);
+        p.setAlignmentX(Component.LEFT_ALIGNMENT);
+        p.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
+        p.add(a);
+        p.add(b);
+        p.add(c);
+        p.add(d);
         return p;
     }
 
