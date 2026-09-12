@@ -38,15 +38,30 @@ Uses Workers static assets (`public/`) + `/api/picks` + `/api/health`.
 
 ## Challenge math this encodes
 
-| Rule | Value |
-|------|-------|
-| Target | +10% closed ($110,000) |
-| Daily DD | 4% of SOD equity, **floating** |
-| Overall DD | 6% static ($94,000 floor) |
-| Min days | 5 UTC trading days |
-| Consistency | No UTC day > 50% of total profit |
-| Pass pairs | Majors listed above |
-| Pass window | 12:00–16:00 UTC |
+Named constants in `src/constants.js` (no magic numbers in sizing/DD/lock):
+
+| Constant | Value |
+|----------|-------|
+| `START_BALANCE` | $100,000 |
+| `TARGET_BALANCE` | $110,000 (+10% closed) |
+| `DAILY_DD_PCT` | 4% of **00:00 UTC SOD equity** (floating included) |
+| `OVERALL_DD_FLOOR` | $94,000 static (never moves after recovery) |
+| `MIN_TRADING_DAYS` | 5 UTC days with a logged fill |
+| `CONSISTENCY_MAX_SHARE` | 50% best-day soft rule |
+| `DEFAULT_RISK_PCT` | 0.75% (low end of 0.75–1%) |
+| `MAX_LOTS` / `MIN_STOP_PIPS` | 2.00 lots / 10 pips |
+| `DEFAULT_RR` / `BUFFER_PCT` | 1.8R / 15% headroom |
+
+### Core “check for a trade” modules (`src/`)
+
+1. **`equity.js`** — UTC SOD snapshot `{ utcDate, startOfDayEquity }`, `getDailyDDRoom`, `getOverallDDRoom`, open-ticket mark-to-market  
+2. **`sizing.js`** — `calcTicket` (buffer, lot cap, min stop, **rejects if full SL would breach remaining daily DD**)  
+3. **`scanner.js`** — Yahoo candles, H1 trend + M15 EMA20 pullback; `{ action: "wait" }` or ticket via `calcTicket`  
+4. **`lock.js`** — logged fill locks the UTC day; override only via explicit `override: true` / `--override` / confirm dialog  
+5. **`consistency.js`** — floating P&L warning: “Closing now may violate the 50% consistency rule — consider partial close.” (never auto-closes)  
+6. **`checkTrade.js`** — end-to-end orchestration for `/api/check-trade`
+
+No live Pivex auto-execution — output stays a ticket you type in manually.
 
 ## 2-week path (example)
 
