@@ -1,0 +1,17 @@
+{
+  "name": "Pivex Pass",
+  "install": "cd pivex-pass && npm install",
+  "terminals": [
+    {
+      "name": "pivex-pass server",
+      "command": "cd pivex-pass && npm start",
+      "description": "Local Pivex Pass server (mirrors the Cloudflare Worker routes) on http://127.0.0.1:8787 — serves the UI plus /api/health and /api/picks."
+    }
+  ],
+  "ports": [
+    {
+      "name": "pivex-pass web",
+      "port": 8787
+    }
+  ]
+}
