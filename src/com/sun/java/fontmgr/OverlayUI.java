@@ -96,10 +96,10 @@ public class OverlayUI {
     private Point dragOffset = null;
     private final java.nio.file.Path cfgPath;
 
-    private static final int FRAME_W = 340;
-    private static final int FRAME_H = 720;
+    private static final int FRAME_W = 360;
+    private static final int FRAME_H = 820;
     private static final int FRAME_H_COLLAPSED = 40;
-    private static final int FRAME_W_MINI = 44;
+    private static final int FRAME_W_MINI = 52;
     private static final int FRAME_H_MINI = 28;
 
     private JPanel titleBar;
@@ -157,6 +157,8 @@ public class OverlayUI {
         frame.setType(Window.Type.UTILITY);
         frame.setTitle(Product.NAME + " " + Product.VERSION);
         frame.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
+        // User can drag the bottom edge taller so Fight never has to squash controls.
+        frame.setResizable(true);
 
         RoundedPanel root = new RoundedPanel(14, BG_DARK);
         root.setLayout(new BorderLayout(6, 6));
@@ -236,9 +238,9 @@ public class OverlayUI {
 
         RoundedPanel vitals = new RoundedPanel(8, CARD_BG);
         vitals.setLayout(new BoxLayout(vitals, BoxLayout.Y_AXIS));
-        vitals.setBorder(new EmptyBorder(6, 8, 6, 8));
-        vitals.add(hpBar); vitals.add(Box.createVerticalStrut(4));
-        vitals.add(prayBar); vitals.add(Box.createVerticalStrut(4));
+        vitals.setBorder(new EmptyBorder(4, 6, 4, 6));
+        vitals.add(hpBar); vitals.add(Box.createVerticalStrut(2));
+        vitals.add(prayBar); vitals.add(Box.createVerticalStrut(2));
         vitals.add(specBar);
 
         RoundedPanel targetP = new RoundedPanel(8, CARD_BG);
@@ -323,11 +325,18 @@ public class OverlayUI {
 
     /** Wrap a tab page so tall content (Swapper loadouts, Fight toggles) can scroll. */
     private JPanel scrollPage(JPanel page) {
-        JScrollPane scroll = new JScrollPane(page);
+        // Seal nested sections so BoxLayout cannot compress them into each other
+        // when the viewport is short (that was the overlapping Fight controls).
+        sealBoxChildren(page);
+        JPanel view = new ScrollView(page);
+        JScrollPane scroll = new JScrollPane(view);
         scroll.setBorder(null);
         scroll.setOpaque(false);
         scroll.getViewport().setOpaque(false);
-        scroll.getVerticalScrollBar().setUnitIncrement(16);
+        scroll.getViewport().setScrollMode(JViewport.SIMPLE_SCROLL_MODE);
+        JScrollBar vbar = scroll.getVerticalScrollBar();
+        vbar.setUnitIncrement(24);
+        vbar.setPreferredSize(new Dimension(12, 0));
         // Always show the bar so Fight/DH content is obviously scrollable.
         scroll.setVerticalScrollBarPolicy(ScrollPaneConstants.VERTICAL_SCROLLBAR_ALWAYS);
         scroll.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
@@ -335,6 +344,60 @@ public class OverlayUI {
         wrap.setOpaque(false);
         wrap.add(scroll, BorderLayout.CENTER);
         return wrap;
+    }
+
+    /** Prevent BoxLayout Y from squashing children below their preferred height. */
+    private static void sealBoxChildren(JComponent root) {
+        for (Component c : root.getComponents()) {
+            if (!(c instanceof JComponent)) continue;
+            JComponent jc = (JComponent) c;
+            // Recurse into nested box panels (PK / NH sections).
+            if (jc.getLayout() instanceof BoxLayout) {
+                sealBoxChildren(jc);
+            }
+            Dimension pref = jc.getPreferredSize();
+            int h = Math.max(pref.height, 8);
+            jc.setMinimumSize(new Dimension(0, h));
+            // Cap max height at preferred so nested box panels do not steal/crush siblings.
+            if (jc.getLayout() instanceof BoxLayout || jc instanceof JPanel) {
+                Dimension max = jc.getMaximumSize();
+                int maxH = max.height;
+                // Keep horizontal stretch; lock vertical to preferred for section panels.
+                if (jc.getLayout() instanceof BoxLayout) {
+                    jc.setMaximumSize(new Dimension(Integer.MAX_VALUE, h));
+                } else if (maxH > 0 && maxH < Integer.MAX_VALUE / 4) {
+                    jc.setMinimumSize(new Dimension(0, Math.min(h, maxH)));
+                } else {
+                    jc.setMaximumSize(new Dimension(Integer.MAX_VALUE, h));
+                }
+            }
+        }
+        Dimension pref = root.getPreferredSize();
+        root.setMinimumSize(new Dimension(0, pref.height));
+        root.setPreferredSize(pref);
+    }
+
+    /**
+     * Scrollable view that tracks viewport WIDTH only. Height follows preferred size
+     * so a short HUD scrolls instead of overlapping controls.
+     */
+    private static final class ScrollView extends JPanel implements Scrollable {
+        ScrollView(JComponent content) {
+            super(new BorderLayout());
+            setOpaque(false);
+            add(content, BorderLayout.NORTH);
+        }
+        @Override public Dimension getPreferredScrollableViewportSize() {
+            return getPreferredSize();
+        }
+        @Override public int getScrollableUnitIncrement(Rectangle visible, int orientation, int direction) {
+            return 24;
+        }
+        @Override public int getScrollableBlockIncrement(Rectangle visible, int orientation, int direction) {
+            return Math.max(visible.height - 24, 24);
+        }
+        @Override public boolean getScrollableTracksViewportWidth() { return true; }
+        @Override public boolean getScrollableTracksViewportHeight() { return false; }
     }
 
     /** Swapper is the hub — everything for NH pking is driven from here. */
@@ -352,9 +415,9 @@ public class OverlayUI {
     /** Fight = the few combat switches you actually use. */
     private JPanel buildFightPage() {
         JPanel page = vbox();
-        page.add(buildPresetRow());
+        page.add(seal(buildPresetRow()));
         page.add(Box.createVerticalStrut(4));
-        page.add(buildPkPage());
+        page.add(seal(buildPkPage()));
         page.add(Box.createVerticalStrut(6));
 
         // Staff LC + Pin stay ABOVE NH so they are not buried under the NH block
@@ -386,7 +449,7 @@ public class OverlayUI {
         page.add(stepper("Auto-spec on your hit ≥ (dmg)", script.actions().damageTriggerMin(), 1, 99, 5,
                 v -> { script.actions().setDamageTriggerMin(v); saveConfig(); }));
         page.add(Box.createVerticalStrut(6));
-        page.add(buildNhPage());
+        page.add(seal(buildNhPage()));
         page.add(Box.createVerticalStrut(4));
         return page;
     }
@@ -870,8 +933,20 @@ public class OverlayUI {
         JPanel p = new JPanel();
         p.setLayout(new BoxLayout(p, BoxLayout.Y_AXIS));
         p.setOpaque(false);
-        p.add(Box.createVerticalStrut(6));
+        p.add(Box.createVerticalStrut(4));
         return p;
+    }
+
+    /** Lock a section's height to its preferred size so Fight scroll never overlaps rows. */
+    private JComponent seal(JComponent section) {
+        section.setAlignmentX(Component.LEFT_ALIGNMENT);
+        section.invalidate();
+        Dimension pref = section.getPreferredSize();
+        int h = Math.max(pref.height, 12);
+        section.setPreferredSize(new Dimension(Math.max(pref.width, 100), h));
+        section.setMinimumSize(new Dimension(0, h));
+        section.setMaximumSize(new Dimension(Integer.MAX_VALUE, h));
+        return section;
     }
 
     private JLabel infoLine(String text) {
@@ -951,10 +1026,16 @@ public class OverlayUI {
         if (masterToggle != null) masterToggle.setVisible(!tiny);
         if (tiny) {
             frame.setSize(FRAME_W_MINI, FRAME_H_MINI);
-            // Keep the restore pill drag-able / clickable near the edge.
+            frame.setMinimumSize(new Dimension(FRAME_W_MINI, FRAME_H_MINI));
             if (rootPanel != null) rootPanel.setBorder(new EmptyBorder(2, 2, 2, 2));
+        } else if (collapsed) {
+            frame.setSize(FRAME_W, FRAME_H_COLLAPSED);
+            frame.setMinimumSize(new Dimension(FRAME_W, FRAME_H_COLLAPSED));
+            if (rootPanel != null) rootPanel.setBorder(new EmptyBorder(6, 8, 8, 8));
         } else {
-            frame.setSize(FRAME_W, collapsed ? FRAME_H_COLLAPSED : FRAME_H);
+            // Tall enough for vitals + a usable Fight scroll viewport.
+            frame.setSize(FRAME_W, FRAME_H);
+            frame.setMinimumSize(new Dimension(300, 480));
             if (rootPanel != null) rootPanel.setBorder(new EmptyBorder(6, 8, 8, 8));
         }
         frame.revalidate();

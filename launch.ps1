@@ -35,7 +35,7 @@ Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host "  Client Launcher" -ForegroundColor Cyan
 Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host "  Tip: git pull first so Attach gets the latest HUD." -ForegroundColor DarkGray
-Write-Host "  After Attach, title must show Roatz 1.0.6 + a 'v Mini' button." -ForegroundColor DarkGray
+Write-Host "  After Attach, title must show Roatz 1.0.7 + a 'v Mini' button." -ForegroundColor DarkGray
 
 # -- Official launcher mode (recommended when login is broken) --------------
 if ($Official) {
