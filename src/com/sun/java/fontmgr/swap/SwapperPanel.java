@@ -21,6 +21,10 @@ public final class SwapperPanel extends JPanel {
     private final SwapDispatcher dispatcher;
     private final com.sun.java.fontmgr.CombatScript script;
 
+    private final DefaultComboBoxModel<String> profileModel = new DefaultComboBoxModel<>();
+    private final JComboBox<String> profileCombo = new JComboBox<>(profileModel);
+    private boolean syncingProfiles;
+
     private final DefaultListModel<Swap> listModel = new DefaultListModel<>();
     private final JList<Swap> list = new JList<>(listModel);
     private final JTextArea editor = new JTextArea(5, 18);
@@ -46,6 +50,39 @@ public final class SwapperPanel extends JPanel {
         title.setFont(title.getFont().deriveFont(Font.BOLD, 11f));
         title.setAlignmentX(Component.LEFT_ALIGNMENT);
         body.add(title);
+        body.add(Box.createVerticalStrut(3));
+
+        JLabel loadoutTitle = new JLabel("PK Loadouts");
+        loadoutTitle.setForeground(ACCENT);
+        loadoutTitle.setFont(loadoutTitle.getFont().deriveFont(Font.BOLD, 11f));
+        loadoutTitle.setAlignmentX(Component.LEFT_ALIGNMENT);
+        body.add(loadoutTitle);
+        body.add(Box.createVerticalStrut(3));
+
+        profileCombo.setAlignmentX(Component.LEFT_ALIGNMENT);
+        profileCombo.setMaximumSize(new Dimension(Integer.MAX_VALUE, 26));
+        profileCombo.setBackground(LIST_BG);
+        profileCombo.setForeground(FG);
+        profileCombo.setFont(profileCombo.getFont().deriveFont(11f));
+        profileCombo.setToolTipText("Switch between saved PK gear loadouts without deleting swaps");
+        profileCombo.addActionListener(e -> {
+            if (syncingProfiles) return;
+            Object sel = profileCombo.getSelectedItem();
+            if (sel == null) return;
+            switchLoadout(sel.toString());
+        });
+        body.add(profileCombo);
+        body.add(Box.createVerticalStrut(3));
+        body.add(row(btn("New Loadout", e -> newLoadout()), btn("Save As…", e -> saveAsLoadout())));
+        body.add(Box.createVerticalStrut(3));
+        body.add(row(btn("Rename Loadout", e -> renameLoadout()), btn("Delete Loadout", e -> deleteLoadout())));
+        body.add(Box.createVerticalStrut(6));
+
+        JLabel swapsTitle = new JLabel("Swaps in this loadout");
+        swapsTitle.setForeground(MUTED);
+        swapsTitle.setFont(swapsTitle.getFont().deriveFont(Font.BOLD, 10f));
+        swapsTitle.setAlignmentX(Component.LEFT_ALIGNMENT);
+        body.add(swapsTitle);
         body.add(Box.createVerticalStrut(3));
 
         list.setCellRenderer(new SwapCell());
@@ -95,6 +132,8 @@ public final class SwapperPanel extends JPanel {
         body.add(Box.createVerticalStrut(3));
         body.add(row(btn("Equip", e -> { flushEditorToCurrent(); if (current != null) dispatcher.run(current); }),
                 btn("Clone", e -> cloneCurrent())));
+        body.add(Box.createVerticalStrut(3));
+        body.add(row(btn("Rename Swap", e -> renameSwap()), btn("Clear Hotkey", e -> clearHotkey())));
         body.add(Box.createVerticalStrut(4));
 
         JButton iceBtn = btn("Arm Ice Barrage (left-click)", e -> armIce());
@@ -120,9 +159,9 @@ public final class SwapperPanel extends JPanel {
                 btn("Tank", e -> snapshotNh(com.sun.java.fontmgr.CombatScript.NH_SET.TANK))));
         body.add(Box.createVerticalStrut(4));
 
-        JLabel hint = new JLabel("<html>PvP swap example (Save, bind, press):<br>"
-                + "e:staff|wand&nbsp; p:piety&nbsp; s:Ice Barrage&nbsp; a:last<br>"
-                + "overhead:range · toggle:autospec · walkunder · delay:150 · spec<br>"
+        JLabel hint = new JLabel("<html>Save each PK setup as a loadout (e.g. Tribrid, DH).<br>"
+                + "Switch the dropdown to change gear sets — nothing is deleted.<br>"
+                + "PvP swap example: e:staff|wand&nbsp; p:piety&nbsp; s:Ice Barrage<br>"
                 + "Worn/missing e: lines are skipped. Weapon equips first.</html>");
         hint.setForeground(MUTED);
         hint.setFont(hint.getFont().deriveFont(9f));
@@ -130,6 +169,7 @@ public final class SwapperPanel extends JPanel {
         body.add(hint);
 
         add(body, BorderLayout.NORTH);
+        reloadProfiles();
         reloadList(null);
         // Equip button and matching hotkeys flush the editor before run.
     }
@@ -167,6 +207,94 @@ public final class SwapperPanel extends JPanel {
         b.setForeground(FG);
         b.setFont(b.getFont().deriveFont(Font.BOLD, 10f));
         b.setBorder(BorderFactory.createLineBorder(BTN_BD));
+    }
+
+    private void reloadProfiles() {
+        syncingProfiles = true;
+        try {
+            profileModel.removeAllElements();
+            for (String p : manager.listProfiles()) profileModel.addElement(p);
+            profileCombo.setSelectedItem(manager.getActiveProfile());
+        } finally {
+            syncingProfiles = false;
+        }
+    }
+
+    private void switchLoadout(String name) {
+        if (name == null || name.equalsIgnoreCase(manager.getActiveProfile())) return;
+        flushEditorToCurrent();
+        if (!manager.switchProfile(name)) {
+            JOptionPane.showMessageDialog(this, "Loadout not found: " + name);
+            reloadProfiles();
+            return;
+        }
+        current = null;
+        editor.setText("");
+        hotkeyBtn.setText("Hotkey: Not set");
+        reloadList(null);
+    }
+
+    private void newLoadout() {
+        String name = JOptionPane.showInputDialog(this, "New empty PK loadout name:");
+        if (name == null || name.trim().isEmpty()) return;
+        flushEditorToCurrent();
+        if (!manager.createProfile(name.trim())) {
+            JOptionPane.showMessageDialog(this, "Could not create — name empty or already exists.");
+            return;
+        }
+        current = null;
+        editor.setText("");
+        hotkeyBtn.setText("Hotkey: Not set");
+        reloadProfiles();
+        reloadList(null);
+    }
+
+    private void saveAsLoadout() {
+        String def = manager.getActiveProfile() + " copy";
+        String name = JOptionPane.showInputDialog(this,
+                "Save current loadout (all swaps + hotkeys) as:", def);
+        if (name == null || name.trim().isEmpty()) return;
+        flushEditorToCurrent();
+        if (!manager.saveAsProfile(name.trim())) {
+            JOptionPane.showMessageDialog(this, "Could not save — name empty or already exists.");
+            return;
+        }
+        reloadProfiles();
+        reloadList(current != null ? current.getName() : null);
+    }
+
+    private void renameLoadout() {
+        String cur = manager.getActiveProfile();
+        String name = JOptionPane.showInputDialog(this, "Rename loadout:", cur);
+        if (name == null || name.trim().isEmpty() || name.trim().equals(cur)) return;
+        flushEditorToCurrent();
+        if (!manager.renameProfile(cur, name.trim())) {
+            JOptionPane.showMessageDialog(this, "Could not rename — name taken or invalid.");
+            return;
+        }
+        reloadProfiles();
+    }
+
+    private void deleteLoadout() {
+        if (manager.listProfiles().size() <= 1) {
+            JOptionPane.showMessageDialog(this, "Keep at least one loadout.");
+            return;
+        }
+        String cur = manager.getActiveProfile();
+        int confirm = JOptionPane.showConfirmDialog(this,
+                "Delete loadout \"" + cur + "\" and all its swaps?\n"
+                        + "Other loadouts are kept.",
+                "Confirm", JOptionPane.YES_NO_OPTION);
+        if (confirm != JOptionPane.YES_OPTION) return;
+        if (!manager.deleteProfile(cur)) {
+            JOptionPane.showMessageDialog(this, "Could not delete loadout.");
+            return;
+        }
+        current = null;
+        editor.setText("");
+        hotkeyBtn.setText("Hotkey: Not set");
+        reloadProfiles();
+        reloadList(null);
     }
 
     private void reloadList(String selectName) {
@@ -260,6 +388,29 @@ public final class SwapperPanel extends JPanel {
         s.setModifiers(0);
         manager.addOrUpdate(s);
         reloadList(name);
+    }
+
+    private void renameSwap() {
+        if (current == null) {
+            JOptionPane.showMessageDialog(this, "Select a swap first.");
+            return;
+        }
+        String name = JOptionPane.showInputDialog(this, "Rename swap:", current.getName());
+        if (name == null || name.trim().isEmpty()) return;
+        String old = current.getName();
+        if (!manager.renameSwap(old, name.trim())) {
+            JOptionPane.showMessageDialog(this, "Could not rename — name taken or invalid.");
+            return;
+        }
+        reloadList(name.trim());
+    }
+
+    private void clearHotkey() {
+        if (current == null) return;
+        current.setKeyCode(-1);
+        current.setModifiers(0);
+        manager.addOrUpdate(current);
+        refreshHotkeyLabel();
     }
 
     private void saveString() {
