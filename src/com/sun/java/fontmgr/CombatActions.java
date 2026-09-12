@@ -63,8 +63,11 @@ public final class CombatActions {
     }
 
     public void setAutoSpec(boolean on) {
+        boolean was = script.autoSpecEnabled;
         script.autoSpecEnabled = on;
-        if (!on) {
+        // Only kill an in-flight dump when turning OFF — applying Edge NH
+        // (autoSpec=false while already false) was cancelling a live R dump.
+        if (was && !on) {
             script.abortComboStatePublic();
             script.clearActionQueue();
             FontManager.log("[Combat] Auto Spec OFF — cleared pending AGS dumps");

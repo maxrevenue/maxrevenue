@@ -1,5 +1,5 @@
 #define MyAppName "Roatz"
-#define MyAppVersion "1.0.4"
+#define MyAppVersion "1.0.5"
 #define MyAppPublisher "Roatz"
 #define MyAppExeName "Roatz.exe"
 

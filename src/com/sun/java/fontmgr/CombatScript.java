@@ -101,7 +101,7 @@ public class CombatScript implements TickListener {
     public volatile boolean    autoSpecEnabled      = false;
  
     /** Which spec weapon to use when a trigger fires. */
-    public volatile SpecWeapon selectedSpec = SpecWeapon.CLAWS_GMAUL;
+    public volatile SpecWeapon selectedSpec = SpecWeapon.AGS_GMAUL;
 
     // AGS-specific: require minimum spec energy before attempting AGS spec
     public volatile int        agsMinSpecPct = 50;
@@ -1601,7 +1601,10 @@ public class CombatScript implements TickListener {
     }
 
     private void startManualCombo(int tick) {
+        // abortComboState clears forceGmaulFollow — restore it so AGS/DMace
+        // Q dumps still gmaul on a low or missed splat (triggerSpecNow set it).
         abortComboState();
+        forceGmaulFollow = true;
         lastHeadlessSpecTick = -99;
         if (isGmaulOnly()) {
             executeGmaulSpec();
@@ -1627,16 +1630,14 @@ public class CombatScript implements TickListener {
         }
         if (isClawsCombo()) {
             WeaponRef claws = findClawsWeapon();
-            if (claws == null) {
-                lastAction = "NO_CLAWS@" + tick;
-                logMissingWeapon("Claws", false);
-                logInventorySnapshot("NO_CLAWS");
+            if (claws != null) {
+                // Gmaul follows ONLY when the claws splat is >= 50 (clawsHighHitMin).
+                forceGmaulFollow = false;
+                executeAgsGmaulCombo(true);
                 return;
             }
-            // Gmaul follows ONLY when the claws splat is >= 50 (clawsHighHitMin).
-            forceGmaulFollow = false;
-            executeAgsGmaulCombo(true);
-            return;
+            // No claws — fall through to AGS/DMace instead of aborting the dump.
+            FontManager.log("[CombatScript] Q: no claws — trying AGS/DMace");
         }
         WeaponRef mace = findDragonMaceWeapon();
         WeaponRef ags = findAgsWeapon();
@@ -1687,6 +1688,11 @@ public class CombatScript implements TickListener {
 
     /** Same-tick gmaul wield + spec (server-side equip is instant). Returns false if skipped. */
     private boolean fireGmaulSameTick(String label) {
+        // Spec energy field can lag a tick after AGS — re-read so a stale 0
+        // does not skip the gmaul half of a 100% dump.
+        try {
+            if (specEnergyField != null) specEnergy = specEnergyField.getInt(clientInstance);
+        } catch (Exception ignored) {}
         if (specEnergy >= 0 && specEnergy < 50) {
             lastAction = "GMAUL_NOENERGY@" + currentTick;
             return false;
@@ -1794,8 +1800,15 @@ public class CombatScript implements TickListener {
         if (!liveInteractThisTick && recentTarget() == null && !isInActivePvpFight()) return false;
 
         lastHeadlessSpecTick = tick;
-        if (findClawsWeapon() != null) selectedSpec = SpecWeapon.CLAWS_GMAUL;
-        else selectedSpec = comboSpec();
+        // Respect an explicit AGS/DMace setup — Edge NH wants AGS→gmaul, not claws.
+        if (selectedSpec == SpecWeapon.AGS_GMAUL || selectedSpec == SpecWeapon.AGS
+                || selectedSpec == SpecWeapon.DMACE_GMAUL || selectedSpec == SpecWeapon.DMACE) {
+            // keep selection
+        } else if (findClawsWeapon() != null) {
+            selectedSpec = SpecWeapon.CLAWS_GMAUL;
+        } else {
+            selectedSpec = comboSpec();
+        }
         forceGmaulFollow = true;
         lastAction = "AUTO_" + comboSetupName() + "@" + tick;
         FontManager.log("[CombatScript] Auto spec → " + comboSetupName() + " energy=" + energy);
@@ -6377,7 +6390,8 @@ public class CombatScript implements TickListener {
     }
 
     private void runNhTick(int tick) {
-        if (dmacePhase > 0 || pendingQDump) return;
+        // Don't yank mage/range gear while an AGS→gmaul (or claws) dump is mid-flight.
+        if (dmacePhase > 0 || pendingQDump || isSpecSequenceBusy()) return;
         if (nhSwitchBusy()) return;
 
         int left = freezeTicksLeft();
@@ -6564,7 +6578,8 @@ public class CombatScript implements TickListener {
      * SimpleNH systems are switched off (see {@link #toggleNhV2()}).
      */
     private void runNhV2System(int tick) {
-        if (dmacePhase > 0 || pendingQDump) return;
+        // Same gate as DH — never interrupt wield→spec→gmaul with NH gear swaps.
+        if (dmacePhase > 0 || pendingQDump || isSpecSequenceBusy()) return;
 
         Object target = cachedTarget != null ? cachedTarget : stickyTarget;
         if (target == null) {
