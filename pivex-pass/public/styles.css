@@ -601,3 +601,24 @@ input::placeholder { color: #6E7F99; opacity: 1; }
   .rules-grid { grid-template-columns: 1fr; }
   h1 { font-size: 36px; }
 }
+
+
+.consistency-warn {
+  margin-top: 10px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: rgba(224, 164, 90, 0.14);
+  border: 1px solid rgba(224, 164, 90, 0.45);
+  color: #F0D2A8;
+  font-size: 0.92rem;
+  line-height: 1.4;
+}
+.consistency-warn b { color: #F5C97A; }
+.override-box {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: rgba(229, 115, 108, 0.12);
+  border: 1px solid rgba(229, 115, 108, 0.4);
+}
+.override-box button { margin-top: 8px; }

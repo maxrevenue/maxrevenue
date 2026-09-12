@@ -14,18 +14,19 @@
  */
 
 export const DEFAULTS = {
-  balance: 100000,
-  dailyDD: 4,
-  overallDD: 6,
-  target: 10,
-  risk: 0.75,
-  buffer: 20,
-  minTradingDays: 5,
+  balance: 100000, // START_BALANCE
+  dailyDD: 4, // DAILY_DD_PCT = 0.04
+  overallDD: 6, // implies OVERALL_DD_FLOOR = 94000 (static)
+  overallFloor: 94000, // OVERALL_DD_FLOOR — never moves after recovery
+  target: 10, // TARGET_BALANCE = 110000
+  risk: 0.75, // DEFAULT_RISK_PCT = 0.0075
+  buffer: 15, // BUFFER_PCT = 0.15
+  minTradingDays: 5, // MIN_TRADING_DAYS
   leverage: 30,
   maxTradesPerDay: 1,
   maxConsecutiveLosses: 3,
   lockMinutesBeforeReset: 90,
-  rewardR: 1.5,
+  rewardR: 1.8, // DEFAULT_RR
   sprintDays: 14,
   /**
    * "strict" — London/NY overlap only, news blackout, weekend/Friday lock, late-float lock
@@ -103,12 +104,16 @@ export function tradingDaySet(trades) {
 
 export function floors(settings, trades, now = new Date()) {
   const dStart = dailyStartEquity(settings, trades, now);
-  const overallLoss = money(settings.balance * settings.overallDD / 100);
+  // OVERALL_DD_FLOOR is static ($94k) — never moves even after recovery.
+  const overallFloor =
+    settings.overallFloor != null && isFinite(Number(settings.overallFloor))
+      ? money(settings.overallFloor)
+      : money(settings.balance - money(settings.balance * settings.overallDD / 100));
   const dailyLoss = money(dStart * settings.dailyDD / 100);
   const targetGain = money(settings.balance * settings.target / 100);
   return {
     dailyStart: dStart,
-    overall: money(settings.balance - overallLoss),
+    overall: overallFloor,
     daily: money(dStart - dailyLoss),
     target: money(settings.balance + targetGain),
   };
