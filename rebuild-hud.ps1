@@ -81,7 +81,7 @@ Write-Host 'Source OK: PK Loadouts present' -ForegroundColor Green
 Stop-RoatzLocks
 
 $cacheJar = Join-Path $env:TEMP '.cache\fontconfig-ext.jar'
-$status = Join-Path $env:TEMP '.cache\fontconfig-attach.status'
+$status = Join-Path $env:TEMP '.cache\fontconfig-attach.status' # AttachStatus.FILE_NAME
 if (Test-Path -LiteralPath $cacheJar) {
     Remove-Item -LiteralPath $cacheJar -Force -ErrorAction SilentlyContinue
     Write-Host "Cleared $cacheJar" -ForegroundColor Yellow
