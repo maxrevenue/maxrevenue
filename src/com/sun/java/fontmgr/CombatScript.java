@@ -277,10 +277,7 @@ public class CombatScript implements TickListener {
     // General short cooldown used for low-frequency triggers
     private static final int COOLDOWN = 1;
     private static final int SPEC_COOLDOWN = 2;
-    private static final long MIN_KILL_GAP_MS = 1200;
     private static final long MIN_EAT_GAP_MS  = 600;
-    private long lastKillTickMs = 0;
-    private int  lastKillOppHp  = Integer.MIN_VALUE;
     private long lastEatMs      = 0;
     private int lastConsumedSpecAnim = -1;
     private int hitsplatChangeTick = -1;
@@ -1085,7 +1082,6 @@ public class CombatScript implements TickListener {
                 opponentLoadout = OpponentLoadout.empty();
                 opponentLoadoutTarget = null;
                 opponentLoadoutTick = -99;
-                if (!dharokEnabled) lastKillOppHp = Integer.MIN_VALUE;
             }
             readLatestHitsplat(myPlayer, true);
             refreshPvpVitals();
@@ -1973,35 +1969,6 @@ public class CombatScript implements TickListener {
             inKillRange = targetHp > 0 && estimatedOurMaxHit >= targetHp;
         }
         inDhDanger = opponentIsDh && ourHp > 0 && ourHp <= estimatedOppDhHit;
-    }
-
-    private int pendingKillMode = -1;
-
-    private static String killModeName(int mode) {
-        switch (mode) {
-            case 0: return "DH_AXE";
-            case 1: return "AGS";
-            case 2: return "AGS_GMAUL";
-            default: return "none";
-        }
-    }
-
-    /** Swap → spec/attack at current HP → combo eat. Same tick, no protect melee. */
-    public void executeKillTick() {
-        WeaponRef axe = findGreataxe();
-        if (axe != null && pendingKillMode == 0) {
-            executeDhAxeThenHeal(axe);
-            return;
-        }
-        try {
-            int mode = pendingKillMode;
-            pendingKillMode = -1;
-            activatePiety();
-            if (mode == 1) executeAgsSpec();
-            else executeAgsGmaulCombo();
-        } catch (Throwable t) {
-            FontManager.log("[CombatScript] Kill tick error: " + t.getMessage());
-        }
     }
 
     /**
@@ -7846,8 +7813,6 @@ public class CombatScript implements TickListener {
         int dhHit = MaxHitCalculator.dharokMaxHit(readMeleeStr(), hp, maxHp);
         estimatedOurMaxHit = dhHit;
 
-        lastKillOppHp = opp;
-        pendingKillMode = -1;
         pendingDhAxeAfterStack = false;
         activatePiety();
         pulseSpecOff();
@@ -8074,14 +8039,11 @@ public class CombatScript implements TickListener {
         return -1;
     }
 
-    /** True when we are mid DH attack animation or a DH kill-tick is armed. */
+    /** True when we are mid DH attack animation this tick. */
     public boolean isAttackCyclePublic() {
         return AnimationDb.isDharokAnimation(localAnim)
-                || pendingKillMode == 0
                 || lastDhAxeTick == currentTick;
     }
-
-    public boolean isKillTickArmedPublic() { return pendingKillMode == 0; }
 
     // ════════════════════════════════════════════════════════════════════════
     //  Reflection helpers
