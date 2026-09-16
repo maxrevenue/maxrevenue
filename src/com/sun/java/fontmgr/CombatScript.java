@@ -1840,45 +1840,6 @@ public class CombatScript implements TickListener {
     }
 
     /**
-     * Auto Spec: dump the current combo (default claws→gmaul) when we have
-     * energy and a target. Does not require the bot to be armed or an incoming 18+ splat.
-     */
-    private boolean tryAutoSpecDump(int tick) {
-        if (!autoSpecEnabled || dharokEnabled) return false;
-        // Never yank Blue moon / staff mid-Ice — Auto Spec was re-equipping AGS every fight.
-        // Manual Spec hotkey (R) still dumps via triggerSpecNow → executeSpec.
-        if (isMageStaffEquipped()) {
-            FontManager.debug("[CombatScript] Auto spec skipped — mage weapon equipped");
-            return false;
-        }
-        if (isSpecSequenceBusy()) return false;
-        if (tick - lastHeadlessSpecTick <= SPEC_COOLDOWN) return false;
-        int energy = specEnergy;
-        try {
-            if (specEnergyField != null) energy = specEnergyField.getInt(clientInstance);
-        } catch (Exception ignored) {}
-        specEnergy = energy;
-        if (energy < primaryMinSpecPct()) return false;
-        if (!liveInteractThisTick && recentTarget() == null && !isInActivePvpFight()) return false;
-
-        lastHeadlessSpecTick = tick;
-        // Respect an explicit AGS/DMace setup — Edge NH wants AGS→gmaul, not claws.
-        if (selectedSpec == SpecWeapon.AGS_GMAUL || selectedSpec == SpecWeapon.AGS
-                || selectedSpec == SpecWeapon.DMACE_GMAUL || selectedSpec == SpecWeapon.DMACE) {
-            // keep selection
-        } else if (findClawsWeapon() != null) {
-            selectedSpec = SpecWeapon.CLAWS_GMAUL;
-        } else {
-            selectedSpec = comboSpec();
-        }
-        forceGmaulFollow = true;
-        lastAction = "AUTO_" + comboSetupName() + "@" + tick;
-        FontManager.log("[CombatScript] Auto spec → " + comboSetupName() + " energy=" + energy);
-        executeSpec();
-        return true;
-    }
-
-    /**
      * Headless-friendly spec enqueue. Returns true when queued.
      * Adds extra guards: avoids enqueueing if a HEADLESS_SPEC is already pending
      * and uses a stronger SPEC_COOLDOWN to stop sustained re-enqueues while
@@ -1954,64 +1915,6 @@ public class CombatScript implements TickListener {
         enqueueHeadlessAction(ActionPriority.SPECIAL_ATTACK, "HEADLESS_AGS_GMAUL", this::executeAgsGmaulCombo);
         FontManager.debug("[CombatScript] Headless queued AGS/GMAUL combo tick=" + tick
                 + " energy=" + specialEnergy + " dmg=" + lastHitDmg);
-        return true;
-    }
-
-    /**
-     * Opponent HP is inside our calculated max hit. Same tick: swap, spec, then
-     * food/karam eat. Eat is after the attack packet so a DH stack still counts.
-     * Never flicks protect-melee.
-     */
-    public boolean tryEnqueueKillTickIfReady() {
-        if (dharokEnabled) return false;
-        if (!autoSpecEnabled) return false;
-        if (isSpecSequenceBusy()) return false;
-        if (currentTick - lastHeadlessSpecTick <= SPEC_COOLDOWN) return false;
-        long now = System.currentTimeMillis();
-        if (now - lastKillTickMs < MIN_KILL_GAP_MS) return false;
-        if (targetHp <= 0) return false;
-        if (lastKillOppHp > 0 && targetHp >= lastKillOppHp) return false;
-        if (overheadChecksEnabled && !targetOverheadAllowsSpec()) return false;
-
-        int ourHp = readLocalHp();
-        int ourMax = stateReader != null ? stateReader.getMaxHp() : 99;
-        int str = stateReader != null ? stateReader.getStrength() : 99;
-
-        WeaponRef primary = findWeapon(false);
-        WeaponRef axe = findGreataxe();
-        boolean dhKoOk = weAreDhStacked(ourHp, axe);
-        int dhHit = (axe != null && dhKoOk) ? MaxHitCalculator.dharokMaxHit(str, ourHp, ourMax) : 0;
-        int primaryHit = 0;
-        if (primary != null) {
-            primaryHit = isDmaceCombo()
-                    ? dmaceMaxHit
-                    : agsMaxHit;
-        }
-        estimatedOurMaxHit = Math.max(dhHit, primaryHit);
-        // Same-tick KO only. Gmaul is next tick — they can eat, so don't count it.
-        inKillRange = targetHp > 0 && estimatedOurMaxHit >= targetHp;
-
-        int mode = -1;
-        // Primary KO needs it already wielded — a same-tick swap resolves as gmaul.
-        if (primary != null && primary.equipped && specEnergy >= primaryMinSpecPct() && primaryHit >= targetHp) {
-            mode = 1;
-        } else if (dhKoOk && dhHit >= targetHp) {
-            mode = 0;
-        }
-        if (mode < 0) {
-            inKillRange = false;
-            return false;
-        }
-
-        pendingKillMode = mode;
-        lastHeadlessSpecTick = currentTick;
-        lastHeadlessComboTick = currentTick;
-        lastComboTick = currentTick;
-        lastKillTickMs = now;
-        lastKillOppHp = targetHp;
-        enqueueHeadlessAction(ActionPriority.SPECIAL_ATTACK, "HEADLESS_KILL_TICK", this::executeKillTick);
-        FontManager.debug("[CombatScript] Kill tick oppHp=" + targetHp + " hit=" + estimatedOurMaxHit
-                + " mode=" + killModeName(mode));
         return true;
     }
 
