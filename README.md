@@ -320,9 +320,11 @@ See `config/gsoft-ags-gmaul-combo.gsoft` for an example block.
 - **Client-thread dispatch.** `doAction` / prayer / spec / swap clicks are
   queued on `ClientThreadGuard` and drained by an ASM prepend on
   `GameEngine.clientTick` (fallbacks: `processGameLoop`, `doCycle`,
-  `graphicsTick`) — the same idiom as the `MouseHandler` hooks. `TickEngine`
-  (`agent-tick`, ~600 ms) still runs combat *decisions* but must not drain the
-  queue: that used to mark the poller as the client thread, so
+  `graphicsTick`) — the same idiom as the `MouseHandler` hooks. Swap hotkeys
+  arrive on the AWT EDT; `SwapDispatcher.run` hops via `invokeLater` *before*
+  `compactEquips` / `sendGameMessage`, then asserts client-thread affinity.
+  `TickEngine` (`agent-tick`, ~600 ms) still runs combat *decisions* but must
+  not drain the queue: that used to mark the poller as the client thread, so
   `assertClientThread()` was a no-op and `UiExecutor` (a background pool) mutated
   client state. Inventory gaps stay wall-clock deadlines (AHK-safe 72–99 ms);
   `clientTick` runs every client cycle (~20 ms) so they do not bunch. If the

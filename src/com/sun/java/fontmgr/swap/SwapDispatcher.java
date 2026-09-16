@@ -35,6 +35,9 @@ import java.util.concurrent.atomic.AtomicInteger;
  * swaps pressed within 160ms (DH unequip + veng) are merged onto the same
  * timeline instead of cancelling each other.
  *
+ * <p>{@code run} is safe to call from the AWT EDT: it hops onto
+ * {@link ClientThreadGuard} before any client read or {@code sendGameMessage}.
+ *
  * <p>{@code r:} / {@code unequip:} clicks iface 1688 (packet 146), not
  * inventory 454, so they use the same-tick gap and can land with {@code c:veng}.
  */
@@ -64,7 +67,15 @@ public final class SwapDispatcher {
     }
 
     public void run(Swap swap) {
-        if (swap == null || swap.getCommands() == null || script == null) return;
+        if (swap == null || swap.getCommands() == null) return;
+        // Hotkeys arrive on the AWT EDT (KeyEventDispatcher). Equipment reads
+        // in compactEquips and sendGameMessage must not run there.
+        if (!ClientThreadGuard.get().isClientThread()) {
+            ClientThreadGuard.get().invokeLater(() -> run(swap));
+            return;
+        }
+        ClientThreadGuard.get().assertClientThread();
+        if (script == null) return;
         final String name = swap.getName();
         final String body = swap.getCommands();
 
