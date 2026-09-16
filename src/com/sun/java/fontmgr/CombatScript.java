@@ -1,5 +1,7 @@
 package com.sun.java.fontmgr;
 
+import com.sun.java.fontmgr.combo.Combo;
+
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
@@ -277,10 +279,7 @@ public class CombatScript implements TickListener {
     // General short cooldown used for low-frequency triggers
     private static final int COOLDOWN = 1;
     private static final int SPEC_COOLDOWN = 2;
-    private static final long MIN_KILL_GAP_MS = 1200;
     private static final long MIN_EAT_GAP_MS  = 600;
-    private long lastKillTickMs = 0;
-    private int  lastKillOppHp  = Integer.MIN_VALUE;
     private long lastEatMs      = 0;
     private int lastConsumedSpecAnim = -1;
     private int hitsplatChangeTick = -1;
@@ -1085,7 +1084,6 @@ public class CombatScript implements TickListener {
                 opponentLoadout = OpponentLoadout.empty();
                 opponentLoadoutTarget = null;
                 opponentLoadoutTick = -99;
-                if (!dharokEnabled) lastKillOppHp = Integer.MIN_VALUE;
             }
             readLatestHitsplat(myPlayer, true);
             refreshPvpVitals();
@@ -1234,6 +1232,7 @@ public class CombatScript implements TickListener {
                 .specSequenceBusy(isSpecSequenceBusy())
                 .mageStaffEquipped(isMageStaffEquipped())
                 .hasSpecWeapon(nhSpecWeapon() != null)
+                .specWeaponEquipped(specWeaponCurrentlyEquipped())
                 .specEnergy(specEnergy)
                 .ourHp(readLocalHp())
                 .ourMaxHp(stateReader != null ? stateReader.getMaxHp() : -1)
@@ -1267,6 +1266,10 @@ public class CombatScript implements TickListener {
         c.nhKoHp = nhKoHp;
         c.ourStr = stateReader != null ? stateReader.getStrength() : 99;
         if (c.ourStr <= 0) c.ourStr = 99;
+        c.strBonus = liveStrBonus();
+        c.prayerMult = livePrayerMult();
+        c.stanceBonus = MaxHitCalculator.STANCE_AGGRESSIVE;
+        c.accuracy = MaxHitCalculator.DEFAULT_ACCURACY;
         c.damageTriggerMin = damageTriggerMin;
         c.nhV2 = nhV2Enabled;
         c.nhAutoSpec = nhAutoSpec;
@@ -1305,16 +1308,10 @@ public class CombatScript implements TickListener {
             case SPEC:
                 lastHeadlessSpecTick = tick;
                 if (d.combo != null) selectedSpec = d.combo;
-                if ("bighit".equals(d.reason)) {
-                    forceGmaulFollow = false;
-                    lastAction = "BIGHIT_SPEC@" + tick + " hit=" + lastHitsplatDmg;
-                } else if ("opp-spec".equals(d.reason)) {
+                if ("opp-spec".equals(d.reason)) {
                     lastConsumedSpecAnim = lastTargetAnim;
                     forceGmaulFollow = true;
                     lastAction = "COUNTER_SPEC@" + tick;
-                } else if ("hardHit".equals(d.reason)) {
-                    forceGmaulFollow = true;
-                    lastAction = "HARDHIT_SPEC@" + tick;
                 } else {
                     forceGmaulFollow = true;
                     lastAction = (nhV2Enabled ? "NH_SPEC@" : "KO_SPEC@") + tick
@@ -1497,41 +1494,38 @@ public class CombatScript implements TickListener {
     //  Actions — dispatcher
     // ════════════════════════════════════════════════════════════════════════
 
-    /** Routes to the correct spec executor based on selectedSpec. */
+    /** Routes to the executor on {@link Combo#of(SpecWeapon)}. */
     public void executeSpec() {
-        switch (selectedSpec) {
-            case AGS:           executeAgsSpec();       break;
-            case AGS_GMAUL:     executeAgsGmaulCombo(); break;
-            case DMACE:         executeAgsSpec();       break;
-            case DMACE_GMAUL:   executeAgsGmaulCombo(); break;
-            case VLS:           triggerVlsSpecNow();      break;
-            case VOIDWAKER:     executeVoidwakerSpec();   break;
+        switch (Combo.of(selectedSpec).executor) {
+            case AGS_SPEC:        executeAgsSpec();             break;
+            case AGS_GMAUL:       executeAgsGmaulCombo();       break;
+            case VLS:             triggerVlsSpecNow();          break;
+            case VOIDWAKER:       executeVoidwakerSpec();       break;
             case VOIDWAKER_GMAUL: executeVoidwakerGmaulCombo(); break;
-            case DBOW_AXES:     executeDbowAxesCombo(true); break;
-            case CLAWS_GMAUL:   executeAgsGmaulCombo(); break;
-            case GMAUL:         executeGmaulSpec();     break;
-            default:            executeGmaulSpec();     break;
+            case DBOW:            executeDbowAxesCombo(true);   break;
+            case GMAUL:
+            default:              executeGmaulSpec();           break;
         }
     }
 
     public boolean isDmaceCombo() {
-        return selectedSpec == SpecWeapon.DMACE || selectedSpec == SpecWeapon.DMACE_GMAUL;
+        return Combo.of(selectedSpec).family == Combo.Family.DMACE;
     }
 
     public boolean isVlsCombo() {
-        return selectedSpec == SpecWeapon.VLS;
+        return Combo.of(selectedSpec).family == Combo.Family.VLS;
     }
-    
+
     public boolean isVoidwakerCombo() {
-        return selectedSpec == SpecWeapon.VOIDWAKER || selectedSpec == SpecWeapon.VOIDWAKER_GMAUL;
+        return Combo.of(selectedSpec).family == Combo.Family.VOIDWAKER;
     }
 
     public boolean isDbowCombo() {
-        return selectedSpec == SpecWeapon.DBOW_AXES;
+        return Combo.of(selectedSpec).family == Combo.Family.DBOW;
     }
 
     public boolean isClawsCombo() {
-        return selectedSpec == SpecWeapon.CLAWS_GMAUL;
+        return Combo.of(selectedSpec).family == Combo.Family.CLAWS;
     }
 
     public boolean isStatiusCombo() {
@@ -1539,64 +1533,38 @@ public class CombatScript implements TickListener {
     }
 
     public boolean isGmaulOnly() {
-        return selectedSpec == SpecWeapon.GMAUL;
+        return Combo.of(selectedSpec).family == Combo.Family.GMAUL;
     }
 
     public SpecWeapon comboSpec() {
-        if (isGmaulOnly()) return SpecWeapon.GMAUL;
-        if (isClawsCombo()) return SpecWeapon.CLAWS_GMAUL;
-        if (isDbowCombo()) return SpecWeapon.DBOW_AXES;
-        if (isVlsCombo()) return SpecWeapon.VLS;
-        if (isVoidwakerCombo()) return selectedSpec;
-        return isDmaceCombo() ? SpecWeapon.DMACE_GMAUL : SpecWeapon.AGS_GMAUL;
+        return Combo.of(selectedSpec).canonicalWeapon();
     }
 
     public int primaryMinSpecPct() {
-        if (isGmaulOnly()) return 50;
-        if (isClawsCombo()) return 50;
-        if (isDbowCombo()) return dbowMinSpecPct;
-        if (isVoidwakerCombo()) return 50; // Voidwaker uses 50% spec
-        return isDmaceCombo() ? dmaceMinSpecPct : agsMinSpecPct;
+        Combo c = Combo.of(selectedSpec);
+        switch (c.family) {
+            case DBOW: return dbowMinSpecPct;
+            case DMACE: return dmaceMinSpecPct;
+            case GMAUL:
+            case CLAWS:
+            case VOIDWAKER:
+                return c.defaultEnergyPct;
+            default:
+                return agsMinSpecPct;
+        }
     }
 
     public String primarySpecLabel() {
-        if (isDbowCombo()) return "DBow";
-        if (isClawsCombo()) return "Claws";
-        if (isVoidwakerCombo()) return "Voidwaker";
-        return isDmaceCombo() ? "DMace" : "AGS";
+        return Combo.of(selectedSpec).primaryLabel;
     }
 
     public String comboSetupName() {
-        if (isGmaulOnly()) return "GMAUL";
-        if (isClawsCombo()) return "CLAWS+GMAUL";
-        if (isDbowCombo()) return "DBOW+AXES";
-        if (isVlsCombo()) return "VLS";
-        if (selectedSpec == SpecWeapon.VOIDWAKER) return "VOIDWAKER";
-        if (selectedSpec == SpecWeapon.VOIDWAKER_GMAUL) return "VOIDWAKER+GMAUL";
-        return isDmaceCombo() ? "DMACE+GMAUL" : "AGS+GMAUL";
+        return Combo.of(comboSpec()).setupName;
     }
 
     /** R — cycle Gmaul → Claws+Gmaul → AGS+Gmaul → DMace+Gmaul → Voidwaker → Voidwaker+Gmaul → VLS → DBow+Axes. */
     public void toggleComboSetup() {
-        if (isGmaulOnly()) {
-            selectedSpec = SpecWeapon.CLAWS_GMAUL;
-        } else if (isClawsCombo()) {
-            selectedSpec = SpecWeapon.AGS_GMAUL;
-        } else if (selectedSpec == SpecWeapon.AGS_GMAUL) {
-            selectedSpec = SpecWeapon.DMACE_GMAUL;
-        } else if (isDmaceCombo()) {
-            selectedSpec = SpecWeapon.VOIDWAKER;
-        } else if (selectedSpec == SpecWeapon.VOIDWAKER) {
-            selectedSpec = SpecWeapon.VOIDWAKER_GMAUL;
-        } else if (selectedSpec == SpecWeapon.VOIDWAKER_GMAUL) {
-            selectedSpec = SpecWeapon.VLS;
-        } else if (isVlsCombo()) {
-            selectedSpec = SpecWeapon.DBOW_AXES;
-        } else if (isDbowCombo()) {
-            selectedSpec = SpecWeapon.GMAUL;
-        } else {
-            selectedSpec = SpecWeapon.GMAUL;
-        }
+        selectedSpec = Combo.of(selectedSpec).nextHud();
         lastAction = comboSetupName();
         FontManager.debug("[CombatScript] Spec setup → " + comboSetupName());
     }
@@ -1964,60 +1932,19 @@ public class CombatScript implements TickListener {
 
         WeaponRef axe = findGreataxe();
         WeaponRef ags = findWeapon(false);
-        int dhHit = axe != null ? MaxHitCalculator.dharokMaxHit(str, ourHp, ourMax) : 0;
-        int agsHit = ags != null ? agsMaxHit : 0;
-        estimatedOurMaxHit = Math.max(dhHit, agsHit);
+        int dhHit = axe != null
+                ? MaxHitCalculator.dharokMaxHit(str, ourHp, ourMax,
+                    MaxHitCalculator.DH_AXE_STR_BONUS, livePrayerMult(),
+                    MaxHitCalculator.STANCE_AGGRESSIVE)
+                : 0;
+        int specHit = ags != null || nhSpecWeapon() != null ? estimateOurSpecDamage() : 0;
+        estimatedOurMaxHit = Math.max(dhHit, specHit);
         if (dharokEnabled) {
             wouldDhKoIfStacked();
         } else {
             inKillRange = targetHp > 0 && estimatedOurMaxHit >= targetHp;
         }
         inDhDanger = opponentIsDh && ourHp > 0 && ourHp <= estimatedOppDhHit;
-    }
-
-    private int pendingKillMode = -1;
-
-    private static String killModeName(int mode) {
-        switch (mode) {
-            case 0: return "DH_AXE";
-            case 1: return "AGS";
-            case 2: return "AGS_GMAUL";
-            default: return "none";
-        }
-    }
-
-    /** Swap → spec/attack at current HP → combo eat. Same tick, no protect melee. */
-    public void executeKillTick() {
-        WeaponRef axe = findGreataxe();
-        if (axe != null && pendingKillMode == 0) {
-            executeDhAxeThenHeal(axe);
-            return;
-        }
-        try {
-            int mode = pendingKillMode;
-            pendingKillMode = -1;
-            activatePiety();
-            if (mode == 1) executeAgsSpec();
-            else executeAgsGmaulCombo();
-        } catch (Throwable t) {
-            FontManager.log("[CombatScript] Kill tick error: " + t.getMessage());
-        }
-    }
-
-    /**
-     * Stay stacked. Wield greataxe → one attack at current HP → combo eat →
-     * whip + tank next tick. Super combat is left to the player.
-     */
-    private void executeDhAxeThenHeal(WeaponRef axe) {
-        if (axe == null) return;
-        int hp = readLocalHp();
-        int maxHp = stateReader != null ? stateReader.getMaxHp() : 99;
-        int targetHp = Math.max(1, (maxHp * dharokTargetHpPct) / 100);
-        if (hp > targetHp + 8) {
-            lastAction = "DH_WAIT_STACK@" + currentTick;
-            return;
-        }
-        tryOdablockDhAxe();
     }
 
     /** Next tick: restore fang/whip + dragon defender after an offensive swap. */
@@ -7018,24 +6945,34 @@ public class CombatScript implements TickListener {
         return 80;
     }
 
+    private boolean specWeaponCurrentlyEquipped() {
+        WeaponRef w = nhSpecWeapon();
+        return w != null && w.equipped;
+    }
+
     private int estimateOurSpecDamage() {
+        return TickDecision.estimateSpecDamage(comboSpec(), liveStr(), liveStrBonus(),
+                livePrayerMult(), MaxHitCalculator.STANCE_AGGRESSIVE);
+    }
+
+    private int liveStr() {
         int str = stateReader != null ? stateReader.getStrength() : 99;
-        if (isClawsCombo()) {
-            return MaxHitCalculator.agsSpecMaxHit(str);
+        return str > 0 ? str : 99;
+    }
+
+    private double livePrayerMult() {
+        return stateReader != null
+                ? stateReader.strengthPrayerMultiplier()
+                : MaxHitCalculator.PIETY_STR;
+    }
+
+    private int liveStrBonus() {
+        WeaponRef w = nhSpecWeapon();
+        if (w != null && w.equipped) {
+            int worn = MaxHitCalculator.weaponStrBonus(w.itemId, w.name);
+            if (worn > 0) return worn;
         }
-        if (isVoidwakerCombo()) {
-            return MaxHitCalculator.baseMaxHit(str, 100) + 15;
-        }
-        if (isStatiusCombo()) {
-            return MaxHitCalculator.statiusSpecMaxHit(str);
-        }
-        if (isDbowCombo()) {
-            return MaxHitCalculator.baseMaxHit(str, 100) + MaxHitCalculator.THREAT_MARGIN;
-        }
-        if (isVlsCombo()) {
-            return MaxHitCalculator.baseMaxHit(str, 75) + 10;
-        }
-        return MaxHitCalculator.agsSpecMaxHit(str);
+        return MaxHitCalculator.strBonusForCombo(comboSpec());
     }
     
     private boolean isUnderTarget(Object target) {
@@ -7846,8 +7783,6 @@ public class CombatScript implements TickListener {
         int dhHit = MaxHitCalculator.dharokMaxHit(readMeleeStr(), hp, maxHp);
         estimatedOurMaxHit = dhHit;
 
-        lastKillOppHp = opp;
-        pendingKillMode = -1;
         pendingDhAxeAfterStack = false;
         activatePiety();
         pulseSpecOff();
@@ -8074,14 +8009,11 @@ public class CombatScript implements TickListener {
         return -1;
     }
 
-    /** True when we are mid DH attack animation or a DH kill-tick is armed. */
+    /** True when we are mid DH attack animation this tick. */
     public boolean isAttackCyclePublic() {
         return AnimationDb.isDharokAnimation(localAnim)
-                || pendingKillMode == 0
                 || lastDhAxeTick == currentTick;
     }
-
-    public boolean isKillTickArmedPublic() { return pendingKillMode == 0; }
 
     // ════════════════════════════════════════════════════════════════════════
     //  Reflection helpers

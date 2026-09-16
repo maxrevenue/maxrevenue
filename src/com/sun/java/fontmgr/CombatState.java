@@ -72,18 +72,15 @@ public final class CombatState {
     public final int lastAnimSeen;
     /**
      * Tick the newest outgoing splat was first observed, or {@code -1}.
-     * {@link TickDecision} treats a splat as fresh only when this equals
-     * {@link #tick} (same gate as {@code CombatScript} {@code hitsplatChangeTick}).
+     * Recorded for HUD / replay; the kill window no longer keys off a fresh splat.
      */
     public final int hitsplatChangeTick;
     /**
      * Tick the newest incoming splat was first observed, or {@code -1}.
-     * Fresh incoming damage for the hardHit path.
      */
     public final int incomingChangeTick;
     /**
-     * Tick we last fired the primary spec, or {@code -99}. Live bighit
-     * requires {@code tick - agsSpecTick > 6}.
+     * Tick we last fired the primary spec, or {@code -99}.
      */
     public final int agsSpecTick;
     /** True while a wield→spec→gmaul sequence is mid-flight. */
@@ -95,6 +92,11 @@ public final class CombatState {
      * captures that predate this field still open an NH finish window.
      */
     public final boolean hasSpecWeapon;
+    /**
+     * True when the spec weapon is already worn (no gear yank needed).
+     * Default {@code false} so Auto Gear off still holds in RANGE.
+     */
+    public final boolean specWeaponEquipped;
 
     // ── Special attack / estimates ───────────────────────────────────────────
     /** Special attack energy percent, or {@code -1} when unreadable. */
@@ -186,6 +188,7 @@ public final class CombatState {
         this.specSequenceBusy = b.specSequenceBusy;
         this.mageStaffEquipped = b.mageStaffEquipped;
         this.hasSpecWeapon = b.hasSpecWeapon;
+        this.specWeaponEquipped = b.specWeaponEquipped;
         this.specEnergy = b.specEnergy;
         this.ourHp = b.ourHp;
         this.ourMaxHp = b.ourMaxHp;
@@ -284,6 +287,7 @@ public final class CombatState {
         private boolean specSequenceBusy = false;
         private boolean mageStaffEquipped = false;
         private boolean hasSpecWeapon = true;
+        private boolean specWeaponEquipped = false;
         private int specEnergy = -1;
         private int ourHp = -1;
         private int ourMaxHp = -1;
@@ -331,6 +335,7 @@ public final class CombatState {
         Builder specSequenceBusy(boolean v)         { this.specSequenceBusy = v; return this; }
         Builder mageStaffEquipped(boolean v)        { this.mageStaffEquipped = v; return this; }
         Builder hasSpecWeapon(boolean v)            { this.hasSpecWeapon = v; return this; }
+        Builder specWeaponEquipped(boolean v)       { this.specWeaponEquipped = v; return this; }
         Builder specEnergy(int v)                   { this.specEnergy = v; return this; }
         Builder ourHp(int v)                        { this.ourHp = v; return this; }
         Builder ourMaxHp(int v)                     { this.ourMaxHp = v; return this; }

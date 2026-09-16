@@ -73,6 +73,7 @@ public final class TickTsv {
                 .specSequenceBusy("1".equals(m.get("busy")))
                 .mageStaffEquipped("1".equals(m.get("staff")))
                 .hasSpecWeapon(!m.containsKey("specwpn") || "1".equals(m.get("specwpn")))
+                .specWeaponEquipped("1".equals(m.get("specworn")))
                 .build();
     }
 
