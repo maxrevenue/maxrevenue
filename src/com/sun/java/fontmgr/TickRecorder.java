@@ -44,7 +44,8 @@ public final class TickRecorder {
 
     private static final String[] COLUMNS = {
         "tick", "seq", "tgt", "thp", "tmax", "spec", "okill", "odh",
-        "owpn", "ostyle", "oh", "anim", "tanim", "defpray", "action"
+        "owpn", "ostyle", "oh", "anim", "tanim", "defpray", "action",
+        "ohp", "omax", "ostr", "ourhit", "opphit", "dhdanger", "nhphase", "freeze", "nhv2"
     };
 
     private static final TickRecorder DISABLED = new TickRecorder(null);
@@ -188,7 +189,16 @@ public final class TickRecorder {
           .append(s.localAnim).append('\t')
           .append(s.lastTargetAnim).append('\t')
           .append(oneLine(s.defPrayTrace)).append('\t')
-          .append(oneLine(s.actionLabel()));
+          .append(oneLine(s.actionLabel())).append('\t')
+          .append(s.ourHp).append('\t')
+          .append(s.ourMaxHp).append('\t')
+          .append(s.ourStr).append('\t')
+          .append(s.estimatedOurMaxHit).append('\t')
+          .append(s.estimatedOppDhHit).append('\t')
+          .append(s.inDhDanger ? 1 : 0).append('\t')
+          .append(oneLine(s.nhPhase)).append('\t')
+          .append(s.nhFreezeTicksLeft).append('\t')
+          .append(s.nhV2Enabled ? 1 : 0);
         return sb.toString();
     }
 

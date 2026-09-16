@@ -1,5 +1,6 @@
 package com.sun.java.fontmgr;
 
+import java.util.Random;
 import java.util.concurrent.ThreadLocalRandom;
 
 /**
@@ -11,7 +12,25 @@ import java.util.concurrent.ThreadLocalRandom;
  */
 public final class Humanizer {
 
+    private static volatile Random seeded;
+
     private Humanizer() {}
+
+    /** Pin all Humanizer draws to {@code seed}. Replay harness calls this. */
+    public static void seed(long seed) {
+        seeded = new Random(seed);
+    }
+
+    /** Resume {@link ThreadLocalRandom} (live attach). */
+    public static void unseed() {
+        seeded = null;
+    }
+
+    static int nextInt(int bound) {
+        if (bound <= 0) return 0;
+        Random r = seeded;
+        return r != null ? r.nextInt(bound) : ThreadLocalRandom.current().nextInt(bound);
+    }
 
     static int tickDelayMs() {
         return tickAlignMs();
@@ -22,7 +41,7 @@ public final class Humanizer {
      * orb+axe+eat chain is still accepted before the server closes the window.
      */
     static int tickAlignMs() {
-        return 8 + ThreadLocalRandom.current().nextInt(15);
+        return 8 + nextInt(15);
     }
 
     /**
@@ -31,7 +50,7 @@ public final class Humanizer {
      * under 600ms even for 10 orb clicks: 10 × 18ms = 180ms.
      */
     static int sameTickClickGapMs() {
-        return 9 + ThreadLocalRandom.current().nextInt(10);
+        return 9 + nextInt(10);
     }
 
     static void sameTickPause() {
@@ -45,7 +64,7 @@ public final class Humanizer {
     /** Eat HP line with a small wobble so it is not always exactly N. */
     static int eatThreshold(int configured) {
         int base = Math.max(1, configured);
-        int wobble = ThreadLocalRandom.current().nextInt(3) - 1; // -1..+1
+        int wobble = nextInt(3) - 1; // -1..+1
         return Math.max(1, base + wobble);
     }
 
@@ -54,12 +73,12 @@ public final class Humanizer {
      * Never used for opponent-spec counters or KO windows.
      */
     static boolean delayPassiveSpec() {
-        return ThreadLocalRandom.current().nextInt(100) < 7;
+        return nextInt(100) < 7;
     }
 
     /** Skip a passive auto-eat this tick (player might be about to food). */
     static boolean skipPassiveEat() {
-        return ThreadLocalRandom.current().nextInt(100) < 4;
+        return nextInt(100) < 4;
     }
 
     /**
@@ -68,17 +87,17 @@ public final class Humanizer {
      * 8-way still fits in about a tick.
      */
     public static int invGapMs() {
-        return 72 + ThreadLocalRandom.current().nextInt(28);
+        return 72 + nextInt(28);
     }
 
     /** First equip in a switch — never below AhkDetection click threshold. */
     public static int firstEquipDelayMs() {
-        return 72 + ThreadLocalRandom.current().nextInt(28);
+        return 72 + nextInt(28);
     }
 
     /** Extra tick before an auto re-freeze so the recast is not a metronome. */
     static boolean delayNhRecast() {
-        return ThreadLocalRandom.current().nextInt(100) < 18;
+        return nextInt(100) < 18;
     }
 
     /**
@@ -87,7 +106,7 @@ public final class Humanizer {
      * Fast enough to land before they can react; not instant.
      */
     static long punishReactionMs() {
-        long mean = 88 + ThreadLocalRandom.current().nextInt(42);
+        long mean = 88 + nextInt(42);
         long sigma = Math.max(12L, mean / 5L);
         return ClientThreadGuard.gaussianDelayMs(mean, sigma);
     }

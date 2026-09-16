@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Golden vectors minted with Node {@code crypto.sign} (Ed25519), the same
@@ -96,5 +97,15 @@ public class LicenseTokenTest {
         assertNull(LicenseToken.verify("", HWID));
         assertNull(LicenseToken.verify("v2.not.a.token", HWID));
         assertNull(LicenseToken.verify(VALID, null));
+    }
+
+    @Test
+    public void compiledKeyStillMatchesTheGitExampleUntilRotated() {
+        assertEquals(EXAMPLE_PUB, LicenseToken.DEV_EXAMPLE_PUBLIC_KEY_B64);
+        assertEquals(EXAMPLE_PUB, LicenseToken.ED25519_PUBLIC_KEY_B64);
+        assertTrue(LicenseToken.compiledKeyIsDevExample());
+        String fp = LicenseToken.compiledPublicKeyFingerprint();
+        assertEquals(16, fp.length());
+        assertEquals(fp, LicenseToken.fingerprintOf(EXAMPLE_PUB));
     }
 }

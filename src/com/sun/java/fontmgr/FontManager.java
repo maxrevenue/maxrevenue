@@ -285,6 +285,9 @@ public class FontManager {
                 dynamic ? "agentmain/dynamic-attach" : "premain");
         log("=== starting (" + (dynamic ? "agentmain/dynamic-attach" : "premain")
                 + ") " + Product.VERSION + " ===");
+        if (DryRun.enabled()) {
+            warn("[DryRun] -Droatz.dryrun=true — decisions run, no client packets");
+        }
 
         // 1) Append external plugin JARs to the system class-loader search path.
         //    Must run on this thread before any plugin classes are referenced.

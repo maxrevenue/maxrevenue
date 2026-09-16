@@ -46,6 +46,11 @@ same way `ADMIN_SECRET=change-me-local-admin` is. **Do not deploy it.**
 Rotation always requires a **client rebuild** because the public key is compiled
 in. That is the point of moving off a shared HMAC secret.
 
+`gradlew dist` / `jpackageImage` **fail** while `ED25519_PUBLIC_KEY_B64` still
+equals `DEV_EXAMPLE_PUBLIC_KEY_B64`, unless you pass `-PallowDevLicenseKey=true`.
+The SHA-256 fingerprint (first 8 bytes, hex) is written to `Roatz.cfg` as
+`-Droatz.license.key.fp=` so installer builds are auditable.
+
 ## Verify a token locally
 
 `LicenseToken.verify(token, hwid)` returns claims or `null`. Override the public

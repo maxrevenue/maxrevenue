@@ -226,6 +226,10 @@ public final class LooterApi {
     // ════════════════════════════════════════════════════════════════════════
 
     public void doAction(int p0, int p1, int opcode, int id, String option, String target) {
+        if (DryRun.enabled()) {
+            DryRun.record("doAction", option + " " + target + " op=" + opcode);
+            return;
+        }
         try {
             if (doActionM == null) doActionM = RtLookup.doAction(clientClass);
             if (doActionM != null) doActionM.invoke(client, 0, p0, p1, opcode, id, -1, option, target, -1, -1);

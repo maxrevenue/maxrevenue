@@ -1,3 +1,6 @@
+import java.security.MessageDigest
+import java.util.Base64
+
 // Roat PKz Java agent build.
 //
 // Replaces the handwritten file list in build.bat with convention-based
@@ -242,10 +245,49 @@ fun innoCompiler(): File? {
     return locals.firstOrNull { it.isFile }
 }
 
+fun compiledLicensePublicKey(): String {
+    val src = file("src/com/sun/java/fontmgr/LicenseToken.java").readText()
+    val example = Regex("""DEV_EXAMPLE_PUBLIC_KEY_B64\s*=\s*"([^"]+)"""")
+        .find(src)?.groupValues?.get(1)
+        ?: throw GradleException("DEV_EXAMPLE_PUBLIC_KEY_B64 missing in LicenseToken.java")
+    val rhs = Regex("""ED25519_PUBLIC_KEY_B64\s*=\s*([^;]+);""")
+        .find(src)?.groupValues?.get(1)?.trim()
+        ?: throw GradleException("ED25519_PUBLIC_KEY_B64 missing in LicenseToken.java")
+    if (rhs.contains("DEV_EXAMPLE_PUBLIC_KEY_B64")) return example
+    return Regex(""""([^"]+)"""").find(rhs)?.groupValues?.get(1)
+        ?: throw GradleException("ED25519_PUBLIC_KEY_B64 is not a string literal")
+}
+
+fun licenseKeyFingerprint(b64url: String): String {
+    val raw = Base64.getUrlDecoder().decode(b64url)
+    val d = MessageDigest.getInstance("SHA-256").digest(raw)
+    return (0 until 8).joinToString("") { String.format("%02x", d[it]) }
+}
+
+val checkLicenseKey by tasks.registering {
+    group = "distribution"
+    description = "Fail dist when the compiled Ed25519 public key is still the git example"
+    doLast {
+        val key = compiledLicensePublicKey()
+        val fp = licenseKeyFingerprint(key)
+        logger.lifecycle("License Ed25519 fingerprint: $fp")
+        val allow = findProperty("allowDevLicenseKey")?.toString() == "true"
+        val example = Regex("""DEV_EXAMPLE_PUBLIC_KEY_B64\s*=\s*"([^"]+)"""")
+            .find(file("src/com/sun/java/fontmgr/LicenseToken.java").readText())
+            ?.groupValues?.get(1)
+        if (key == example && !allow) {
+            throw GradleException(
+                "dist refuses the git example Ed25519 public key (fp=$fp). " +
+                    "Rotate LicenseToken.ED25519_PUBLIC_KEY_B64 or pass -PallowDevLicenseKey=true"
+            )
+        }
+    }
+}
+
 val jpackageImage by tasks.registering(Exec::class) {
     group = "distribution"
     description = "Windows app-image with a bundled JDK (jdk.attach)"
-    dependsOn(jpackageInput)
+    dependsOn(jpackageInput, checkLicenseKey)
     val destDir = layout.buildDirectory.dir("jpackage")
     val inputDir = layout.buildDirectory.dir("jpackage-input")
     inputs.dir(inputDir)
@@ -280,6 +322,7 @@ val jpackageImage by tasks.registering(Exec::class) {
     if (!licenseApi.isNullOrBlank()) {
         args("--java-options", "-Droatz.license.api=$licenseApi")
     }
+    args("--java-options", "-Droatz.license.key.fp=${licenseKeyFingerprint(compiledLicensePublicKey())}")
     // App icon (taskbar / Explorer / shortcut). jpackage wants a multi-size .ico
     // on Windows; regenerate it with installer/make-icon.py.
     val icon = file("installer/roatz.ico")
@@ -293,7 +336,7 @@ val jpackageImage by tasks.registering(Exec::class) {
 tasks.register("dist") {
     group = "distribution"
     description = "Build Roatz-Setup.exe (app-image + Inno Setup when ISCC is installed)"
-    dependsOn(jpackageImage)
+    dependsOn(checkLicenseKey, jpackageImage)
     doLast {
         val image = layout.buildDirectory.dir("jpackage/Roatz").get().asFile
         if (!image.isDirectory) {
