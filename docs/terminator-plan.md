@@ -1,12 +1,13 @@
 # Terminator work queue (items 1–11)
 
-Trunk is `integration/roatz-de09`. This branch stacks on PR #9
-(`cursor/swap-p0-client-thread-de09` @ `a8e7db7`) because #9 is not merged yet.
-Never merge `origin/main`.
+Trunk is `integration/roatz-de09`. This branch stacks on PR #11
+(`cursor/replay-dryrun-de09` @ `df553b9`), which itself stacks on PR #9
+(`cursor/swap-p0-client-thread-de09` @ `a8e7db7`). Neither is merged to
+integration yet. Never merge `origin/main`.
 
 CombatState is a **read-model**: published once per tick, never fed by the HUD.
-Item 1 scores decisions against that snapshot. Items 3 and 8 are what make
-`CombatScript.onTick` *call* the same functions the harness already runs.
+`CombatScript.onTick` now *calls* `TickDecision.decide` and acts on the Intent.
+The harness goldens therefore run through the real path, not a parallel model.
 
 No fight captures are in the repo. Synthetic goldens are the baseline corpus.
 Real captures need a wider TSV than the old 15 columns (see **Capture recipe**).
@@ -33,8 +34,9 @@ Real captures need a wider TSV than the old 15 columns (see **Capture recipe**).
 | `README.md` | Dry-run / rec / capture pointer |
 
 `TickDecision` is extracted from **current** `CombatScript` behaviour (including
-spec-on-big-hit waste). Item 3 will tighten the window; the harness is how that
-tightening is measured.
+spec-on-big-hit waste). The arbiter wiring (item 3, this PR) makes onTick call
+that function. Tightening the window so waste goes to 0 is the remainder of
+item 3.
 
 ## 2. Live kill math
 
@@ -45,13 +47,36 @@ tightening is measured.
 | `CombatScript.refreshPvpVitals` / `nhSpecFinishHp` / `estimateOurSpecDamage` | Consume the calculator |
 | `test/.../MaxHitCalculatorTest.java` | Known OSRS max hits + drained-str case |
 
-## 3. One kill window, one arbiter
+## 3. One kill window, one arbiter — arbiter shipped; window still today's
+
+`onTick` builds a `TickDecision.Config` from live flags, captures the same
+`CombatState` the HUD will read, calls `TickDecision.decide`, and acts:
+EAT → existing survive-eat, SPEC → `executeSpec`, HOLD → nothing. Scattered
+spec branches (outBigHit / oppSpec dump / ko / hardHit / `nhFireSpecFinish` /
+`tryAutoSpecDump`) no longer decide to spec. Goldens, including
+`TickDecisionParityTest` under `-Droatz.dryrun=true`, run through that path.
+
+**Window that actually shipped** (not yet the tight KO formula):
+
+- PK: `inKillRange && inActiveFight`, funded, not busy, not cooling.
+- NH: `targetHp ≤ nhSpecFinishHp` where the HP cap is
+  `max(nhKoHp, estimateSpecDamage(s.ourStr > 0 ? s.ourStr : cfg.ourStr))`
+  clipped by `ourMaxHp` when readable; spec weapon carried; not on a mage staff.
+- Additional SPEC paths that still exist (known waste): fresh outgoing splat
+  ≥ `damageTriggerMin` (`bighit`), fresh incoming splat ≥ that (`hardHit`).
+- Survive still wins: DH axe / opponent spec eat before any SPEC.
 
 | File | Change |
 |---|---|
-| `TickDecision.java` | Window iff HP ≤ expectedMaxHit(best finish) with margin, weapon carried, spec funded, in range, overhead correct |
-| `CombatScript.onTick` | Spec only when `TickDecision` says SPEC; log suppression reason |
-| Goldens | Spec waste outside a window → 0 |
+| `TickDecision.java` | Fidelity: fresh-splat, `inActiveFight`, hardHit, NH weapon/staff, `ourStr` |
+| `CombatScript.onTick` | Sole spec/eat arbiter; `captureCombatState` shared with publish |
+| `ReplayHarness.java` | `oneShotDeaths` latches per exposure; `windowsSuppressedBySurvival` |
+| `test/.../TickDecisionParityTest.java` | DryRun intent sequence == TickDecision sequence |
+| Goldens | Bighit waste still fires on a *fresh* splat; stale splat HOLDs; drained `ostr` shrinks the NH window |
+
+Remainder of item 3 (later): window iff HP ≤ expectedMaxHit(best finish) with
+margin and overhead correct; spec waste outside a window → 0. That change
+needs its own golden.
 
 ## 4. Data-driven combos
 
