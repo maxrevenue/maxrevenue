@@ -3,6 +3,10 @@ package com.sun.java.fontmgr.swap;
 import com.sun.java.fontmgr.ClientThreadGuard;
 import org.junit.jupiter.api.Test;
 
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -103,10 +107,57 @@ public class SwapTimelineTest {
         SwapTimeline.Cursor first = new SwapTimeline.Cursor(0L, true);
         first.scheduleClick("r");
         first.scheduleClick("c");
+        assertTrue(first.delayMs >= 18L && first.delayMs <= 36L,
+                "r:+c: two same-tick gaps=" + first.delayMs);
         SwapTimeline.Cursor merged = new SwapTimeline.Cursor(first.delayMs, first.firstInv);
         long specAt = merged.scheduleClick("spec");
-        assertTrue(specAt > first.delayMs);
-        assertEquals(first.delayMs + (specAt - first.delayMs), specAt);
+        long specGap = specAt - first.delayMs;
+        assertTrue(specGap >= 9L && specGap <= 18L, "merged spec offset=" + specGap);
+        assertTrue(merged.firstInv, "spec must not consume firstInv");
+    }
+
+    @Test
+    public void planSchedulesInventoryThenCastWithAhkThenSameTick() {
+        List<CommandParser.Command> steps = Arrays.asList(
+                CommandParser.parse("e:whip"),
+                CommandParser.parse("c:Ice Barrage"));
+        SwapTimeline.Plan plan = SwapTimeline.plan(steps, 0L, true);
+        assertEquals(2, plan.clicks.size());
+        assertEquals("e", plan.clicks.get(0).command.type);
+        assertEquals("c", plan.clicks.get(1).command.type);
+        long equip = plan.clicks.get(0).offsetMs;
+        long cast = plan.clicks.get(1).offsetMs;
+        assertTrue(equip >= 72L && equip <= 99L, "first inv=" + equip);
+        assertTrue(cast - equip >= 9L && cast - equip <= 18L, "cast gap=" + (cast - equip));
+    }
+
+    @Test
+    public void planSkipsDelayCommandsButAdvancesTheCursor() {
+        List<CommandParser.Command> steps = Arrays.asList(
+                CommandParser.parse("e:whip"),
+                CommandParser.parse("delay:200"),
+                CommandParser.parse("e:torso"));
+        SwapTimeline.Plan plan = SwapTimeline.plan(steps, 0L, true);
+        assertEquals(2, plan.clicks.size());
+        long gap = plan.clicks.get(1).offsetMs - plan.clicks.get(0).offsetMs;
+        assertTrue(gap >= 200L + 72L && gap <= 200L + 99L, "delay+ahk gap=" + gap);
+        assertFalse(plan.cursor.firstInv);
+    }
+
+    @Test
+    public void planMergedContinuesFromStartDelay() {
+        List<CommandParser.Command> firstSteps = Arrays.asList(
+                CommandParser.parse("r:helm"),
+                CommandParser.parse("c:veng"));
+        SwapTimeline.Plan first = SwapTimeline.plan(firstSteps, 0L, true);
+        assertEquals(2, first.clicks.size());
+        List<CommandParser.Command> spec = Collections.singletonList(
+                CommandParser.parse("spec"));
+        SwapTimeline.Plan merged = SwapTimeline.plan(spec, first.cursor.delayMs, first.cursor.firstInv);
+        assertEquals(1, merged.clicks.size());
+        long specGap = merged.clicks.get(0).offsetMs - first.cursor.delayMs;
+        assertTrue(specGap >= 9L && specGap <= 18L, "merged spec offset=" + specGap);
+        assertTrue(merged.clicks.get(0).offsetMs > first.clicks.get(1).offsetMs);
     }
 
     @Test

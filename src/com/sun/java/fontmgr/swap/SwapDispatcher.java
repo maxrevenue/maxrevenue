@@ -125,24 +125,21 @@ public final class SwapDispatcher {
             } catch (Exception ignored) {}
 
             CommandExecutor executor = new CommandExecutor(script);
-            SwapTimeline.Cursor cur = new SwapTimeline.Cursor(nextDelayMs, firstInv);
-            for (int i = 0; i < steps.size(); i++) {
-                final Command cmd = steps.get(i);
-                if ("delay".equals(cmd.type)) {
-                    cur.addExplicitDelay(cmd.value);
-                    continue;
-                }
-                final long at = cur.scheduleClick(cmd.type);
+            SwapTimeline.Plan plan = SwapTimeline.plan(steps, nextDelayMs, firstInv);
+            for (int i = 0; i < plan.clicks.size(); i++) {
+                SwapTimeline.Click click = plan.clicks.get(i);
+                final Command cmd = click.command;
+                final long at = click.offsetMs;
                 ClientThreadGuard.get().invokeAfter(at, () -> {
                     if (runGen.get() != gen) return;
                     boolean ok = executor.execute(cmd);
                     FontManager.debug("[Swapper] " + cmd.type + "=" + cmd.value + " ok=" + ok);
                 });
             }
-            nextDelayMs = cur.delayMs;
-            firstInv = cur.firstInv;
+            nextDelayMs = plan.cursor.delayMs;
+            firstInv = plan.cursor.firstInv;
 
-            final long doneAt = cur.doneAtMs();
+            final long doneAt = plan.doneAtMs();
             final String doneName = lastMergedName;
             ClientThreadGuard.get().invokeAfter(doneAt, () -> {
                 if (runGen.get() != gen) return;

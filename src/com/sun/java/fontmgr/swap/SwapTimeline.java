@@ -1,14 +1,19 @@
 package com.sun.java.fontmgr.swap;
 
 import com.sun.java.fontmgr.ClientThreadGuard;
+import com.sun.java.fontmgr.swap.CommandParser.Command;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 
 /**
  * Pure merge-window and AHK-gap policy for {@link SwapDispatcher}.
  *
- * <p>Kept out of the dispatcher so the 160ms different-hotkey merge and the
- * per-command gap table can be unit-tested without a live {@code CombatScript}.
- * Behaviour must stay identical to the inlined loop that used to live in
- * {@code SwapDispatcher.run}.
+ * <p>Kept out of the dispatcher so the 160ms different-hotkey merge, the
+ * per-command gap table, and the scheduled click list can be unit-tested
+ * without a live {@code CombatScript}. Behaviour must stay identical to the
+ * inlined loop that used to live in {@code SwapDispatcher.run}.
  */
 final class SwapTimeline {
 
@@ -50,6 +55,51 @@ final class SwapTimeline {
             extra = DELAY_DEFAULT_MS;
         }
         return extra;
+    }
+
+    /**
+     * Walk {@code steps} with the same cursor {@link SwapDispatcher} uses and
+     * return every click with its {@code invokeAfter} offset. {@code delay:}
+     * lines advance the cursor but are not clicks.
+     */
+    static Plan plan(List<Command> steps, long startDelayMs, boolean firstInv) {
+        Cursor cur = new Cursor(startDelayMs, firstInv);
+        List<Click> clicks = new ArrayList<>();
+        if (steps == null) return new Plan(clicks, cur);
+        for (Command cmd : steps) {
+            if (cmd == null) continue;
+            if ("delay".equals(cmd.type)) {
+                cur.addExplicitDelay(cmd.value);
+                continue;
+            }
+            long at = cur.scheduleClick(cmd.type);
+            clicks.add(new Click(at, cmd));
+        }
+        return new Plan(clicks, cur);
+    }
+
+    static final class Click {
+        final long offsetMs;
+        final Command command;
+
+        Click(long offsetMs, Command command) {
+            this.offsetMs = offsetMs;
+            this.command = command;
+        }
+    }
+
+    static final class Plan {
+        final List<Click> clicks;
+        final Cursor cursor;
+
+        Plan(List<Click> clicks, Cursor cursor) {
+            this.clicks = Collections.unmodifiableList(clicks);
+            this.cursor = cursor;
+        }
+
+        long doneAtMs() {
+            return cursor.doneAtMs();
+        }
     }
 
     /** Mutable delay cursor carried across a merged hotkey pair. */
