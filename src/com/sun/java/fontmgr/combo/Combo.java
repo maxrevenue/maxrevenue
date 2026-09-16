@@ -143,6 +143,29 @@ public final class Combo {
         }
     }
 
+    /**
+     * Strength bonus the kill window uses. {@link Hit#CLAWS_AS_AGS} ignores a
+     * worn claws bonus (56) so the stand-in AGS 132 cannot invert when the
+     * spec weapon is equipped.
+     */
+    public int windowStrBonus(int wornBonus) {
+        if (hit == Hit.CLAWS_AS_AGS) return strBonus;
+        return wornBonus > 0 ? wornBonus : strBonus;
+    }
+
+    /**
+     * Gmaul half of a 2-tick combo, or 0 when this setup has no follow-up.
+     * Not part of the shipped {@link com.sun.java.fontmgr.TickDecision#expectedFinishHp}
+     * window — see the conversion-trade golden.
+     */
+    public int followUpMaxHit(int boostedStr, double prayerMult, int stanceBonus) {
+        if (!gmaulFollow) return 0;
+        int str = boostedStr > 0 ? boostedStr : 99;
+        double pray = prayerMult > 0 ? prayerMult : 1.0;
+        int stance = stanceBonus >= 0 ? stanceBonus : MaxHitCalculator.STANCE_AGGRESSIVE;
+        return MaxHitCalculator.gmaulSpecMaxHit(str, MaxHitCalculator.GMAUL_STR_BONUS, pray, stance);
+    }
+
     public int specMaxHit(int boostedStr, int wornOrComboBonus, double prayerMult, int stanceBonus) {
         int str = boostedStr > 0 ? boostedStr : 99;
         int bonus = wornOrComboBonus > 0 ? wornOrComboBonus : strBonus;
@@ -174,7 +197,7 @@ public final class Combo {
 
     public static final Combo GMAUL = new Combo(
             CombatScript.SpecWeapon.GMAUL, Family.GMAUL, Executor.GMAUL,
-            "GMAUL", "AGS", 50, false, MaxHitCalculator.GMAUL_STR_BONUS, Hit.GMAUL);
+            "GMAUL", "Gmaul", 50, false, MaxHitCalculator.GMAUL_STR_BONUS, Hit.GMAUL);
     public static final Combo AGS = new Combo(
             CombatScript.SpecWeapon.AGS, Family.AGS, Executor.AGS_SPEC,
             "AGS", "AGS", 50, false, MaxHitCalculator.AGS_STR_BONUS, Hit.AGS_SPEC);
@@ -183,10 +206,10 @@ public final class Combo {
             "AGS+GMAUL", "AGS", 50, true, MaxHitCalculator.AGS_STR_BONUS, Hit.AGS_SPEC);
     public static final Combo STATIUS = new Combo(
             CombatScript.SpecWeapon.STATIUS, Family.STATIUS, Executor.GMAUL,
-            "STATIUS", "AGS", 50, false, MaxHitCalculator.STATIUS_STR_BONUS, Hit.STATIUS);
+            "STATIUS", "Statius", 50, false, MaxHitCalculator.STATIUS_STR_BONUS, Hit.STATIUS);
     public static final Combo STATIUS_GMAUL = new Combo(
             CombatScript.SpecWeapon.STATIUS_GMAUL, Family.STATIUS, Executor.GMAUL,
-            "STATIUS+GMAUL", "AGS", 50, true, MaxHitCalculator.STATIUS_STR_BONUS, Hit.STATIUS);
+            "STATIUS+GMAUL", "Statius", 50, true, MaxHitCalculator.STATIUS_STR_BONUS, Hit.STATIUS);
     public static final Combo DMACE = new Combo(
             CombatScript.SpecWeapon.DMACE, Family.DMACE, Executor.AGS_SPEC,
             "DMACE", "DMace", 15, false, MaxHitCalculator.DMACE_STR_BONUS, Hit.DMACE);
@@ -195,7 +218,7 @@ public final class Combo {
             "DMACE+GMAUL", "DMace", 15, true, MaxHitCalculator.DMACE_STR_BONUS, Hit.DMACE);
     public static final Combo VLS = new Combo(
             CombatScript.SpecWeapon.VLS, Family.VLS, Executor.VLS,
-            "VLS", "AGS", 50, false, MaxHitCalculator.VLS_STR_BONUS, Hit.VLS);
+            "VLS", "VLS", 50, false, MaxHitCalculator.VLS_STR_BONUS, Hit.VLS);
     public static final Combo VOIDWAKER = new Combo(
             CombatScript.SpecWeapon.VOIDWAKER, Family.VOIDWAKER, Executor.VOIDWAKER,
             "VOIDWAKER", "Voidwaker", 50, false, MaxHitCalculator.VOIDWAKER_STR_BONUS, Hit.VOIDWAKER);

@@ -91,6 +91,80 @@ public final class ReplayHarness {
         }
     }
 
+    /**
+     * Per-tick conversion of independent KO opportunities. Rising-edge
+     * {@link Metrics#killWindowsConverted} collapses a HP sweep into one window,
+     * so {@code specWaste=0} cannot show the conservative window's cost.
+     *
+     * <p>Shipped = primary spec only. Follow-up = primary + gmaul when the combo
+     * has one. {@code 77} is the pre-item-3 {@code agsMaxHit} cap.
+     */
+    public static final class ConversionTrade {
+        public static final int OLD_77 = 77;
+        public final int shippedFinishHp;
+        public final int followUpFinishHp;
+        public int ticks;
+        public int shippedConverted;
+        public int followUpConverted;
+        public int old77Converted;
+        public int shippedMissed;
+        public int followUpMissed;
+        public int old77Missed;
+        /** Funded ticks the follow-up window would convert and shipped HOLDs. */
+        public int leftOnTableVsFollowUp;
+        /** Funded ticks the old 77 cap would convert and shipped HOLDs. */
+        public int leftOnTableVs77;
+
+        ConversionTrade(int shippedFinishHp, int followUpFinishHp) {
+            this.shippedFinishHp = shippedFinishHp;
+            this.followUpFinishHp = followUpFinishHp;
+        }
+
+        public String table() {
+            return "model              finish  converted  missed  left-on-table\n"
+                    + row("shipped (primary)", shippedFinishHp, shippedConverted, shippedMissed, 0)
+                    + row("follow-up (p+g)", followUpFinishHp, followUpConverted, followUpMissed,
+                            leftOnTableVsFollowUp)
+                    + row("pre-item3 (77)", OLD_77, old77Converted, old77Missed, leftOnTableVs77);
+        }
+
+        private static String row(String name, int finish, int converted, int missed, int left) {
+            return String.format("%-18s %6d  %9d  %6d  %13d%n", name, finish, converted, missed, left);
+        }
+
+        public static ConversionTrade score(List<CombatState> ticks, TickDecision.Config cfg) {
+            if (cfg == null) cfg = new Config();
+            ConversionTrade t = new ConversionTrade(
+                    TickDecision.expectedFinishHp(null, cfg),
+                    TickDecision.expectedFinishHpWithFollowUp(null, cfg));
+            if (ticks == null) return t;
+            for (int i = 0; i < ticks.size(); i++) {
+                CombatState s = ticks.get(i);
+                t.ticks++;
+                if (!TickDecision.windowGates(s, cfg)) continue;
+                boolean funded = s.specEnergy >= cfg.minSpecPct;
+                boolean shipped = s.targetHp <= TickDecision.expectedFinishHp(s, cfg);
+                boolean follow = s.targetHp <= TickDecision.expectedFinishHpWithFollowUp(s, cfg);
+                boolean old77 = s.targetHp <= OLD_77;
+                if (shipped) {
+                    if (funded) t.shippedConverted++;
+                    else t.shippedMissed++;
+                }
+                if (follow) {
+                    if (funded) t.followUpConverted++;
+                    else t.followUpMissed++;
+                }
+                if (old77) {
+                    if (funded) t.old77Converted++;
+                    else t.old77Missed++;
+                }
+                if (funded && follow && !shipped) t.leftOnTableVsFollowUp++;
+                if (funded && old77 && !shipped) t.leftOnTableVs77++;
+            }
+            return t;
+        }
+    }
+
     public static final class Report {
         public final List<TickDecision> decisions;
         public final Metrics metrics;

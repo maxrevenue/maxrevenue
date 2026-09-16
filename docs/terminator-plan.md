@@ -1,8 +1,8 @@
 # Terminator work queue (items 1–11)
 
-Trunk is `integration/roatz-de09`. This branch stacks on PR #14
-(`cursor/live-kill-math-5863`), which stacks on PR #12
-(`cursor/tickdecision-arbiter-de09`, including merged PR #13).
+Trunk is `integration/roatz-de09`. This branch stacks on PR #12
+(`cursor/tickdecision-arbiter-de09`, which includes merged PRs #13–#15:
+arbiter, live kill math, expectedMaxHit window, Combo descriptors).
 Never merge `origin/main`.
 
 CombatState is a **read-model**: published once per tick, never fed by the HUD.
@@ -59,6 +59,25 @@ correct, spec weapon carried. NH also needs Auto Gear **or**
 Counter-spec remains a named dump. `nhSpecFinishReady` still calls
 `killWindowOpen`.
 
+Live `CombatScript.liveDecisionConfig()` sets `accuracy = DEFAULT_ACCURACY`
+(1.0). The live window is the **full max hit**; `accuracy = 0.5` exists only
+in the harness golden `accuracyBelowOneTightensThePkWindow`.
+
+The shipped window is primary-spec only (no gmaul follow-up) and uses weapon
+str bonus without armour. `ReplayHarness.ConversionTrade` scores that cost on
+a funded HP 1–99 sweep (99/piety/AGS):
+
+| model | finish HP | converted | missed | left on table vs shipped |
+|---|---|---|---|---|
+| shipped (primary) | 55 | 55 | 0 | — |
+| follow-up (AGS+gmaul) | 84 | 84 | 0 | 29 |
+| pre-item-3 (`agsMaxHit=77`) | 77 | 77 | 0 | 22 |
+
+Unfunded sweep: shipped missed = 55, follow-up missed = 84, converted = 0.
+`specWaste=0` is true by construction and is not evidence of improvement;
+conversion vs missed (and left-on-table vs follow-up) is the number to watch
+before item 5+ tunes the window.
+
 | File | Change |
 |---|---|
 | `TickDecision.killWindowOpen` | expectedMaxHit + overhead + Auto Gear/`specWeaponEquipped` |
@@ -108,7 +127,7 @@ Counter-spec remains a named dump. `nhSpecFinishReady` still calls
 | File | Change |
 |---|---|
 | `RtLookup.java` / `PrayerController.java` | Resolve `prayer()` / `isPrayerActive` / `liveProtectPrayerId` once; WARN if a handle disappears |
-| `CombatScript.onTick` | Capture `CombatState` **once** per tick and pass the snapshot into `runNhTick` / `nhSpecFinishReady` / `nhFinishRange` (review note 3). Do not add more `captureCombatState()` calls before then. |
+| `CombatScript.onTick` | Capture `CombatState` **once** per tick and pass the snapshot into `runNhTick` / `nhSpecFinishReady` / `nhFinishRange` (review note 3). Do not add more `captureCombatState()` calls before then. Expanding the str-bonus term to include armour/gloves (~20–35) belongs here so the extra inventory/equipment reads stay on the one snapshot. |
 
 ## 10. Fail-visible catches
 
