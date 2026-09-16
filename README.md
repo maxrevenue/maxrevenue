@@ -290,9 +290,16 @@ while you are typing in the swapper editor or an HP field.
 Gear swaps are hotkey-bound scripts in Ganom Advanced-Swapper style. Persisted
 to `%TEMP%\.cache\fontdata-local.bin`.
 
-Command prefixes: `e:` (equip), `r:` (remove), `drop:`, `p:` (prayer),
+Command prefixes: `e:` (equip), `r:`/`unequip:` (remove), `drop:`, `p:` (prayer),
 `chat:`, `cmd:`, `a:` (attack), `c:`/`select:` (cast/arm spell), `u:`, `o:`,
-`spec`, `walkunder`. `|` separates OR alternatives; `//` starts a comment.
+`spec`, `walkunder`, `delay:`/`wait:`/`pause:` (0–3000 ms, default 120).
+`|` separates OR alternatives; `//` starts a comment.
+
+`e:`/`drop:`/`u:` are inventory clicks and get an AHK-safe 72–99 ms gap.
+`r:` hits worn-equipment (iface 1688), so it uses the 9–18 ms same-tick gap and
+can land with `c:veng` on one game tick. Two *different* swap hotkeys pressed
+within 160 ms (DH unequip + veng) are merged onto one timeline; pressing the
+same swap again cancels the in-flight chain.
 
 See `config/gsoft-ags-gmaul-combo.gsoft` for an example block.
 

@@ -90,10 +90,8 @@ public final class SwapDispatcher {
         final boolean merged;
         synchronized (runLock) {
             long now = System.currentTimeMillis();
-            boolean canMerge = now <= mergeUntilMs
-                    && activeGen == runGen.get()
-                    && lastSwapName != null && !lastSwapName.isEmpty()
-                    && name != null && !lastSwapName.equalsIgnoreCase(name);
+            boolean canMerge = SwapTimeline.shouldMerge(
+                    now, mergeUntilMs, activeGen, runGen.get(), lastSwapName, name);
             if (!canMerge) {
                 activeGen = runGen.incrementAndGet();
                 nextDelayMs = 0L;
@@ -107,7 +105,7 @@ public final class SwapDispatcher {
                 merged = true;
             }
             gen = activeGen;
-            mergeUntilMs = now + 160L;
+            mergeUntilMs = now + SwapTimeline.MERGE_WINDOW_MS;
 
             FontManager.log("[Swapper] " + (merged ? "merge" : "run") + ": "
                     + lastMergedName + " lines=" + steps.size() + "/" + parsed.size());
@@ -116,34 +114,24 @@ public final class SwapDispatcher {
             } catch (Exception ignored) {}
 
             CommandExecutor executor = new CommandExecutor(script);
-            long delay = nextDelayMs;
+            SwapTimeline.Cursor cur = new SwapTimeline.Cursor(nextDelayMs, firstInv);
             for (int i = 0; i < steps.size(); i++) {
                 final Command cmd = steps.get(i);
                 if ("delay".equals(cmd.type)) {
-                    long extra = 120L;
-                    try { extra = Math.max(0L, Math.min(3000L, Long.parseLong(cmd.value.trim()))); }
-                    catch (NumberFormatException ignored) {}
-                    delay += extra;
+                    cur.addExplicitDelay(cmd.value);
                     continue;
                 }
-                if (isInventoryClick(cmd.type)) {
-                    delay += firstInv
-                            ? ClientThreadGuard.firstInvClickDelayMs()
-                            : ClientThreadGuard.ahkSafeInvGapMs();
-                    firstInv = false;
-                } else {
-                    delay += ClientThreadGuard.sameTickGapMs();
-                }
-                final long at = delay;
+                final long at = cur.scheduleClick(cmd.type);
                 ClientThreadGuard.get().invokeAfter(at, () -> {
                     if (runGen.get() != gen) return;
                     boolean ok = executor.execute(cmd);
                     FontManager.debug("[Swapper] " + cmd.type + "=" + cmd.value + " ok=" + ok);
                 });
             }
-            nextDelayMs = delay;
+            nextDelayMs = cur.delayMs;
+            firstInv = cur.firstInv;
 
-            final long doneAt = delay + ClientThreadGuard.sameTickGapMs();
+            final long doneAt = cur.doneAtMs();
             final String doneName = lastMergedName;
             ClientThreadGuard.get().invokeAfter(doneAt, () -> {
                 if (runGen.get() != gen) return;
@@ -184,14 +172,6 @@ public final class SwapDispatcher {
         } else {
             script.clearLeftClickArmPublic();
         }
-    }
-
-    /**
-     * Client {@code AhkDetection.handleClickInventoryItem} only runs on
-     * doAction opcodes 74 (eat/use) and 454 (wield) against iface 3214.
-     */
-    private static boolean isInventoryClick(String type) {
-        return "e".equals(type) || "drop".equals(type) || "u".equals(type);
     }
 
     /**
