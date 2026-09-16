@@ -628,6 +628,45 @@ public class OverlayUI {
         page.add(grid);
         page.add(Box.createVerticalStrut(8));
 
+        JButton forceBarrageBtn = new JButton("Test Barrage");
+        styleBtn(forceBarrageBtn, ACCENT_BLUE);
+        forceBarrageBtn.setAlignmentX(Component.LEFT_ALIGNMENT);
+        forceBarrageBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 22));
+        forceBarrageBtn.addActionListener(e -> ClientThreadGuard.get().invokeLater(
+                () -> script.actions().forceNhBarrage()));
+
+        JButton walkUnderBtn = new JButton("Test Walk-Under");
+        styleBtn(walkUnderBtn, ACCENT_PURPLE);
+        walkUnderBtn.setAlignmentX(Component.LEFT_ALIGNMENT);
+        walkUnderBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 22));
+        walkUnderBtn.addActionListener(e -> ClientThreadGuard.get().invokeLater(() -> {
+            boolean result = script.actions().walkUnderNow();
+            FontManager.log("[WalkUnder] Test button result=" + result);
+        }));
+
+        JButton prayerTestBtn = new JButton("Test Prayer");
+        styleBtn(prayerTestBtn, ACCENT_GREEN);
+        prayerTestBtn.setAlignmentX(Component.LEFT_ALIGNMENT);
+        prayerTestBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 22));
+        prayerTestBtn.addActionListener(e -> ClientThreadGuard.get().invokeLater(
+                () -> script.actions().testPrayerSwitch()));
+
+        JPanel controlRow1 = new JPanel(new GridLayout(1, 2, 4, 0));
+        controlRow1.setOpaque(false);
+        controlRow1.setAlignmentX(Component.LEFT_ALIGNMENT);
+        controlRow1.setMaximumSize(new Dimension(Integer.MAX_VALUE, 22));
+        controlRow1.add(forceBarrageBtn);
+        controlRow1.add(walkUnderBtn);
+        JPanel controlRow2 = new JPanel(new GridLayout(1, 1, 4, 0));
+        controlRow2.setOpaque(false);
+        controlRow2.setAlignmentX(Component.LEFT_ALIGNMENT);
+        controlRow2.setMaximumSize(new Dimension(Integer.MAX_VALUE, 22));
+        controlRow2.add(prayerTestBtn);
+        page.add(controlRow1);
+        page.add(Box.createVerticalStrut(3));
+        page.add(controlRow2);
+        page.add(Box.createVerticalStrut(8));
+
         page.add(stepper("KO HP (finish trigger)", script.actions().nhKoHp(), 1, 99, 1,
                 v -> { script.actions().setNhKoHp(v); saveConfig(); }));
         page.add(Box.createVerticalStrut(8));
