@@ -288,9 +288,10 @@ public final class LeftClickCast {
                     + " name=" + InventoryTracker.stripName(liveName));
         }
 
-        if (InventoryTracker.isMageStaff(live, liveName)
-                || InventoryTracker.isBlueMoonSpear(live, liveName)
-                || InventoryTracker.isLearnedMageWeapon(live)) {
+        if (!InventoryTracker.isThrownOrRangedWeaponName(liveName)
+                && (InventoryTracker.isMageStaff(live, liveName)
+                    || InventoryTracker.isBlueMoonSpear(live, liveName)
+                    || InventoryTracker.isLearnedMageWeapon(live))) {
             lastMainWeaponId = live;
             pendingSwapNonStaffId = -1;
             iceBlockedUntilStaffWield = false;
@@ -298,7 +299,8 @@ public final class LeftClickCast {
         }
 
         // Off-by-one / appearance lag: try neighbouring ids for moon spear names.
-        if (live > 1) {
+        // Never learn a known melee/range weapon (thrown axe, bow, whip, …) this way.
+        if (live > 1 && !InventoryTracker.isKnownMeleeOrRangeWeapon(live, liveName)) {
             String n1 = script.resolveItemNamePublic(live + 1);
             String n2 = script.resolveItemNamePublic(live - 1);
             if (InventoryTracker.isBlueMoonSpear(live + 1, n1)

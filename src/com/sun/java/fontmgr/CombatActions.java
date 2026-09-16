@@ -90,12 +90,12 @@ public final class CombatActions {
     public void setNhAutoBarrage(boolean on)    { script.nhAutoBarrageEnabled = on; }
     public void setNhAutoGear(boolean on)       { script.nhAutoGearEnabled = on; }
     public void setNhAutoWalkUnder(boolean on)  { if (on != script.nhAutoWalkUnderEnabled) script.toggleNhAutoWalkUnder(); }
-    public void setLegacyNh(boolean on)         { script.nhEnabled = on; }
+    public void setLegacyNh(boolean on)         { if (on != script.nhV2Enabled) script.toggleNhV2(); }
     public void setSimpleNh(boolean on)         { script.simpleNHEnabled = on; }
     /** Direct spec-setup selection; {@code toggleComboSetup} only cycles, it cannot target one. */
     public void setComboSetup(CombatScript.SpecWeapon weapon) { if (weapon != null) script.selectedSpec = weapon; }
 
-    public boolean legacyNh()                   { return script.nhEnabled; }
+    public boolean legacyNh()                   { return script.nhV2Enabled; }
     public boolean simpleNh()                   { return script.simpleNHEnabled; }
     public CombatScript.SpecWeapon comboSetup() { return script.selectedSpec; }
     public void setComboEat(boolean on)             { script.comboEatEnabled = on; }
@@ -126,6 +126,10 @@ public final class CombatActions {
     public boolean nhAutoPrayerEnabled()      { return script.nhAutoPrayerEnabled; }
     public boolean nhAutoBarrageEnabled()     { return script.nhAutoBarrageEnabled; }
     public boolean nhAutoGearEnabled()        { return script.nhAutoGearEnabled; }
+    public boolean nhAutoAttack()             { return script.nhAutoAttack; }
+    public void setNhAutoAttack(boolean on)   { script.nhAutoAttack = on; }
+    public boolean nhAutoSpec()               { return script.nhAutoSpec; }
+    public void setNhAutoSpec(boolean on)     { script.nhAutoSpec = on; }
     public boolean nhAutoWalkUnderEnabled()   { return script.nhAutoWalkUnderEnabled; }
     public int damageTriggerMin()            { return script.damageTriggerMin; }
     public int animTriggerAnim()              { return script.animTriggerAnim; }

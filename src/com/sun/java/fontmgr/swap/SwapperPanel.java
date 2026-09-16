@@ -157,7 +157,7 @@ public final class SwapperPanel extends JPanel {
         body.add(Box.createVerticalStrut(3));
 
         JLabel hint = new JLabel("<html>Loadout dropdown (always visible above) saves full PK sets.<br>"
-                + "e:staff|wand&nbsp; p:piety&nbsp; s:Ice Barrage</html>");
+                + "r:dh,veng&nbsp; unequips Dharok's and casts veng same tick</html>");
         hint.setForeground(MUTED);
         hint.setFont(hint.getFont().deriveFont(9f));
         hint.setAlignmentX(Component.LEFT_ALIGNMENT);

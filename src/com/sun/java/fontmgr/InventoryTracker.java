@@ -209,6 +209,7 @@ public final class InventoryTracker {
     public static boolean looksLikeMageWeaponName(String name) {
         String n = stripName(name);
         if (n.isEmpty()) return false;
+        if (isThrownOrRangedWeaponName(n)) return false;
         if (n.contains("helm") || n.contains("hat") || n.contains("chest") || n.contains("body")
                 || n.contains("plate") || n.contains("tasset") || n.contains("legs")
                 || n.contains("skirt") || n.contains("boot") || n.contains("glove")
@@ -229,6 +230,7 @@ public final class InventoryTracker {
 
     /** Weapons that must never keep Ice armed (AGS, bows, etc.). */
     public static boolean isKnownMeleeOrRangeWeapon(int itemId, String name) {
+        if (isThrownOrRangedWeaponName(stripName(name))) return true;
         if (isLearnedMageWeapon(itemId) || isBlueMoonSpear(itemId, name) || isMageStaff(itemId, name)) {
             return false;
         }
@@ -255,6 +257,9 @@ public final class InventoryTracker {
     }
 
     public static boolean isMageStaff(int itemId, String name) {
+        // Thrown / ranged weapons are never staves — even a colliding Roat id or a
+        // learned id must not win over an explicit thrown-weapon name.
+        if (isThrownOrRangedWeaponName(stripName(name))) return false;
         if (itemId > 0 && containsId(MAGE_STAFF_IDS, itemId)) return true;
         if (isLearnedMageWeapon(itemId)) return true;
         if (isBlueMoonSpear(itemId, name)) {
@@ -333,6 +338,17 @@ public final class InventoryTracker {
     }
 
     /**
+     * Thrown / ranged weapon names — must never resolve to a mage staff, even when a
+     * Roat custom id collides with a staff id or was learned by the off-by-one wield
+     * heuristic. Morrigan's throwing axe / javelin are the trigger cases.
+     */
+    public static boolean isThrownOrRangedWeaponName(String n) {
+        if (n == null || n.isEmpty()) return false;
+        return n.contains("morrigan") || n.contains("throwing axe") || n.contains("thrown axe")
+                || n.contains("thrownaxe") || n.contains("javelin") || n.contains("throwing knife");
+    }
+
+    /**
      * Fuzzy item-name match: ignores apostrophes/punctuation and matches when
      * every query token appears in the item name (or is a prefix of a word).
      * e.g. "vesta longsword" / "armd godsword" match "Armadyl godsword".
@@ -370,6 +386,7 @@ public final class InventoryTracker {
         q = q.replace("ddef", "dragon defender");
         q = q.replace("vls", "vesta longsword");
         q = q.replace("dbow", "dark bow");
+        if (q.equals("dh") || q.equals("dharoks")) q = "dharok";
         return q;
     }
 
