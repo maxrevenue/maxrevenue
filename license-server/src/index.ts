@@ -2,8 +2,9 @@
  * Roatz license API: issue / activate / check / revoke.
  *
  * Secrets (wrangler secret put, or .dev.vars locally):
- *   ADMIN_SECRET  — operator scripts
- *   TOKEN_SECRET  — must match LicenseToken.HMAC_SECRET
+ *   ADMIN_SECRET       — operator scripts
+ *   TOKEN_PRIVATE_JWK  — Ed25519 JWK `{kty,crv,d,x}`; private key never ships
+ *                        in the client. Public `x` is LicenseToken.ED25519_PUBLIC_KEY_B64.
  *
  * KV binding: LICENSES  (namespace id pinned in wrangler.jsonc)
  *
@@ -15,10 +16,12 @@
  * record of who held it.
  */
 
+import { signToken } from "./token";
+
 interface Env {
   LICENSES: KVNamespace;
   ADMIN_SECRET: string;
-  TOKEN_SECRET: string;
+  TOKEN_PRIVATE_JWK: string;
 }
 
 interface LicenseRecord {
@@ -141,7 +144,7 @@ async function bindAndToken(request: Request, env: Env, allowBind: boolean): Pro
   }
 
   const exp = tokenExpiry(rec);
-  const token = await signToken(env.TOKEN_SECRET, key, hwid, exp);
+  const token = await signToken(env.TOKEN_PRIVATE_JWK, key, hwid, exp);
   return json({
     ok: true, token, exp, key,
     days: daysOf(rec),
@@ -175,22 +178,6 @@ function tokenExpiry(rec: LicenseRecord): number {
   const e = rec.expiresAt;
   if (typeof e === "number" && e > 0) return Math.min(base, Math.floor(e / 1000));
   return base;
-}
-
-async function signToken(secret: string, key: string, hwid: string, exp: number): Promise<string> {
-  if (!secret) throw new Error("TOKEN_SECRET missing");
-  const payload = `${key}|${hwid}|${exp}`;
-  const body = b64url(new TextEncoder().encode(payload));
-  const signing = new TextEncoder().encode(`v1.${body}`);
-  const cryptoKey = await crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"],
-  );
-  const sig = new Uint8Array(await crypto.subtle.sign("HMAC", cryptoKey, signing));
-  return `v1.${body}.${b64url(sig)}`;
 }
 
 function adminOk(request: Request, env: Env): boolean {
@@ -240,12 +227,6 @@ function group(): string {
   let s = "";
   for (const b of buf) s += ALPHABET[b % ALPHABET.length];
   return s;
-}
-
-function b64url(bytes: Uint8Array): string {
-  let bin = "";
-  for (const b of bytes) bin += String.fromCharCode(b);
-  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
 function json(body: unknown, status = 200): Response {
