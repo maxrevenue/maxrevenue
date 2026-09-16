@@ -686,7 +686,7 @@ public class CombatScript implements TickListener {
 
     public CombatScript(Object clientInstance, Class<?> clientClass, Method doActionMethod) throws Exception {
         this.clientInstance = clientInstance;
-        this.doActionMethod = doActionMethod;
+        this.doActionMethod = DryRun.enabled() ? DryRun.doActionSinkMethod() : doActionMethod;
 
         myPlayerField      = getField(clientClass, "myPlayer");
         specEnergyField    = getField(clientClass, "playerSpecialEnergy");
@@ -1270,6 +1270,9 @@ public class CombatScript implements TickListener {
                 .localAnim(localAnim)
                 .lastAnimSeen(lastAnimSeen)
                 .specEnergy(specEnergy)
+                .ourHp(readLocalHp())
+                .ourMaxHp(stateReader != null ? stateReader.getMaxHp() : -1)
+                .ourStr(stateReader != null ? stateReader.getStrength() : -1)
                 .estimatedOurMaxHit(estimatedOurMaxHit)
                 .estimatedOppDhHit(estimatedOppDhHit)
                 .pendingDhStack(pendingDhStack)
@@ -2820,6 +2823,10 @@ public class CombatScript implements TickListener {
 
     /** Frame 185 / button 5004 — identical to spec-orb click. */
     boolean sendClickingButton(int buttonId) {
+        if (DryRun.enabled()) {
+            DryRun.record("specOrb", Integer.toString(buttonId));
+            return true;
+        }
         Object helper = livePacketHelper();
         Method meth = sendClickingButtonMethod;
         if (helper != null) {
@@ -2838,6 +2845,10 @@ public class CombatScript implements TickListener {
 
     /** Last-resort spec: write frame 185/5004 onto Client.buffer ourselves. */
     private void sendSpecOrbFallback() {
+        if (DryRun.enabled()) {
+            DryRun.record("specOrbFallback", "185/5004");
+            return;
+        }
         if (bufferField == null) return;
         try {
             Object buf = bufferField.get(clientInstance);
@@ -3931,6 +3942,10 @@ public class CombatScript implements TickListener {
 
     /** Packet 146 — this client's real inventory Eat/Wield path (INTERFACE_ITEM_CLICK). */
     private boolean clickInterfaceItem(int iface, int slot, int itemId, int row) {
+        if (DryRun.enabled()) {
+            DryRun.record("ifaceClick", "iface=" + iface + " slot=" + slot + " id=" + itemId);
+            return true;
+        }
         Object helper = livePacketHelper();
         Method m = sendInterfaceItemClickMethod;
         if (helper != null) {

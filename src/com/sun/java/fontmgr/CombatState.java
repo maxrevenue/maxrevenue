@@ -74,6 +74,12 @@ public final class CombatState {
     // ── Special attack / estimates ───────────────────────────────────────────
     /** Special attack energy percent, or {@code -1} when unreadable. */
     public final int specEnergy;
+    /** Our current HP, or {@code -1} when unreadable. */
+    public final int ourHp;
+    /** Our max HP, or {@code -1} when unreadable. */
+    public final int ourMaxHp;
+    /** Our current (boosted) strength level, or {@code -1} when unreadable. */
+    public final int ourStr;
     /** Estimated max hit of our current weapon, or {@code -1}. */
     public final int estimatedOurMaxHit;
     /** Estimated max hit of an opposing Dharok's, or {@code -1}. */
@@ -150,6 +156,9 @@ public final class CombatState {
         this.localAnim = b.localAnim;
         this.lastAnimSeen = b.lastAnimSeen;
         this.specEnergy = b.specEnergy;
+        this.ourHp = b.ourHp;
+        this.ourMaxHp = b.ourMaxHp;
+        this.ourStr = b.ourStr;
         this.estimatedOurMaxHit = b.estimatedOurMaxHit;
         this.estimatedOppDhHit = b.estimatedOppDhHit;
         this.pendingDhStack = b.pendingDhStack;
@@ -239,6 +248,9 @@ public final class CombatState {
         private int localAnim = -1;
         private int lastAnimSeen = -1;
         private int specEnergy = -1;
+        private int ourHp = -1;
+        private int ourMaxHp = -1;
+        private int ourStr = -1;
         private int estimatedOurMaxHit = -1;
         private int estimatedOppDhHit = -1;
         private boolean pendingDhStack = false;
@@ -277,6 +289,9 @@ public final class CombatState {
         Builder localAnim(int v)                    { this.localAnim = v; return this; }
         Builder lastAnimSeen(int v)                 { this.lastAnimSeen = v; return this; }
         Builder specEnergy(int v)                   { this.specEnergy = v; return this; }
+        Builder ourHp(int v)                        { this.ourHp = v; return this; }
+        Builder ourMaxHp(int v)                     { this.ourMaxHp = v; return this; }
+        Builder ourStr(int v)                       { this.ourStr = v; return this; }
         Builder estimatedOurMaxHit(int v)           { this.estimatedOurMaxHit = v; return this; }
         Builder estimatedOppDhHit(int v)            { this.estimatedOppDhHit = v; return this; }
         Builder pendingDhStack(boolean v)           { this.pendingDhStack = v; return this; }
