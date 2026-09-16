@@ -33,15 +33,23 @@ to record. There are no captures in git yet; synthetic goldens in
 ## Replay
 
 `ReplayHarness.run(List<CombatState>, Config)` seeds `Humanizer`, runs
-`TickDecision` (current onTick / NH finish / survive rules), and returns:
+`TickDecision.decide` — the same function `CombatScript.onTick` calls — and returns:
 
 - action sequence (`SPEC:kill-window`, `EAT:dh-axe`, `HOLD:hold`, …)
-- metrics: windows entered / converted / missed, specs fired, spec waste
-  outside a window, wrong-overhead ticks, one-shot deaths, survive eats
+- metrics: windows entered / converted / missed / suppressed-by-survival,
+  specs fired, spec waste outside a window, wrong-overhead ticks,
+  one-shot exposures (latched per bracket), survive eats
 
 `TickTsv.parse` reads a recorder file by header name so extra columns can land
 without breaking old rows.
 
+`LiveDecisionConfigRoundTripTest` sets `-Droatz.dryrun=true` and drives
+`runOnTickArbiter`. That hydrates `liveDecisionConfig()` and asserts the
+`[DryRun] intent` log matches `TickDecision` for the same flags. It does
+**not** run full `onTick` (no client, no `myPlayer` / NH ordering). The
+shared-function guarantee is the code sharing.
+
 ```
 ./gradlew test --tests com.sun.java.fontmgr.ReplayHarnessTest
+./gradlew test --tests com.sun.java.fontmgr.LiveDecisionConfigRoundTripTest
 ```

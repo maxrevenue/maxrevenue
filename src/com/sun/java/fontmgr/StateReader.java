@@ -159,8 +159,44 @@ public class StateReader {
         return cur > 0 ? cur : 99;
     }
     public  int getStrength()        { return readSkill(2); }
+    public  int getAttack()          { return readSkill(0); }
     public  int getCurrentPrayer()   { return readSkill(5); }
     public  int getMaxPrayer()       { return readSkill(5); }
+
+    /** Live strength-prayer multiplier. 1.0 when no strength prayer is readable. */
+    public double strengthPrayerMultiplier() {
+        return MaxHitCalculator.strengthPrayerMultiplier(
+                isPrayerActive("PIETY"),
+                isPrayerActive("CHIVALRY"),
+                isPrayerActive("ULTIMATE_STRENGTH"),
+                isPrayerActive("SUPERHUMAN_STRENGTH"),
+                isPrayerActive("BURST_OF_STRENGTH"));
+    }
+
+    public boolean isPietyActive() { return isPrayerActive("PIETY"); }
+
+    /**
+     * Worn item ids (slot order of {@code getEquipmentIds}). Empty array when
+     * unreadable — never null.
+     */
+    public int[] getEquipmentIds() {
+        GameState gs = new GameState();
+        readEquipment(gs);
+        return gs.equipIds.clone();
+    }
+
+    /**
+     * Strength bonus of the worn weapon, or 0 when the slot is empty/unknown.
+     * Armour bonuses are not in the client snapshot yet — KO math uses the
+     * combo's weapon bonus as the rest of the equipment term.
+     */
+    public int wornWeaponStrBonus() {
+        int[] ids = getEquipmentIds();
+        if (ids == null || ids.length <= 3) return 0;
+        int id = ids[3];
+        if (id <= 0) return 0;
+        return MaxHitCalculator.weaponStrBonus(id, "");
+    }
 
     private int readSpec() {
         try {

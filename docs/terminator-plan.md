@@ -1,12 +1,13 @@
 # Terminator work queue (items 1–11)
 
-Trunk is `integration/roatz-de09`. This branch stacks on PR #9
-(`cursor/swap-p0-client-thread-de09` @ `a8e7db7`) because #9 is not merged yet.
+Trunk is `integration/roatz-de09`. This branch stacks on PR #14
+(`cursor/live-kill-math-5863`), which stacks on PR #12
+(`cursor/tickdecision-arbiter-de09`, including merged PR #13).
 Never merge `origin/main`.
 
 CombatState is a **read-model**: published once per tick, never fed by the HUD.
-Item 1 scores decisions against that snapshot. Items 3 and 8 are what make
-`CombatScript.onTick` *call* the same functions the harness already runs.
+`CombatScript.onTick` now *calls* `TickDecision.decide` and acts on the Intent.
+The harness goldens therefore run through the real path, not a parallel model.
 
 No fight captures are in the repo. Synthetic goldens are the baseline corpus.
 Real captures need a wider TSV than the old 15 columns (see **Capture recipe**).
@@ -32,34 +33,46 @@ Real captures need a wider TSV than the old 15 columns (see **Capture recipe**).
 | `docs/replay.md` | Ops: dry-run, record, what to capture |
 | `README.md` | Dry-run / rec / capture pointer |
 
-`TickDecision` is extracted from **current** `CombatScript` behaviour (including
-spec-on-big-hit waste). Item 3 will tighten the window; the harness is how that
-tightening is measured.
+`TickDecision` is the sole spec/eat arbiter. Item 3 closed big-hit / hardHit
+waste: the window is `targetHp <= expectedFinishHp`.
 
-## 2. Live kill math
-
-| File | Change |
-|---|---|
-| `MaxHitCalculator.java` | Equipped str bonus, live str/prayer, accuracy term; drop unconditional piety+hardcoded bonuses |
-| `StateReader.java` | Expose str bonus / prayer drain already readable |
-| `CombatScript.refreshPvpVitals` / `nhSpecFinishHp` / `estimateOurSpecDamage` | Consume the calculator |
-| `test/.../MaxHitCalculatorTest.java` | Known OSRS max hits + drained-str case |
-
-## 3. One kill window, one arbiter
+## 2. Live kill math — shipped
 
 | File | Change |
 |---|---|
-| `TickDecision.java` | Window iff HP ≤ expectedMaxHit(best finish) with margin, weapon carried, spec funded, in range, overhead correct |
-| `CombatScript.onTick` | Spec only when `TickDecision` says SPEC; log suppression reason |
-| Goldens | Spec waste outside a window → 0 |
+| `MaxHitCalculator.java` | Live str/prayer/stance + combo str bonus; `expectedHit` / `hitChance`; piety only on opponent threat |
+| `StateReader.java` | `strengthPrayerMultiplier`, `wornWeaponStrBonus`, `getEquipmentIds`, `getAttack` |
+| `CombatScript.refreshPvpVitals` / `estimateOurSpecDamage` | Consume `TickDecision.estimateSpecDamage` (no `agsMaxHit=77`) |
+| `test/.../MaxHitCalculatorTest.java` | 99/piety/AGS = 40/55; no prayer = 46; ostr=1 = 5 |
 
-## 4. Data-driven combos
+## 3. One kill window — expectedMaxHit shipped
+
+`onTick` builds a `TickDecision.Config` from live flags, captures the same
+`CombatState` the HUD will read, calls `TickDecision.decide`, and acts:
+EAT → existing survive-eat, SPEC → `executeSpec`, HOLD → nothing.
+
+**Window:** `targetHp ≤ expectedFinishHp` (live spec max × accuracy, NH
+floored by `nhKoHp` and capped by `ourMaxHp`), `inActiveFight`, overhead
+correct, spec weapon carried. NH also needs Auto Gear **or**
+`specWeaponEquipped` (no yank — review note 2b). Mage staff still blocks.
+`bighit` / `hardHit` dumps are gone: spec waste outside a window is 0.
+Counter-spec remains a named dump. `nhSpecFinishReady` still calls
+`killWindowOpen`.
 
 | File | Change |
 |---|---|
-| `src/.../combo/Combo.java` (new) | Descriptor: spec weapon, energy %, follow-up, condition, tick offsets, max-hit contribution |
-| `CombatScript.SpecWeapon` / `executeSpec` | Dispatch through descriptors |
-| Replay goldens | AGS/Gmaul, claws, dmace, dbow, VLS, voidwaker identical unless a measured change |
+| `TickDecision.killWindowOpen` | expectedMaxHit + overhead + Auto Gear/`specWeaponEquipped` |
+| Goldens | AGS window uses finish HP not 77; bighit/hardHit HOLD; accuracy 0.5 tightens; Auto Gear off + worn spec SPECs |
+| `OverlayUI` Auto Spec tooltip | Requires Auto Gear or spec already equipped |
+
+## 4. Data-driven combos — shipped
+
+| File | Change |
+|---|---|
+| `src/.../combo/Combo.java` | Descriptor: family, executor, energy %, gmaul follow, str bonus, hit formula |
+| `CombatScript.SpecWeapon` / `executeSpec` | Dispatch through `Combo.of(selectedSpec).executor` |
+| `TickDecision.estimateSpecDamage` | `Combo.specMaxHit` — one table with the window |
+| Replay goldens | Each HUD combo SPECs at its own `expectedFinishHp` and HOLDs at +1. Claws still AGS-equivalent |
 
 ## 5. Canonical overhead
 
@@ -95,6 +108,7 @@ tightening is measured.
 | File | Change |
 |---|---|
 | `RtLookup.java` / `PrayerController.java` | Resolve `prayer()` / `isPrayerActive` / `liveProtectPrayerId` once; WARN if a handle disappears |
+| `CombatScript.onTick` | Capture `CombatState` **once** per tick and pass the snapshot into `runNhTick` / `nhSpecFinishReady` / `nhFinishRange` (review note 3). Do not add more `captureCombatState()` calls before then. |
 
 ## 10. Fail-visible catches
 

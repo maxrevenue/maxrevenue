@@ -1,5 +1,7 @@
 package com.sun.java.fontmgr;
 
+import com.sun.java.fontmgr.combo.Combo;
+
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
@@ -277,10 +279,7 @@ public class CombatScript implements TickListener {
     // General short cooldown used for low-frequency triggers
     private static final int COOLDOWN = 1;
     private static final int SPEC_COOLDOWN = 2;
-    private static final long MIN_KILL_GAP_MS = 1200;
     private static final long MIN_EAT_GAP_MS  = 600;
-    private long lastKillTickMs = 0;
-    private int  lastKillOppHp  = Integer.MIN_VALUE;
     private long lastEatMs      = 0;
     private int lastConsumedSpecAnim = -1;
     private int hitsplatChangeTick = -1;
@@ -676,6 +675,8 @@ public class CombatScript implements TickListener {
      */
     private volatile CombatState stateSnapshot = CombatState.empty();
     private long stateSeq = 0L;
+    /** Cross-tick cooldown / eaten-spec anim for {@link TickDecision}. */
+    final TickDecision.Session tickSession = new TickDecision.Session();
 
     /** Write-side facade for UI/command consumers; see CombatActions. */
     private final CombatActions actions = new CombatActions(this);
@@ -1083,7 +1084,6 @@ public class CombatScript implements TickListener {
                 opponentLoadout = OpponentLoadout.empty();
                 opponentLoadoutTarget = null;
                 opponentLoadoutTick = -99;
-                if (!dharokEnabled) lastKillOppHp = Integer.MIN_VALUE;
             }
             readLatestHitsplat(myPlayer, true);
             refreshPvpVitals();
@@ -1108,7 +1108,6 @@ public class CombatScript implements TickListener {
 
             boolean inCombat = hasCombatContext();
             boolean justHit = isFreshIncomingHit();
-            boolean oppSpec = counterSpecEnabled && isFreshOpponentSpec();
             if (justHit || dealtDamageRecently()) lastCombatActivityTick = tick;
 
             if (dharokEnabled) {
@@ -1127,28 +1126,27 @@ public class CombatScript implements TickListener {
             }
             
             // NH V2 engine (UI-driven): prayers + freeze/range/melee loop.
+            // Spec finish is TickDecision, not nhFireSpecFinish.
             if (nhV2Enabled) {
                 runNhV2System(tick);
             }
 
             // Mage staff: keep Ice armed only while staffForIce (handled above).
 
-            // NH spec-survive eat: react to a fresh opponent spec animation by
-            // eating out of the one-shot bracket. NH-only — regular PK stays
-            // fully manual (keys 1-4 / Q).
-            if (!dharokEnabled && nhV2Enabled
-                    && isFreshOpponentSpec()
-                    && tryEatOffOpponentSpec(tick)) {
-                return;
-            }
-
-            // NH one-shot protection vs Dharok greataxe (normal swing, not a
-            // spec). When we're inside their stacked max-hit bracket and a DH
-            // swing anim is live, eat out of the danger band.
-            if (!dharokEnabled && nhV2Enabled && inDhDanger
-                    && AnimationDb.isDharokAnimation(lastTargetAnim)) {
-                eatOffDhStackForced();
-                return;
+            // Survive + spec: TickDecision is the only arbiter. EAT runs the
+            // existing survive-eat path, SPEC runs executeSpec, HOLD is a no-op.
+            if (!dharokEnabled) {
+                syncDecisionSessionFromLive();
+                CombatState captured = captureCombatState();
+                TickDecision decision = TickDecision.decide(captured, liveDecisionConfig(), tickSession);
+                applyTickDecision(tick, decision);
+                if (decision.intent != TickDecision.Intent.HOLD) {
+                    if (autoVengEnabled && decision.intent == TickDecision.Intent.SPEC) {
+                        tryCastVengeanceEngage();
+                    }
+                    drainActionQueue();
+                    return;
+                }
             }
 
             if (!enabled && !autoSpecEnabled) {
@@ -1162,62 +1160,6 @@ public class CombatScript implements TickListener {
             }
 
             if (enabled && !nhV2Enabled) ensurePiety();
-
-            // Eats are keybind-only (1-4). No auto combo-eat in regular PK.
-            if (autoSpecEnabled && tryAutoSpecDump(tick)) {
-                drainActionQueue();
-                return;
-            }
-
-            if (autoSpecEnabled && tryEnqueueKillTickIfReady()) {
-                drainActionQueue();
-                return;
-            }
-
-            boolean canDump = autoSpecEnabled && !isSpecSequenceBusy() && specEnergy >= primaryMinSpecPct()
-                    && (tick - lastHeadlessSpecTick > SPEC_COOLDOWN);
-            if (canDump && oppSpec) {
-                lastConsumedSpecAnim = lastTargetAnim;
-                lastHeadlessSpecTick = tick;
-                selectedSpec = comboSpec();
-                forceGmaulFollow = true;
-                executeSpec();
-                if (autoVengEnabled) tryCastVengeanceEngage();
-                if (autoVengEnabled && !vengWithSpecOnly) tryCastVengeance();
-                drainActionQueue();
-                return;
-            }
-
-            boolean ko = inKillRange && targetHp > 0 && specEnergy >= primaryMinSpecPct();
-            boolean hardHit = justHit && lastIncomingDmg >= Math.max(1, damageTriggerMin);
-            if (canDump && isInActivePvpFight() && (ko || hardHit) && !Humanizer.delayPassiveSpec()) {
-                lastHeadlessSpecTick = tick;
-                selectedSpec = comboSpec();
-                forceGmaulFollow = true;
-                executeSpec();
-            }
-
-            // (A) Ganom-style "Damage Threshold": auto-spec when a hit WE LAND
-            // this tick is >= damageTriggerMin (default 40). The gmaul follow-up
-            // is still gated on the primary spec hitting 50+.
-            boolean outBigHit = autoSpecEnabled && hasCombatTarget() && isInActivePvpFight()
-                    && hitsplatChangeTick == tick
-                    && lastHitsplatDmg >= Math.max(1, damageTriggerMin)
-                    && !isSpecSequenceBusy()
-                    && specEnergy >= primaryMinSpecPct()
-                    && (tick - lastHeadlessSpecTick > SPEC_COOLDOWN)
-                    && (tick - agsSpecTick > 6)
-                    && !AnimationDb.isSpecAnimation(lastAnimSeen);
-            if (outBigHit) {
-                lastHeadlessSpecTick = tick;
-                lastAction = "BIGHIT_SPEC@" + tick + " hit=" + lastHitsplatDmg;
-                selectedSpec = comboSpec();
-                forceGmaulFollow = false;   // only follow if the spec splat >= 50
-                executeSpec();
-                if (autoVengEnabled) tryCastVengeanceEngage();
-                drainActionQueue();
-                return;
-            }
 
             if (autoVengEnabled) tryCastVengeanceEngage();
             if (autoVengEnabled && !vengWithSpecOnly) tryCastVengeance();
@@ -1247,13 +1189,28 @@ public class CombatScript implements TickListener {
     }
 
     /**
+     * Builds the immutable per-tick read-model. Called from {@link #onTick}
+     * before {@link TickDecision#decide} so the arbiter sees the same values
+     * the HUD later reads, then again from {@link #publishState()} after
+     * acting so {@code lastAction} is current.
+     */
+    CombatState captureCombatState() {
+        return fillStateBuilder(stateSeq + 1).build();
+    }
+
+    /**
      * Builds and publishes the immutable per-tick read-model. Called exactly
      * once per tick, including on the logged-out early return, so every reader
      * sees a consistent snapshot. Pure bookkeeping: it observes, it never
      * decides, and it runs after all combat sequencing for the tick is done.
      */
     private void publishState() {
-        stateSnapshot = new CombatState.Builder(++stateSeq, currentTick)
+        stateSnapshot = fillStateBuilder(++stateSeq).build();
+        recorder.record(stateSnapshot);
+    }
+
+    private CombatState.Builder fillStateBuilder(long seq) {
+        return new CombatState.Builder(seq, currentTick)
                 .lastAction(lastAction)
                 .targetName(targetName)
                 .targetHp(targetHp)
@@ -1269,6 +1226,13 @@ public class CombatScript implements TickListener {
                 .lastIncomingDmg(lastIncomingDmg)
                 .localAnim(localAnim)
                 .lastAnimSeen(lastAnimSeen)
+                .hitsplatChangeTick(hitsplatChangeTick)
+                .incomingChangeTick(incomingChangeTick)
+                .agsSpecTick(agsSpecTick)
+                .specSequenceBusy(isSpecSequenceBusy())
+                .mageStaffEquipped(isMageStaffEquipped())
+                .hasSpecWeapon(nhSpecWeapon() != null)
+                .specWeaponEquipped(specWeaponCurrentlyEquipped())
                 .specEnergy(specEnergy)
                 .ourHp(readLocalHp())
                 .ourMaxHp(stateReader != null ? stateReader.getMaxHp() : -1)
@@ -1288,9 +1252,93 @@ public class CombatScript implements TickListener {
                 .nhV2Enabled(nhV2Enabled)
                 .defPrayTrace(defPrayTrace)
                 .ourOverhead(protectStyleToken())
-                .debugState(debugState)
-                .build();
-        recorder.record(stateSnapshot);
+                .debugState(debugState);
+    }
+
+    /**
+     * HUD / replay flags for {@link TickDecision}. Built fresh each tick from
+     * the live toggles — never from the published snapshot.
+     */
+    TickDecision.Config liveDecisionConfig() {
+        TickDecision.Config c = new TickDecision.Config();
+        c.combo = comboSpec();
+        c.minSpecPct = primaryMinSpecPct();
+        c.nhKoHp = nhKoHp;
+        c.ourStr = stateReader != null ? stateReader.getStrength() : 99;
+        if (c.ourStr <= 0) c.ourStr = 99;
+        c.strBonus = liveStrBonus();
+        c.prayerMult = livePrayerMult();
+        c.stanceBonus = MaxHitCalculator.STANCE_AGGRESSIVE;
+        c.accuracy = MaxHitCalculator.DEFAULT_ACCURACY;
+        c.damageTriggerMin = damageTriggerMin;
+        c.nhV2 = nhV2Enabled;
+        c.nhAutoSpec = nhAutoSpec;
+        c.nhAutoGear = nhAutoGearEnabled;
+        c.autoSpec = autoSpecEnabled;
+        c.autoEat = autoEatEnabled;
+        c.counterSpec = counterSpecEnabled;
+        return c;
+    }
+
+    private void syncDecisionSessionFromLive() {
+        tickSession.lastSpecTick = lastHeadlessSpecTick;
+        tickSession.lastEatAnim = lastDhSpecEatAnim;
+        tickSession.lastConsumedSpecAnim = lastConsumedSpecAnim;
+    }
+
+    /**
+     * Act on a {@link TickDecision}. Package-visible so the dry-run round-trip
+     * test can drive the same path {@link #onTick} uses. SPEC executes
+     * {@code d.combo} rather than calling {@code comboSpec()} again.
+     */
+    void applyTickDecision(int tick, TickDecision d) {
+        if (d == null) return;
+        if (DryRun.enabled()) {
+            DryRun.record("intent", d.intent + ":" + d.reason);
+        }
+        switch (d.intent) {
+            case EAT:
+                if ("dh-axe".equals(d.reason)) {
+                    eatOffDhStackForced();
+                } else if ("opp-spec".equals(d.reason)) {
+                    tryEatOffOpponentSpec(tick);
+                }
+                lastAction = "ARB_EAT_" + d.reason + "@" + tick;
+                break;
+            case SPEC:
+                lastHeadlessSpecTick = tick;
+                if (d.combo != null) selectedSpec = d.combo;
+                if ("opp-spec".equals(d.reason)) {
+                    lastConsumedSpecAnim = lastTargetAnim;
+                    forceGmaulFollow = true;
+                    lastAction = "COUNTER_SPEC@" + tick;
+                } else {
+                    forceGmaulFollow = true;
+                    lastAction = (nhV2Enabled ? "NH_SPEC@" : "KO_SPEC@") + tick
+                            + (nhV2Enabled ? " hp=" + targetHp : "");
+                }
+                executeSpec();
+                break;
+            default:
+                break;
+        }
+    }
+
+    /**
+     * Dry-run test seam: hydrates {@link #liveDecisionConfig()} and
+     * {@link #applyTickDecision} for a synthetic {@link CombatState}.
+     * Not a full {@link #onTick}. Throws unless {@code -Droatz.dryrun=true}
+     * so a missed call cannot {@link #executeSpec()} on a live client.
+     */
+    TickDecision runOnTickArbiter(CombatState captured) {
+        if (!DryRun.enabled()) {
+            throw new IllegalStateException("runOnTickArbiter requires -Droatz.dryrun=true");
+        }
+        if (captured != null) currentTick = captured.tick;
+        syncDecisionSessionFromLive();
+        TickDecision d = TickDecision.decide(captured, liveDecisionConfig(), tickSession);
+        applyTickDecision(currentTick, d);
+        return d;
     }
 
     /**
@@ -1446,41 +1494,38 @@ public class CombatScript implements TickListener {
     //  Actions — dispatcher
     // ════════════════════════════════════════════════════════════════════════
 
-    /** Routes to the correct spec executor based on selectedSpec. */
+    /** Routes to the executor on {@link Combo#of(SpecWeapon)}. */
     public void executeSpec() {
-        switch (selectedSpec) {
-            case AGS:           executeAgsSpec();       break;
-            case AGS_GMAUL:     executeAgsGmaulCombo(); break;
-            case DMACE:         executeAgsSpec();       break;
-            case DMACE_GMAUL:   executeAgsGmaulCombo(); break;
-            case VLS:           triggerVlsSpecNow();      break;
-            case VOIDWAKER:     executeVoidwakerSpec();   break;
+        switch (Combo.of(selectedSpec).executor) {
+            case AGS_SPEC:        executeAgsSpec();             break;
+            case AGS_GMAUL:       executeAgsGmaulCombo();       break;
+            case VLS:             triggerVlsSpecNow();          break;
+            case VOIDWAKER:       executeVoidwakerSpec();       break;
             case VOIDWAKER_GMAUL: executeVoidwakerGmaulCombo(); break;
-            case DBOW_AXES:     executeDbowAxesCombo(true); break;
-            case CLAWS_GMAUL:   executeAgsGmaulCombo(); break;
-            case GMAUL:         executeGmaulSpec();     break;
-            default:            executeGmaulSpec();     break;
+            case DBOW:            executeDbowAxesCombo(true);   break;
+            case GMAUL:
+            default:              executeGmaulSpec();           break;
         }
     }
 
     public boolean isDmaceCombo() {
-        return selectedSpec == SpecWeapon.DMACE || selectedSpec == SpecWeapon.DMACE_GMAUL;
+        return Combo.of(selectedSpec).family == Combo.Family.DMACE;
     }
 
     public boolean isVlsCombo() {
-        return selectedSpec == SpecWeapon.VLS;
+        return Combo.of(selectedSpec).family == Combo.Family.VLS;
     }
-    
+
     public boolean isVoidwakerCombo() {
-        return selectedSpec == SpecWeapon.VOIDWAKER || selectedSpec == SpecWeapon.VOIDWAKER_GMAUL;
+        return Combo.of(selectedSpec).family == Combo.Family.VOIDWAKER;
     }
 
     public boolean isDbowCombo() {
-        return selectedSpec == SpecWeapon.DBOW_AXES;
+        return Combo.of(selectedSpec).family == Combo.Family.DBOW;
     }
 
     public boolean isClawsCombo() {
-        return selectedSpec == SpecWeapon.CLAWS_GMAUL;
+        return Combo.of(selectedSpec).family == Combo.Family.CLAWS;
     }
 
     public boolean isStatiusCombo() {
@@ -1488,64 +1533,38 @@ public class CombatScript implements TickListener {
     }
 
     public boolean isGmaulOnly() {
-        return selectedSpec == SpecWeapon.GMAUL;
+        return Combo.of(selectedSpec).family == Combo.Family.GMAUL;
     }
 
     public SpecWeapon comboSpec() {
-        if (isGmaulOnly()) return SpecWeapon.GMAUL;
-        if (isClawsCombo()) return SpecWeapon.CLAWS_GMAUL;
-        if (isDbowCombo()) return SpecWeapon.DBOW_AXES;
-        if (isVlsCombo()) return SpecWeapon.VLS;
-        if (isVoidwakerCombo()) return selectedSpec;
-        return isDmaceCombo() ? SpecWeapon.DMACE_GMAUL : SpecWeapon.AGS_GMAUL;
+        return Combo.of(selectedSpec).canonicalWeapon();
     }
 
     public int primaryMinSpecPct() {
-        if (isGmaulOnly()) return 50;
-        if (isClawsCombo()) return 50;
-        if (isDbowCombo()) return dbowMinSpecPct;
-        if (isVoidwakerCombo()) return 50; // Voidwaker uses 50% spec
-        return isDmaceCombo() ? dmaceMinSpecPct : agsMinSpecPct;
+        Combo c = Combo.of(selectedSpec);
+        switch (c.family) {
+            case DBOW: return dbowMinSpecPct;
+            case DMACE: return dmaceMinSpecPct;
+            case GMAUL:
+            case CLAWS:
+            case VOIDWAKER:
+                return c.defaultEnergyPct;
+            default:
+                return agsMinSpecPct;
+        }
     }
 
     public String primarySpecLabel() {
-        if (isDbowCombo()) return "DBow";
-        if (isClawsCombo()) return "Claws";
-        if (isVoidwakerCombo()) return "Voidwaker";
-        return isDmaceCombo() ? "DMace" : "AGS";
+        return Combo.of(selectedSpec).primaryLabel;
     }
 
     public String comboSetupName() {
-        if (isGmaulOnly()) return "GMAUL";
-        if (isClawsCombo()) return "CLAWS+GMAUL";
-        if (isDbowCombo()) return "DBOW+AXES";
-        if (isVlsCombo()) return "VLS";
-        if (selectedSpec == SpecWeapon.VOIDWAKER) return "VOIDWAKER";
-        if (selectedSpec == SpecWeapon.VOIDWAKER_GMAUL) return "VOIDWAKER+GMAUL";
-        return isDmaceCombo() ? "DMACE+GMAUL" : "AGS+GMAUL";
+        return Combo.of(comboSpec()).setupName;
     }
 
     /** R — cycle Gmaul → Claws+Gmaul → AGS+Gmaul → DMace+Gmaul → Voidwaker → Voidwaker+Gmaul → VLS → DBow+Axes. */
     public void toggleComboSetup() {
-        if (isGmaulOnly()) {
-            selectedSpec = SpecWeapon.CLAWS_GMAUL;
-        } else if (isClawsCombo()) {
-            selectedSpec = SpecWeapon.AGS_GMAUL;
-        } else if (selectedSpec == SpecWeapon.AGS_GMAUL) {
-            selectedSpec = SpecWeapon.DMACE_GMAUL;
-        } else if (isDmaceCombo()) {
-            selectedSpec = SpecWeapon.VOIDWAKER;
-        } else if (selectedSpec == SpecWeapon.VOIDWAKER) {
-            selectedSpec = SpecWeapon.VOIDWAKER_GMAUL;
-        } else if (selectedSpec == SpecWeapon.VOIDWAKER_GMAUL) {
-            selectedSpec = SpecWeapon.VLS;
-        } else if (isVlsCombo()) {
-            selectedSpec = SpecWeapon.DBOW_AXES;
-        } else if (isDbowCombo()) {
-            selectedSpec = SpecWeapon.GMAUL;
-        } else {
-            selectedSpec = SpecWeapon.GMAUL;
-        }
+        selectedSpec = Combo.of(selectedSpec).nextHud();
         lastAction = comboSetupName();
         FontManager.debug("[CombatScript] Spec setup → " + comboSetupName());
     }
@@ -1795,45 +1814,6 @@ public class CombatScript implements TickListener {
     }
 
     /**
-     * Auto Spec: dump the current combo (default claws→gmaul) when we have
-     * energy and a target. Does not require the bot to be armed or an incoming 18+ splat.
-     */
-    private boolean tryAutoSpecDump(int tick) {
-        if (!autoSpecEnabled || dharokEnabled) return false;
-        // Never yank Blue moon / staff mid-Ice — Auto Spec was re-equipping AGS every fight.
-        // Manual Spec hotkey (R) still dumps via triggerSpecNow → executeSpec.
-        if (isMageStaffEquipped()) {
-            FontManager.debug("[CombatScript] Auto spec skipped — mage weapon equipped");
-            return false;
-        }
-        if (isSpecSequenceBusy()) return false;
-        if (tick - lastHeadlessSpecTick <= SPEC_COOLDOWN) return false;
-        int energy = specEnergy;
-        try {
-            if (specEnergyField != null) energy = specEnergyField.getInt(clientInstance);
-        } catch (Exception ignored) {}
-        specEnergy = energy;
-        if (energy < primaryMinSpecPct()) return false;
-        if (!liveInteractThisTick && recentTarget() == null && !isInActivePvpFight()) return false;
-
-        lastHeadlessSpecTick = tick;
-        // Respect an explicit AGS/DMace setup — Edge NH wants AGS→gmaul, not claws.
-        if (selectedSpec == SpecWeapon.AGS_GMAUL || selectedSpec == SpecWeapon.AGS
-                || selectedSpec == SpecWeapon.DMACE_GMAUL || selectedSpec == SpecWeapon.DMACE) {
-            // keep selection
-        } else if (findClawsWeapon() != null) {
-            selectedSpec = SpecWeapon.CLAWS_GMAUL;
-        } else {
-            selectedSpec = comboSpec();
-        }
-        forceGmaulFollow = true;
-        lastAction = "AUTO_" + comboSetupName() + "@" + tick;
-        FontManager.log("[CombatScript] Auto spec → " + comboSetupName() + " energy=" + energy);
-        executeSpec();
-        return true;
-    }
-
-    /**
      * Headless-friendly spec enqueue. Returns true when queued.
      * Adds extra guards: avoids enqueueing if a HEADLESS_SPEC is already pending
      * and uses a stronger SPEC_COOLDOWN to stop sustained re-enqueues while
@@ -1912,64 +1892,6 @@ public class CombatScript implements TickListener {
         return true;
     }
 
-    /**
-     * Opponent HP is inside our calculated max hit. Same tick: swap, spec, then
-     * food/karam eat. Eat is after the attack packet so a DH stack still counts.
-     * Never flicks protect-melee.
-     */
-    public boolean tryEnqueueKillTickIfReady() {
-        if (dharokEnabled) return false;
-        if (!autoSpecEnabled) return false;
-        if (isSpecSequenceBusy()) return false;
-        if (currentTick - lastHeadlessSpecTick <= SPEC_COOLDOWN) return false;
-        long now = System.currentTimeMillis();
-        if (now - lastKillTickMs < MIN_KILL_GAP_MS) return false;
-        if (targetHp <= 0) return false;
-        if (lastKillOppHp > 0 && targetHp >= lastKillOppHp) return false;
-        if (overheadChecksEnabled && !targetOverheadAllowsSpec()) return false;
-
-        int ourHp = readLocalHp();
-        int ourMax = stateReader != null ? stateReader.getMaxHp() : 99;
-        int str = stateReader != null ? stateReader.getStrength() : 99;
-
-        WeaponRef primary = findWeapon(false);
-        WeaponRef axe = findGreataxe();
-        boolean dhKoOk = weAreDhStacked(ourHp, axe);
-        int dhHit = (axe != null && dhKoOk) ? MaxHitCalculator.dharokMaxHit(str, ourHp, ourMax) : 0;
-        int primaryHit = 0;
-        if (primary != null) {
-            primaryHit = isDmaceCombo()
-                    ? dmaceMaxHit
-                    : agsMaxHit;
-        }
-        estimatedOurMaxHit = Math.max(dhHit, primaryHit);
-        // Same-tick KO only. Gmaul is next tick — they can eat, so don't count it.
-        inKillRange = targetHp > 0 && estimatedOurMaxHit >= targetHp;
-
-        int mode = -1;
-        // Primary KO needs it already wielded — a same-tick swap resolves as gmaul.
-        if (primary != null && primary.equipped && specEnergy >= primaryMinSpecPct() && primaryHit >= targetHp) {
-            mode = 1;
-        } else if (dhKoOk && dhHit >= targetHp) {
-            mode = 0;
-        }
-        if (mode < 0) {
-            inKillRange = false;
-            return false;
-        }
-
-        pendingKillMode = mode;
-        lastHeadlessSpecTick = currentTick;
-        lastHeadlessComboTick = currentTick;
-        lastComboTick = currentTick;
-        lastKillTickMs = now;
-        lastKillOppHp = targetHp;
-        enqueueHeadlessAction(ActionPriority.SPECIAL_ATTACK, "HEADLESS_KILL_TICK", this::executeKillTick);
-        FontManager.debug("[CombatScript] Kill tick oppHp=" + targetHp + " hit=" + estimatedOurMaxHit
-                + " mode=" + killModeName(mode));
-        return true;
-    }
-
     /** Eat out of a DH one-shot bracket. No defensive overhead. */
     public boolean tryEnqueueSafetyEatIfReady(int tick) {
         if (dharokEnabled) return false;
@@ -2010,60 +1932,19 @@ public class CombatScript implements TickListener {
 
         WeaponRef axe = findGreataxe();
         WeaponRef ags = findWeapon(false);
-        int dhHit = axe != null ? MaxHitCalculator.dharokMaxHit(str, ourHp, ourMax) : 0;
-        int agsHit = ags != null ? agsMaxHit : 0;
-        estimatedOurMaxHit = Math.max(dhHit, agsHit);
+        int dhHit = axe != null
+                ? MaxHitCalculator.dharokMaxHit(str, ourHp, ourMax,
+                    MaxHitCalculator.DH_AXE_STR_BONUS, livePrayerMult(),
+                    MaxHitCalculator.STANCE_AGGRESSIVE)
+                : 0;
+        int specHit = ags != null || nhSpecWeapon() != null ? estimateOurSpecDamage() : 0;
+        estimatedOurMaxHit = Math.max(dhHit, specHit);
         if (dharokEnabled) {
             wouldDhKoIfStacked();
         } else {
             inKillRange = targetHp > 0 && estimatedOurMaxHit >= targetHp;
         }
         inDhDanger = opponentIsDh && ourHp > 0 && ourHp <= estimatedOppDhHit;
-    }
-
-    private int pendingKillMode = -1;
-
-    private static String killModeName(int mode) {
-        switch (mode) {
-            case 0: return "DH_AXE";
-            case 1: return "AGS";
-            case 2: return "AGS_GMAUL";
-            default: return "none";
-        }
-    }
-
-    /** Swap → spec/attack at current HP → combo eat. Same tick, no protect melee. */
-    public void executeKillTick() {
-        WeaponRef axe = findGreataxe();
-        if (axe != null && pendingKillMode == 0) {
-            executeDhAxeThenHeal(axe);
-            return;
-        }
-        try {
-            int mode = pendingKillMode;
-            pendingKillMode = -1;
-            activatePiety();
-            if (mode == 1) executeAgsSpec();
-            else executeAgsGmaulCombo();
-        } catch (Throwable t) {
-            FontManager.log("[CombatScript] Kill tick error: " + t.getMessage());
-        }
-    }
-
-    /**
-     * Stay stacked. Wield greataxe → one attack at current HP → combo eat →
-     * whip + tank next tick. Super combat is left to the player.
-     */
-    private void executeDhAxeThenHeal(WeaponRef axe) {
-        if (axe == null) return;
-        int hp = readLocalHp();
-        int maxHp = stateReader != null ? stateReader.getMaxHp() : 99;
-        int targetHp = Math.max(1, (maxHp * dharokTargetHpPct) / 100);
-        if (hp > targetHp + 8) {
-            lastAction = "DH_WAIT_STACK@" + currentTick;
-            return;
-        }
-        tryOdablockDhAxe();
     }
 
     /** Next tick: restore fang/whip + dragon defender after an offensive swap. */
@@ -6637,8 +6518,9 @@ public class CombatScript implements TickListener {
         // needFreeze so a low target that drops in the last ticks still commits.
         if (nhAutoGearEnabled && targetLow && !nhMeleedThisFreeze && nhRangedThisFreeze) {
             nhMeleedThisFreeze = true;
-            if (nhFireSpecFinish(tick)) {
+            if (nhSpecFinishReady(tick)) {
                 nhPhaseName = "KO_SPEC";
+                nhCurrentPhase = "KO_SPEC";
                 return;
             }
             nhSwitchMelee();
@@ -6691,34 +6573,22 @@ public class CombatScript implements TickListener {
     }
 
     /**
-     * Funded spec finish for the NH melee phase. Fires the selected spec combo
-     * (AGS / claws / gmaul / …) when the target is inside its kill range and spec
-     * energy is up, then lets the existing combo state machine run. Returns true
-     * when a spec sequence was started.
+     * True when NH would spec-finish this tick. The spec itself is fired by
+     * {@link TickDecision} later in {@link #onTick}; this only keeps the melee
+     * switch from running on a funded window. Window + weapon/staff/gear
+     * gates live in {@link TickDecision#killWindowOpen} so item 3 cannot
+     * leave the gear switch on a stale HP cap.
      */
-    private boolean nhFireSpecFinish(int tick) {
-        if (!nhAutoSpec) return false;
+    private boolean nhSpecFinishReady(int tick) {
         if (isSpecSequenceBusy()) return false;
-        if (isMageStaffEquipped()) return false;
-        if (specEnergy < primaryMinSpecPct()) return false;
-        if (targetHp <= 0 || targetHp > nhSpecFinishHp()) return false;
         if (tick - lastHeadlessSpecTick <= SPEC_COOLDOWN) return false;
-        if (nhSpecWeapon() == null) return false;
-        selectedSpec = comboSpec();
-        forceGmaulFollow = true;
-        lastHeadlessSpecTick = tick;
-        lastAction = "NH_SPEC@" + tick + " hp=" + targetHp;
-        FontManager.log("[NH] spec finish hp=" + targetHp + " energy=" + specEnergy
-                + " setup=" + comboSetupName());
-        executeSpec();
-        if (autoVengEnabled) tryCastVengeanceEngage();
-        return true;
+        if (specEnergy < primaryMinSpecPct()) return false;
+        return TickDecision.killWindowOpen(captureCombatState(), liveDecisionConfig());
     }
 
     /** Target HP at or below which the NH finish commits to the funded spec. */
     private int nhSpecFinishHp() {
-        int spec = estimateOurSpecDamage();
-        return Math.min(99, Math.max(nhKoHp, spec > 0 ? spec : nhKoHp));
+        return TickDecision.nhSpecFinishHp(captureCombatState(), liveDecisionConfig());
     }
 
     /**
@@ -6933,7 +6803,7 @@ public class CombatScript implements TickListener {
     /**
      * Advanced NH features (NH V2): opponent animation tracking for cast / low-HP
      * detection, predictive eating, and walk-under while the target is frozen.
-     * Spec finishing lives in {@link #runNhTick} via {@link #nhFireSpecFinish}.
+     * Spec finishing lives in {@link TickDecision} via {@link #onTick}.
      */
     private void runAdvancedNhFeatures(int tick) {
         Object target = cachedTarget;
@@ -7075,24 +6945,34 @@ public class CombatScript implements TickListener {
         return 80;
     }
 
+    private boolean specWeaponCurrentlyEquipped() {
+        WeaponRef w = nhSpecWeapon();
+        return w != null && w.equipped;
+    }
+
     private int estimateOurSpecDamage() {
+        return TickDecision.estimateSpecDamage(comboSpec(), liveStr(), liveStrBonus(),
+                livePrayerMult(), MaxHitCalculator.STANCE_AGGRESSIVE);
+    }
+
+    private int liveStr() {
         int str = stateReader != null ? stateReader.getStrength() : 99;
-        if (isClawsCombo()) {
-            return MaxHitCalculator.agsSpecMaxHit(str);
+        return str > 0 ? str : 99;
+    }
+
+    private double livePrayerMult() {
+        return stateReader != null
+                ? stateReader.strengthPrayerMultiplier()
+                : MaxHitCalculator.PIETY_STR;
+    }
+
+    private int liveStrBonus() {
+        WeaponRef w = nhSpecWeapon();
+        if (w != null && w.equipped) {
+            int worn = MaxHitCalculator.weaponStrBonus(w.itemId, w.name);
+            if (worn > 0) return worn;
         }
-        if (isVoidwakerCombo()) {
-            return MaxHitCalculator.baseMaxHit(str, 100) + 15;
-        }
-        if (isStatiusCombo()) {
-            return MaxHitCalculator.statiusSpecMaxHit(str);
-        }
-        if (isDbowCombo()) {
-            return MaxHitCalculator.baseMaxHit(str, 100) + MaxHitCalculator.THREAT_MARGIN;
-        }
-        if (isVlsCombo()) {
-            return MaxHitCalculator.baseMaxHit(str, 75) + 10;
-        }
-        return MaxHitCalculator.agsSpecMaxHit(str);
+        return MaxHitCalculator.strBonusForCombo(comboSpec());
     }
     
     private boolean isUnderTarget(Object target) {
@@ -7903,8 +7783,6 @@ public class CombatScript implements TickListener {
         int dhHit = MaxHitCalculator.dharokMaxHit(readMeleeStr(), hp, maxHp);
         estimatedOurMaxHit = dhHit;
 
-        lastKillOppHp = opp;
-        pendingKillMode = -1;
         pendingDhAxeAfterStack = false;
         activatePiety();
         pulseSpecOff();
@@ -8131,14 +8009,11 @@ public class CombatScript implements TickListener {
         return -1;
     }
 
-    /** True when we are mid DH attack animation or a DH kill-tick is armed. */
+    /** True when we are mid DH attack animation this tick. */
     public boolean isAttackCyclePublic() {
         return AnimationDb.isDharokAnimation(localAnim)
-                || pendingKillMode == 0
                 || lastDhAxeTick == currentTick;
     }
-
-    public boolean isKillTickArmedPublic() { return pendingKillMode == 0; }
 
     // ════════════════════════════════════════════════════════════════════════
     //  Reflection helpers

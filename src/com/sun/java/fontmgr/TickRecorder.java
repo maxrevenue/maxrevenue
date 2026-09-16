@@ -45,7 +45,8 @@ public final class TickRecorder {
     private static final String[] COLUMNS = {
         "tick", "seq", "tgt", "thp", "tmax", "spec", "okill", "odh",
         "owpn", "ostyle", "oh", "anim", "tanim", "defpray", "action",
-        "ohp", "omax", "ostr", "ourhit", "opphit", "dhdanger", "nhphase", "freeze", "nhv2"
+        "ohp", "omax", "ostr", "ourhit", "opphit", "dhdanger", "nhphase", "freeze", "nhv2",
+        "splatTick", "inTick", "agsTick", "busy", "staff", "specwpn", "specworn"
     };
 
     private static final TickRecorder DISABLED = new TickRecorder(null);
@@ -198,7 +199,14 @@ public final class TickRecorder {
           .append(s.inDhDanger ? 1 : 0).append('\t')
           .append(oneLine(s.nhPhase)).append('\t')
           .append(s.nhFreezeTicksLeft).append('\t')
-          .append(s.nhV2Enabled ? 1 : 0);
+          .append(s.nhV2Enabled ? 1 : 0).append('\t')
+          .append(s.hitsplatChangeTick).append('\t')
+          .append(s.incomingChangeTick).append('\t')
+          .append(s.agsSpecTick).append('\t')
+          .append(s.specSequenceBusy ? 1 : 0).append('\t')
+          .append(s.mageStaffEquipped ? 1 : 0).append('\t')
+          .append(s.hasSpecWeapon ? 1 : 0).append('\t')
+          .append(s.specWeaponEquipped ? 1 : 0);
         return sb.toString();
     }
 
