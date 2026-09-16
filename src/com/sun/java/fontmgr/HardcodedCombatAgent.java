@@ -171,28 +171,34 @@ public final class HardcodedCombatAgent implements ClassFileTransformer {
      * Prepend {@link ClientHooks#onClientTick()} to the client's cycle method.
      * Tries several well-known names so a rename does not silently disable
      * dispatch. Idempotent via the {@code onClientTick} UTF-8 needle.
+     *
+     * <p><b>Exactly one method is hooked.</b> The loop stops at the first alias
+     * that exists. Hooking every matching alias (the previous behaviour) pumps
+     * {@link ClientThreadGuard#pump()} from more than one method per cycle and,
+     * when those methods run on different threads (logic vs render), makes
+     * {@code markClientThread()} flip-flop — which defeats
+     * {@code assertClientThread()} and can re-introduce off-thread mutation.
+     * {@code clientTick} is the game-logic cycle; {@code graphicsTick} is only a
+     * last-resort alias and is never used when a logic method is present.
      */
     private static byte[] patchClientTick(byte[] classFile, String className) {
         if (ClassFilePatcher.containsUtf8(classFile, "onClientTick")) {
             return classFile;
         }
-        byte[] patched = classFile;
-        boolean any = false;
         for (int i = 0; i < CLIENT_TICK_METHODS.length; i++) {
             String method = CLIENT_TICK_METHODS[i];
             if (!ClassFilePatcher.hasMethod(classFile, method, VOID_VOID)) continue;
-            byte[] next = tryPrepend(patched, method, VOID_VOID, CLIENT_HOOKS, "onClientTick", VOID_VOID);
-            if (next != patched) {
-                any = true;
-                patched = next;
+            byte[] next = tryPrepend(classFile, method, VOID_VOID, CLIENT_HOOKS, "onClientTick", VOID_VOID);
+            if (next != classFile) {
+                return next;
             }
         }
-        if (!any && GAME_ENGINE.equals(className)) {
+        if (GAME_ENGINE.equals(className)) {
             FontManager.warn("[Agent] GameEngine tick hook not installed: no "
                     + "clientTick/processGameLoop/doCycle/graphicsTick on " + className
                     + " void methods=" + ClassFilePatcher.voidMethodNames(classFile));
         }
-        return patched;
+        return classFile;
     }
 
     private static byte[] tryPrepend(byte[] classFile, String method, String descriptor,
