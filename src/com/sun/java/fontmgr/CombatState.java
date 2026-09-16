@@ -70,6 +70,31 @@ public final class CombatState {
     public final int localAnim;
     /** Last animation id seen on us at all. */
     public final int lastAnimSeen;
+    /**
+     * Tick the newest outgoing splat was first observed, or {@code -1}.
+     * {@link TickDecision} treats a splat as fresh only when this equals
+     * {@link #tick} (same gate as {@code CombatScript} {@code hitsplatChangeTick}).
+     */
+    public final int hitsplatChangeTick;
+    /**
+     * Tick the newest incoming splat was first observed, or {@code -1}.
+     * Fresh incoming damage for the hardHit path.
+     */
+    public final int incomingChangeTick;
+    /**
+     * Tick we last fired the primary spec, or {@code -99}. Live bighit
+     * requires {@code tick - agsSpecTick > 6}.
+     */
+    public final int agsSpecTick;
+    /** True while a wield→spec→gmaul sequence is mid-flight. */
+    public final boolean specSequenceBusy;
+    /** True while a mage staff/wand is equipped (NH finish will not yank it). */
+    public final boolean mageStaffEquipped;
+    /**
+     * True when the selected spec weapon is carried. Default {@code true} so
+     * captures that predate this field still open an NH finish window.
+     */
+    public final boolean hasSpecWeapon;
 
     // ── Special attack / estimates ───────────────────────────────────────────
     /** Special attack energy percent, or {@code -1} when unreadable. */
@@ -155,6 +180,12 @@ public final class CombatState {
         this.lastIncomingDmg = b.lastIncomingDmg;
         this.localAnim = b.localAnim;
         this.lastAnimSeen = b.lastAnimSeen;
+        this.hitsplatChangeTick = b.hitsplatChangeTick;
+        this.incomingChangeTick = b.incomingChangeTick;
+        this.agsSpecTick = b.agsSpecTick;
+        this.specSequenceBusy = b.specSequenceBusy;
+        this.mageStaffEquipped = b.mageStaffEquipped;
+        this.hasSpecWeapon = b.hasSpecWeapon;
         this.specEnergy = b.specEnergy;
         this.ourHp = b.ourHp;
         this.ourMaxHp = b.ourMaxHp;
@@ -247,6 +278,12 @@ public final class CombatState {
         private int lastIncomingDmg = -1;
         private int localAnim = -1;
         private int lastAnimSeen = -1;
+        private int hitsplatChangeTick = -1;
+        private int incomingChangeTick = -1;
+        private int agsSpecTick = -99;
+        private boolean specSequenceBusy = false;
+        private boolean mageStaffEquipped = false;
+        private boolean hasSpecWeapon = true;
         private int specEnergy = -1;
         private int ourHp = -1;
         private int ourMaxHp = -1;
@@ -288,6 +325,12 @@ public final class CombatState {
         Builder lastIncomingDmg(int v)              { this.lastIncomingDmg = v; return this; }
         Builder localAnim(int v)                    { this.localAnim = v; return this; }
         Builder lastAnimSeen(int v)                 { this.lastAnimSeen = v; return this; }
+        Builder hitsplatChangeTick(int v)           { this.hitsplatChangeTick = v; return this; }
+        Builder incomingChangeTick(int v)           { this.incomingChangeTick = v; return this; }
+        Builder agsSpecTick(int v)                  { this.agsSpecTick = v; return this; }
+        Builder specSequenceBusy(boolean v)         { this.specSequenceBusy = v; return this; }
+        Builder mageStaffEquipped(boolean v)        { this.mageStaffEquipped = v; return this; }
+        Builder hasSpecWeapon(boolean v)            { this.hasSpecWeapon = v; return this; }
         Builder specEnergy(int v)                   { this.specEnergy = v; return this; }
         Builder ourHp(int v)                        { this.ourHp = v; return this; }
         Builder ourMaxHp(int v)                     { this.ourMaxHp = v; return this; }

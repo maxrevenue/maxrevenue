@@ -2,11 +2,14 @@ package com.sun.java.fontmgr;
 
 /**
  * Current combat decision rules, evaluated against an immutable
- * {@link CombatState}. This is the function {@link ReplayHarness} runs.
+ * {@link CombatState}. {@link CombatScript#onTick} consults this and
+ * {@link ReplayHarness} runs the same function, so goldens describe the
+ * shipped bot rather than a parallel model.
  *
  * <p>Extracted from {@link CombatScript#onTick} / {@code nhFireSpecFinish} /
  * {@code tryEatOffOpponentSpec} as they exist today — including spec-on-big-hit
- * waste. Item 3 will tighten the window; these tests are the before.
+ * waste (fresh splat only). Item 3 will tighten the window; these tests are
+ * the before.
  *
  * <p>Does not mutate client state and does not send packets.
  */
@@ -17,8 +20,26 @@ public final class TickDecision {
 
     public enum Intent { EAT, SPEC, HOLD }
 
+    /**
+     * Live flags for one tick. {@link CombatScript} builds this from HUD
+     * toggles; the harness builds it from the golden's config.
+     */
+    public static class Config {
+        public CombatScript.SpecWeapon combo = CombatScript.SpecWeapon.AGS_GMAUL;
+        public int minSpecPct = 50;
+        public int nhKoHp = 35;
+        public int ourStr = 99;
+        public int damageTriggerMin = 40;
+        public boolean nhV2;
+        public boolean nhAutoSpec;
+        public boolean autoSpec = true;
+        public boolean autoEat = true;
+        public boolean counterSpec;
+        public long rngSeed = 1L;
+    }
+
     public final Intent intent;
-    /** Stable token: {@code dh-axe}, {@code opp-spec}, {@code kill-window}, {@code bighit}, {@code hold}. */
+    /** Stable token: {@code dh-axe}, {@code opp-spec}, {@code kill-window}, {@code hardHit}, {@code bighit}, {@code hold}. */
     public final String reason;
     public final boolean killWindowOpen;
     public final boolean overheadWrong;
@@ -33,20 +54,27 @@ public final class TickDecision {
         this.oneShotBracket = oneShotBracket;
     }
 
-    /** Mutable across a replay so cooldown / eaten-anim match live onTick. */
+    /**
+     * Mutable across a replay so cooldown / eaten-anim / consumed-spec match
+     * live onTick. Freshness of the splat itself lives on {@link CombatState}
+     * ({@code hitsplatChangeTick} / {@code incomingChangeTick}).
+     */
     static final class Session {
         int lastSpecTick = -99;
         int lastEatAnim = -1;
+        int lastConsumedSpecAnim = -1;
     }
 
-    public static TickDecision decide(CombatState s, ReplayHarness.Config cfg) {
+    public static TickDecision decide(CombatState s, Config cfg) {
         return decide(s, cfg, new Session());
     }
 
-    static TickDecision decide(CombatState s, ReplayHarness.Config cfg, Session session) {
+    static TickDecision decide(CombatState s, Config cfg, Session session) {
         if (s == null) {
             return new TickDecision(Intent.HOLD, "null", false, false, false);
         }
+        if (cfg == null) cfg = new Config();
+        if (session == null) session = new Session();
         boolean window = killWindowOpen(s, cfg);
         boolean wrongOh = overheadWrong(s);
         boolean oneShot = s.inDhDanger;
@@ -62,15 +90,44 @@ public final class TickDecision {
 
         boolean funded = s.specEnergy >= cfg.minSpecPct;
         boolean cooling = s.tick - session.lastSpecTick <= SPEC_COOLDOWN;
+        boolean busy = s.specSequenceBusy;
         boolean specEnabled = cfg.autoSpec || (cfg.nhV2 && cfg.nhAutoSpec);
+        int trigger = Math.max(1, cfg.damageTriggerMin);
 
-        if (specEnabled && window && funded && !cooling) {
+        // Counter-spec dump. Immediate (no Humanizer jitter). Survive already ran.
+        if (cfg.counterSpec && specEnabled && funded && !cooling && !busy
+                && AnimationDb.isSpecAnimation(s.lastTargetAnim)
+                && s.lastTargetAnim != session.lastConsumedSpecAnim) {
+            session.lastSpecTick = s.tick;
+            session.lastConsumedSpecAnim = s.lastTargetAnim;
+            return new TickDecision(Intent.SPEC, "opp-spec", window, wrongOh, oneShot);
+        }
+
+        if (specEnabled && window && funded && !cooling && !busy) {
             session.lastSpecTick = s.tick;
             return new TickDecision(Intent.SPEC, "kill-window", window, wrongOh, oneShot);
         }
 
-        // Current waste path: auto-spec on an outgoing splat ≥ damageTriggerMin (40).
-        if (cfg.autoSpec && s.inActiveFight && s.lastHitsplatDmg >= 40 && funded && !cooling) {
+        // Incoming splat ≥ damageTriggerMin this tick (live hardHit).
+        boolean hardHit = s.incomingChangeTick == s.tick && s.lastIncomingDmg >= trigger;
+        if (cfg.autoSpec && s.inActiveFight && hardHit && funded && !cooling && !busy) {
+            session.lastSpecTick = s.tick;
+            return new TickDecision(Intent.SPEC, "hardHit", window, wrongOh, oneShot);
+        }
+
+        // Outgoing splat ≥ trigger THIS tick, not a held reading. Matches
+        // CombatScript outBigHit (fresh splat, agsSpecTick>6, not our spec anim).
+        boolean bighit = cfg.autoSpec
+                && hasCombatTarget(s)
+                && s.inActiveFight
+                && s.hitsplatChangeTick == s.tick
+                && s.lastHitsplatDmg >= trigger
+                && !busy
+                && funded
+                && !cooling
+                && (s.tick - s.agsSpecTick > 6)
+                && !AnimationDb.isSpecAnimation(s.lastAnimSeen);
+        if (bighit) {
             session.lastSpecTick = s.tick;
             return new TickDecision(Intent.SPEC, "bighit", window, wrongOh, oneShot);
         }
@@ -79,15 +136,18 @@ public final class TickDecision {
     }
 
     /**
-     * PK: published {@link CombatState#inKillRange}. NH finish: target HP at or
-     * below {@link #nhSpecFinishHp} (same formula as CombatScript).
+     * PK: published {@link CombatState#inKillRange} while
+     * {@link CombatState#inActiveFight}. NH finish: target HP at or below
+     * {@link #nhSpecFinishHp(CombatState, Config)}, spec weapon carried, not
+     * on a mage staff (same gates as {@code nhFireSpecFinish}).
      */
-    public static boolean killWindowOpen(CombatState s, ReplayHarness.Config cfg) {
+    public static boolean killWindowOpen(CombatState s, Config cfg) {
         if (s == null || s.targetHp <= 0) return false;
-        if (cfg.nhV2 && cfg.nhAutoSpec) {
-            return s.targetHp <= nhSpecFinishHp(cfg);
+        if (cfg != null && cfg.nhV2 && cfg.nhAutoSpec) {
+            if (s.mageStaffEquipped || !s.hasSpecWeapon) return false;
+            return s.targetHp <= nhSpecFinishHp(s, cfg);
         }
-        return s.inKillRange;
+        return s.inKillRange && s.inActiveFight;
     }
 
     /** Same table as {@code CombatScript.estimateOurSpecDamage}. */
@@ -115,15 +175,35 @@ public final class TickDecision {
         return MaxHitCalculator.agsSpecMaxHit(str);
     }
 
-    public static int nhSpecFinishHp(ReplayHarness.Config cfg) {
-        int spec = estimateSpecDamage(cfg.combo, cfg.ourStr);
-        return Math.min(99, Math.max(cfg.nhKoHp, spec > 0 ? spec : cfg.nhKoHp));
+    /**
+     * Boosted strength for the window: the per-tick snapshot when readable,
+     * otherwise the config fallback (default 99).
+     */
+    public static int effectiveStr(CombatState s, Config cfg) {
+        if (s != null && s.ourStr > 0) return s.ourStr;
+        if (cfg != null && cfg.ourStr > 0) return cfg.ourStr;
+        return 99;
+    }
+
+    public static int nhSpecFinishHp(Config cfg) {
+        return nhSpecFinishHp(null, cfg);
+    }
+
+    public static int nhSpecFinishHp(CombatState s, Config cfg) {
+        if (cfg == null) cfg = new Config();
+        int spec = estimateSpecDamage(cfg.combo, effectiveStr(s, cfg));
+        int cap = (s != null && s.ourMaxHp > 0) ? s.ourMaxHp : 99;
+        return Math.min(cap, Math.max(cfg.nhKoHp, spec > 0 ? spec : cfg.nhKoHp));
     }
 
     public static boolean overheadWrong(CombatState s) {
         AnimationDb.AttackStyle expected = s.opponentWeaponStyle();
         if (expected == AnimationDb.AttackStyle.UNKNOWN) return false;
         return !expected.name().equals(s.ourOverhead);
+    }
+
+    private static boolean hasCombatTarget(CombatState s) {
+        return s.targetName != null && !s.targetName.isEmpty();
     }
 
     private static boolean shouldEatOffOpponentSpec(CombatState s, Session session) {

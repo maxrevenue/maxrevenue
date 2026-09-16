@@ -9,44 +9,44 @@ import java.util.List;
  * {@link TickDecision} and returns the action sequence plus a metric report.
  *
  * <p>No live client. Seed {@link Humanizer} so gaps are deterministic.
+ * {@link CombatScript#onTick} calls the same {@link TickDecision#decide}
+ * function, so these numbers describe the shipped bot.
  */
 public final class ReplayHarness {
 
     private ReplayHarness() {}
 
-    public static final class Config {
-        public CombatScript.SpecWeapon combo = CombatScript.SpecWeapon.AGS_GMAUL;
-        public int minSpecPct = 50;
-        public int nhKoHp = 35;
-        public int ourStr = 99;
-        public boolean nhV2;
-        public boolean nhAutoSpec;
-        public boolean autoSpec = true;
-        public boolean autoEat = true;
-        public long rngSeed = 1L;
-    }
+    /** Test/replay flags. Same fields {@link CombatScript} feeds TickDecision. */
+    public static final class Config extends TickDecision.Config {}
 
     public static final class Metrics {
         public int ticks;
         public int killWindowsEntered;
         public int killWindowsConverted;
         public int missedWindows;
+        /** Kill windows closed after a survive-eat and no spec. Not a miss. */
+        public int windowsSuppressedBySurvival;
         public int specsFired;
         public int specsOutsideWindow;
         public int wrongOverheadTicks;
+        /** Rising-edge count of lethal DH brackets we did not eat. */
         public int oneShotDeaths;
         public int surviveEats;
 
         private boolean inWindow;
         private boolean specInWindow;
+        private boolean ateInWindow;
+        private boolean inOneShot;
 
         void observe(CombatState s, TickDecision d) {
             ticks++;
             if (d.overheadWrong) wrongOverheadTicks++;
-            if (d.oneShotBracket && s.ourHp > 0 && s.ourHp <= s.estimatedOppDhHit
-                    && d.intent != TickDecision.Intent.EAT) {
+            boolean exposed = d.oneShotBracket && s.ourHp > 0 && s.ourHp <= s.estimatedOppDhHit
+                    && d.intent != TickDecision.Intent.EAT;
+            if (exposed && !inOneShot) {
                 oneShotDeaths++;
             }
+            inOneShot = exposed;
             if (d.intent == TickDecision.Intent.EAT) surviveEats++;
             if (d.intent == TickDecision.Intent.SPEC) {
                 specsFired++;
@@ -57,8 +57,10 @@ public final class ReplayHarness {
             if (open && !inWindow) {
                 killWindowsEntered++;
                 specInWindow = false;
+                ateInWindow = false;
             }
             if (open && d.intent == TickDecision.Intent.SPEC) specInWindow = true;
+            if (open && d.intent == TickDecision.Intent.EAT) ateInWindow = true;
             if (!open && inWindow) closeWindow();
             inWindow = open;
         }
@@ -69,8 +71,10 @@ public final class ReplayHarness {
 
         private void closeWindow() {
             if (specInWindow) killWindowsConverted++;
+            else if (ateInWindow) windowsSuppressedBySurvival++;
             else missedWindows++;
             specInWindow = false;
+            ateInWindow = false;
         }
 
         public String report() {
@@ -78,6 +82,7 @@ public final class ReplayHarness {
                     + " windows=" + killWindowsEntered
                     + " converted=" + killWindowsConverted
                     + " missed=" + missedWindows
+                    + " suppressed=" + windowsSuppressedBySurvival
                     + " specs=" + specsFired
                     + " specWaste=" + specsOutsideWindow
                     + " wrongOh=" + wrongOverheadTicks
@@ -105,7 +110,7 @@ public final class ReplayHarness {
         }
     }
 
-    public static Report run(List<CombatState> ticks, Config cfg) {
+    public static Report run(List<CombatState> ticks, TickDecision.Config cfg) {
         if (cfg == null) cfg = new Config();
         Humanizer.seed(cfg.rngSeed);
         try {

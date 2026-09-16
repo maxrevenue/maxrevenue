@@ -67,6 +67,12 @@ public final class TickTsv {
                 .nhFreezeTicksLeft(ival(m, "freeze", 0))
                 .nhV2Enabled("1".equals(m.get("nhv2")))
                 .inActiveFight(inKill || ival(m, "thp", -1) > 0)
+                .hitsplatChangeTick(ival(m, "splatTick", -1))
+                .incomingChangeTick(ival(m, "inTick", -1))
+                .agsSpecTick(ival(m, "agsTick", -99))
+                .specSequenceBusy("1".equals(m.get("busy")))
+                .mageStaffEquipped("1".equals(m.get("staff")))
+                .hasSpecWeapon(!m.containsKey("specwpn") || "1".equals(m.get("specwpn")))
                 .build();
     }
 

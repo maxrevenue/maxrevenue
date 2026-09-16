@@ -100,6 +100,8 @@ public class ReplayHarnessTest {
         ReplayHarness.Report r = ReplayHarness.run(Arrays.asList(s), cfg);
         assertEquals("EAT:opp-spec", r.actionSequence().get(0));
         assertEquals(0, r.metrics.specsFired);
+        assertEquals(1, r.metrics.windowsSuppressedBySurvival);
+        assertEquals(0, r.metrics.missedWindows);
     }
 
     @Test
@@ -139,6 +141,8 @@ public class ReplayHarnessTest {
         ReplayHarness.Report r = ReplayHarness.run(Arrays.asList(s), cfg);
         assertEquals(TickDecision.Intent.EAT, r.decisions.get(0).intent);
         assertEquals(1, r.metrics.surviveEats);
+        assertEquals(1, r.metrics.windowsSuppressedBySurvival);
+        assertEquals(0, r.metrics.missedWindows);
     }
 
     @Test
@@ -147,6 +151,8 @@ public class ReplayHarnessTest {
         CombatState s = pk(12)
                 .targetHp(90).inKillRange(false).specEnergy(100)
                 .lastHitsplatDmg(50).inActiveFight(true)
+                .hitsplatChangeTick(12)
+                .agsSpecTick(-99)
                 .build();
         ReplayHarness.Report r = ReplayHarness.run(Arrays.asList(s), cfg);
         assertEquals("SPEC:bighit", r.actionSequence().get(0));
@@ -225,6 +231,111 @@ public class ReplayHarnessTest {
                 TickDecision.estimateSpecDamage(CombatScript.SpecWeapon.CLAWS_GMAUL, str));
         int drained = TickDecision.estimateSpecDamage(CombatScript.SpecWeapon.AGS_GMAUL, 1);
         assertTrue(drained < TickDecision.estimateSpecDamage(CombatScript.SpecWeapon.AGS_GMAUL, 99));
+    }
+
+    @Test
+    public void staleOutgoingSplatDoesNotBighit() {
+        ReplayHarness.Config cfg = pkCfg();
+        CombatState s = pk(12)
+                .targetHp(90).inKillRange(false).specEnergy(100)
+                .lastHitsplatDmg(50).inActiveFight(true)
+                .hitsplatChangeTick(5)
+                .build();
+        ReplayHarness.Report r = ReplayHarness.run(Arrays.asList(s), cfg);
+        assertEquals("HOLD:hold", r.actionSequence().get(0));
+        assertEquals(0, r.metrics.specsOutsideWindow);
+    }
+
+    @Test
+    public void hardHitSpecsOutsideTheKillWindow_currentWaste() {
+        ReplayHarness.Config cfg = pkCfg();
+        CombatState s = pk(12)
+                .targetHp(90).inKillRange(false).specEnergy(100)
+                .lastIncomingDmg(50).incomingChangeTick(12)
+                .inActiveFight(true)
+                .build();
+        ReplayHarness.Report r = ReplayHarness.run(Arrays.asList(s), cfg);
+        assertEquals("SPEC:hardHit", r.actionSequence().get(0));
+        assertEquals(1, r.metrics.specsOutsideWindow);
+    }
+
+    @Test
+    public void drainedStrengthShrinksTheNhFinishWindow() {
+        ReplayHarness.Config cfg = nh();
+        CombatState maxed = pk(10)
+                .targetHp(1).ourStr(99).ourMaxHp(99)
+                .specEnergy(100).nhV2Enabled(true)
+                .inActiveFight(true).hasSpecWeapon(true)
+                .build();
+        CombatState drained = pk(10)
+                .targetHp(1).ourStr(1).ourMaxHp(99)
+                .specEnergy(100).nhV2Enabled(true)
+                .inActiveFight(true).hasSpecWeapon(true)
+                .build();
+        int maxedHp = TickDecision.nhSpecFinishHp(maxed, cfg);
+        int drainedHp = TickDecision.nhSpecFinishHp(drained, cfg);
+        assertTrue(drainedHp < maxedHp, "ostr=1 window=" + drainedHp + " vs ostr=99 window=" + maxedHp);
+
+        int between = drainedHp + 1;
+        assertTrue(between <= maxedHp);
+        CombatState inMaxedOnly = pk(10)
+                .targetHp(between).ourStr(1).ourMaxHp(99)
+                .specEnergy(100).nhV2Enabled(true)
+                .inActiveFight(true).hasSpecWeapon(true)
+                .build();
+        CombatState stillInMaxed = pk(10)
+                .targetHp(between).ourStr(99).ourMaxHp(99)
+                .specEnergy(100).nhV2Enabled(true)
+                .inActiveFight(true).hasSpecWeapon(true)
+                .build();
+        assertEquals(TickDecision.Intent.HOLD,
+                ReplayHarness.run(Arrays.asList(inMaxedOnly), cfg).decisions.get(0).intent);
+        assertEquals("SPEC:kill-window",
+                ReplayHarness.run(Arrays.asList(stillInMaxed), cfg).actionSequence().get(0));
+    }
+
+    @Test
+    public void nhFinishRequiresCarriedSpecWeapon() {
+        ReplayHarness.Config cfg = nh();
+        int finish = TickDecision.nhSpecFinishHp(cfg);
+        CombatState s = pk(10)
+                .targetHp(finish).specEnergy(100)
+                .nhV2Enabled(true).inActiveFight(true)
+                .hasSpecWeapon(false)
+                .build();
+        ReplayHarness.Report r = ReplayHarness.run(Arrays.asList(s), cfg);
+        assertEquals(TickDecision.Intent.HOLD, r.decisions.get(0).intent);
+        assertFalse(r.decisions.get(0).killWindowOpen);
+    }
+
+    @Test
+    public void oneShotExposureLatchesOncePerBracket() {
+        ReplayHarness.Config cfg = pkCfg();
+        CombatState.Builder b = pk(1)
+                .ourHp(12).ourMaxHp(99)
+                .inDhDanger(true).estimatedOppDhHit(80)
+                .targetHp(80).specEnergy(0)
+                .inActiveFight(true);
+        ReplayHarness.Report r = ReplayHarness.run(Arrays.asList(b.build(), pk(2)
+                .ourHp(12).ourMaxHp(99)
+                .inDhDanger(true).estimatedOppDhHit(80)
+                .targetHp(80).specEnergy(0)
+                .inActiveFight(true)
+                .build()), cfg);
+        assertEquals(1, r.metrics.oneShotDeaths, "two ticks in one bracket is one exposure");
+        assertEquals(2, r.metrics.ticks);
+    }
+
+    @Test
+    public void pkKillWindowRequiresActiveFight() {
+        ReplayHarness.Config cfg = pkCfg();
+        CombatState s = pk(10)
+                .targetHp(40).inKillRange(true).specEnergy(100)
+                .inActiveFight(false)
+                .build();
+        ReplayHarness.Report r = ReplayHarness.run(Arrays.asList(s), cfg);
+        assertEquals(TickDecision.Intent.HOLD, r.decisions.get(0).intent);
+        assertEquals(0, r.metrics.killWindowsEntered);
     }
 
     private static ReplayHarness.Config pkCfg() {
