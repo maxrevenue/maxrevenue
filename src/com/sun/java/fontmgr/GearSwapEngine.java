@@ -33,6 +33,8 @@ public final class GearSwapEngine {
 
     /**
      * Queue a weapon-first swap chain with humanized inter-equip gaps.
+     * Clicks are {@link ClientThreadGuard#invokeAfter} deadlines drained on
+     * the real client thread (via {@link UiExecutor#schedule}).
      */
     public void queueSwap(String label, List<SwapStep> steps, Runnable afterWeapon, Runnable finale) {
         if (steps == null || steps.isEmpty() || busy) return;

@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Consumer;
@@ -14,15 +15,25 @@ import java.util.function.Supplier;
  * Thread-safety and client-thread dispatch for decoupled plugins.
  *
  * <p>All automated workflow triggers are queued here and executed only when
- * {@link #pump()} runs on the client's internal execution thread (tick /
- * invoke-later). Actions are never started on unmanaged background threads.
+ * {@link #pump()} runs on the client's internal execution thread. The drain is
+ * hooked at the start of {@code GameEngine.clientTick} (ASM prepend, same
+ * idiom as {@code MouseHandler}) so {@link #assertClientThread()} names the
+ * real client thread, not the agent-tick poller.
+ *
+ * <p>{@code TickEngine} must not call {@link #pump()}: that used to mark the
+ * {@code agent-tick} daemon as the client thread, which made
+ * {@link #assertClientThread()} a no-op and let {@code UiExecutor} (a plain
+ * background pool) mutate client state. Delays still use wall-clock
+ * {@link #invokeAfter(long, Runnable)} deadlines so AHK-safe inventory gaps
+ * are not quantized to a 600 ms game tick; {@code clientTick} runs every
+ * client cycle (~20 ms) and only due tasks fire.
  *
  * <p>Inter-state delays use a clipped Gaussian (bell-curve) distribution so
  * polling and state transitions are not metronomic.
  *
  * <h3>Integration</h3>
  * <pre>{@code
- * // Once, from the client tick / combat drain path:
+ * // Injected at the start of GameEngine.clientTick — never from agent-tick:
  * ClientThreadGuard.get().pump();
  *
  * // From hotkeys, sockets, or UI — never touches client state directly:
@@ -50,6 +61,9 @@ public final class ClientThreadGuard {
     /** Thread that is allowed to mutate client-facing state (set by host). */
     private final AtomicReference<Thread> clientThread = new AtomicReference<>();
 
+    /** Successful {@link #pump()} calls — watchdog / tests. */
+    private final AtomicLong pumps = new AtomicLong();
+
     private ClientThreadGuard() {}
 
     public static ClientThreadGuard get() {
@@ -69,8 +83,8 @@ public final class ClientThreadGuard {
     }
 
     /**
-     * Mark the calling thread as the client execution thread. Call once from
-     * the tick / drain loop so {@link #assertClientThread()} can enforce affinity.
+     * Mark the calling thread as the client execution thread. Only
+     * {@link #pump()} (the GameEngine tick hook) should call this.
      */
     public void markClientThread() {
         clientThread.set(Thread.currentThread());
@@ -81,13 +95,47 @@ public final class ClientThreadGuard {
         return marked != null && marked == Thread.currentThread();
     }
 
+    /** True after {@link #pump()} has marked a thread. */
+    public boolean hasClientThread() {
+        return clientThread.get() != null;
+    }
+
+    public long pumpCount() {
+        return pumps.get();
+    }
+
+    /**
+     * Fail if this is not the thread that last drained the queue.
+     *
+     * <p>Throws when no client thread has been marked yet (the GameEngine hook
+     * has not run) as well as when a different thread tries to mutate. The
+     * previous check skipped the unmarked case, so {@code agent-tick} calling
+     * {@link #pump()} made every later caller look legitimate.
+     */
     public void assertClientThread() {
         Thread marked = clientThread.get();
-        if (marked != null && marked != Thread.currentThread()) {
+        Thread current = Thread.currentThread();
+        if (marked == null) {
+            throw new IllegalStateException(
+                    "client-state mutation before GameEngine tick hook marked a thread: "
+                            + current.getName());
+        }
+        if (marked != current) {
             throw new IllegalStateException(
                     "client-state mutation off client thread: "
-                            + Thread.currentThread().getName());
+                            + current.getName() + " (client=" + marked.getName() + ")");
         }
+    }
+
+    /**
+     * Test-only: drop queued work and forget the marked thread. Production
+     * attach never calls this.
+     */
+    public void resetForTest() {
+        clear();
+        clientThread.set(null);
+        clientDispatcher = null;
+        pumps.set(0L);
     }
 
     // ════════════════════════════════════════════════════════════════════════
@@ -172,12 +220,14 @@ public final class ClientThreadGuard {
 
     /**
      * Drain due tasks. <b>Must</b> be called from the client's execution thread
-     * (tick listener, combat drain, or host invoke-later loop).
+     * ({@code GameEngine.clientTick} via {@link ClientHooks#onClientTick()}).
+     * Do not call from {@code TickEngine} / {@code agent-tick}.
      *
      * @return number of tasks executed
      */
     public int pump() {
         markClientThread();
+        pumps.incrementAndGet();
         long now = System.currentTimeMillis();
         List<QueuedTask> ready;
         synchronized (queueLock) {

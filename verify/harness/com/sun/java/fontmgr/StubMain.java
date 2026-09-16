@@ -42,7 +42,11 @@ public final class StubMain {
     private static final String HTTP  = "com/roatpkz/client/game/net/HttpHelper";
     private static final String AHK   = "com/roatpkz/client/game/security/AhkDetection";
     private static final String DEBUG = "com/roatpkz/common/DebugPrintStream";
-    private static final String[] ALL = { MOUSE, HTTP, AHK, DEBUG };
+    private static final String ENGINE = "com/roatpkz/client/game/engine/GameEngine";
+    /** Stubs always include GameEngine so -javaagent / attach cover the tick hook. */
+    private static final String[] ALL = { MOUSE, HTTP, AHK, DEBUG, ENGINE };
+    /** game.jar must contain the four telemetry classes; GameEngine is asserted when present. */
+    private static final String[] TELEMETRY = { MOUSE, HTTP, AHK, DEBUG };
 
     private static final String MOUSE_EVENT = "(Ljava/awt/event/MouseEvent;)V";
     private static final String STRING_VOID = "(Ljava/lang/String;)V";
@@ -157,6 +161,7 @@ public final class StubMain {
         assertHttp(c, patched.get(HTTP), phase, expectTransform);
         assertAhk(c, patched.get(AHK), phase, expectTransform);
         assertDebug(c, patched.get(DEBUG), phase, expectTransform);
+        assertEngine(c, patched.get(ENGINE), phase, expectTransform);
     }
 
     private static void assertMouse(Checks c, byte[] mouse, String phase, boolean expectTransform) {
@@ -253,6 +258,33 @@ public final class StubMain {
                         == ByteInspector.tryCatchBlocks(dbg, "sentinel", INT_INT));
     }
 
+    private static void assertEngine(Checks c, byte[] engine, String phase, boolean expectTransform) {
+        byte[] orig = readBytes(ENGINE);
+        if (engine == null) {
+            c.that(phase + ": GameEngine bytes captured", false);
+            return;
+        }
+        if (expectTransform) {
+            c.that(phase + ": GameEngine was actually transformed",
+                    !java.util.Arrays.equals(engine, orig));
+        }
+        c.that(phase + ": hook is FIRST instruction of clientTick",
+                ByteInspector.startsWithInvokeStatic(engine, "clientTick", VOID_VOID,
+                        HOOKS, "onClientTick", VOID_VOID));
+        int before = ByteInspector.tryCatchBlocks(orig, "clientTick", VOID_VOID);
+        int after = ByteInspector.tryCatchBlocks(engine, "clientTick", VOID_VOID);
+        c.that(phase + ": exception table preserved on clientTick [" + before + " entries]",
+                before > 0 && before == after);
+        int framesBefore = ByteInspector.frames(orig, "clientTick", VOID_VOID);
+        int framesAfter = ByteInspector.frames(engine, "clientTick", VOID_VOID);
+        c.that(phase + ": StackMapTable kept on clientTick [" + framesBefore + " -> " + framesAfter + "]",
+                framesAfter >= framesBefore && framesAfter > 0);
+        c.that(phase + ": untouched sentinel keeps its exception table",
+                ByteInspector.tryCatchBlocks(orig, "sentinel", INT_INT) > 0
+                        && ByteInspector.tryCatchBlocks(orig, "sentinel", INT_INT)
+                        == ByteInspector.tryCatchBlocks(engine, "sentinel", INT_INT));
+    }
+
     // -- realjar: the real client classes, verified by the JVM itself --------
 
     /**
@@ -273,7 +305,7 @@ public final class StubMain {
 
         Map<String, byte[]> orig = new LinkedHashMap<>();
         try (java.util.zip.ZipFile zip = new java.util.zip.ZipFile(gameJar)) {
-            for (String n : ALL) {
+            for (String n : TELEMETRY) {
                 java.util.zip.ZipEntry e = zip.getEntry(n + ".class");
                 if (e == null) {
                     c.that("game.jar contains " + n, false);
@@ -281,8 +313,10 @@ public final class StubMain {
                 }
                 orig.put(n, readStream(zip.getInputStream(e)));
             }
+            java.util.zip.ZipEntry engine = zip.getEntry(ENGINE + ".class");
+            if (engine != null) orig.put(ENGINE, readStream(zip.getInputStream(engine)));
         }
-        if (orig.size() != ALL.length) {
+        if (orig.size() < TELEMETRY.length) {
             c.report();
             return false;
         }
@@ -295,15 +329,32 @@ public final class StubMain {
                 StubMain.class.getClassLoader());
 
         Map<String, byte[]> patched = new LinkedHashMap<>();
-        for (String n : ALL) {
+        for (String n : orig.keySet()) {
             byte[] out = HardcodedCombatAgent.TRANSFORMER.transform(null, n, null, null, orig.get(n));
             patched.put(n, out == null ? orig.get(n) : out);
         }
 
         verifyAll(c, parent, orig, "unpatched (control)");
         verifyAll(c, parent, patched, "patched");
+        if (orig.containsKey(ENGINE)) {
+            c.that("game.jar GameEngine tick hook is first instruction",
+                    tickHooked(patched.get(ENGINE)));
+        }
         c.report();
         return c.ok();
+    }
+
+    private static boolean tickHooked(byte[] patched) {
+        if (patched == null) return false;
+        String[] names = {"clientTick", "processGameLoop", "doCycle", "graphicsTick"};
+        for (String n : names) {
+            if (ByteInspector.hasMethod(patched, n, VOID_VOID)
+                    && ByteInspector.startsWithInvokeStatic(patched, n, VOID_VOID,
+                    HOOKS, "onClientTick", VOID_VOID)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static void verifyAll(Checks c, ClassLoader parent, Map<String, byte[]> defs, String label) {

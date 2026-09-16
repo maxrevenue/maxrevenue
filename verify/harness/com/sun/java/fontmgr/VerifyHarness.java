@@ -46,7 +46,9 @@ import org.objectweb.asm.Opcodes;
  *       unpatched classes are linked first as a control, so a failure is
  *       attributable to the patch. Bytecode-level checks then assert the hook is
  *       the FIRST instruction and that exception tables and StackMapTables
- *       survived - in the patched bytes themselves.</li>
+ *       survived - in the patched bytes themselves. {@code GameEngine} is
+ *       patched the same way when present so {@code ClientHooks.onClientTick}
+ *       is the first instruction of the cycle method.</li>
  *   <li><b>{@code -javaagent} (premain).</b> A child JVM loads stub classes
  *       bearing the four real names (each with branches, a switch and
  *       try/catch) and a capture transformer registered after the agent's own
@@ -67,7 +69,11 @@ public final class VerifyHarness {
     private static final String HTTP  = "com/roatpkz/client/game/net/HttpHelper";
     private static final String AHK   = "com/roatpkz/client/game/security/AhkDetection";
     private static final String DEBUG = "com/roatpkz/common/DebugPrintStream";
+    private static final String ENGINE = "com/roatpkz/client/game/engine/GameEngine";
     private static final String[] ALL = { MOUSE, HTTP, AHK, DEBUG };
+    private static final String[] TICK_METHODS = {
+            "clientTick", "processGameLoop", "doCycle", "graphicsTick"
+    };
 
     private static final String MOUSE_EVENT = "(Ljava/awt/event/MouseEvent;)V";
     private static final String STRING_VOID = "(Ljava/lang/String;)V";
@@ -91,14 +97,21 @@ public final class VerifyHarness {
         File harnessClasses = new File(args[3]);
         File attachClasses = new File(args[4]);
 
-        System.out.println("== phase 1: real client classes out of " + gameJar.getName()
-                + " - patch, define, force link ==");
         Checks c = new Checks("game.jar patch + link");
-        phaseRealJar(c, gameJar, agentJar);
-        c.report();
+        boolean realJar = true;
+        if (!gameJar.isFile()) {
+            System.out.println("== phase 1 SKIPPED: " + gameJar.getAbsolutePath()
+                    + " not found (stub phases still run) ==");
+            System.out.println("== phase 1b SKIPPED ==");
+        } else {
+            System.out.println("== phase 1: real client classes out of " + gameJar.getName()
+                    + " - patch, define, force link ==");
+            phaseRealJar(c, gameJar, agentJar);
+            c.report();
 
-        System.out.println("== phase 1b: same classes, verified by the JVM in a throwaway child ==");
-        boolean realJar = runRealJarChild(gameJar, agentJar, stubClasses, harnessClasses);
+            System.out.println("== phase 1b: same classes, verified by the JVM in a throwaway child ==");
+            realJar = runRealJarChild(gameJar, agentJar, stubClasses, harnessClasses);
+        }
 
         System.out.println("== phase 2: -javaagent premain run against stubs with branches/switch/try-catch ==");
         boolean premain = runPremain(stubClasses, harnessClasses, agentJar);
@@ -205,6 +218,53 @@ public final class VerifyHarness {
                 "println(Ljava/lang/String;)V" });
 
         link(c, new GameLoader(parent, patched), patched, "patched");
+
+        phaseRealJarEngine(c, gameJar, parent);
+    }
+
+    /**
+     * GameEngine is the client-thread drain hook. Not every gamepack layout
+     * ships it under this name, so a miss here is a note plus a failed tick
+     * assertion only when the class is present.
+     */
+    private static void phaseRealJarEngine(Checks c, File gameJar, ClassLoader parent) throws Exception {
+        byte[] origBytes;
+        try (ZipFile zip = new ZipFile(gameJar)) {
+            ZipEntry e = zip.getEntry(ENGINE + ".class");
+            if (e == null) {
+                System.out.println("  note: game.jar has no " + ENGINE
+                        + " — stub phases still cover ClientHooks.onClientTick");
+                return;
+            }
+            origBytes = readEntry(zip, e);
+        }
+        byte[] patchedBytes = HardcodedCombatAgent.TRANSFORMER.transform(
+                null, ENGINE, null, null, origBytes);
+        if (patchedBytes == null) patchedBytes = origBytes;
+        c.that("GameEngine was patched", !Arrays.equals(origBytes, patchedBytes));
+        c.that("GameEngine tick hook is the FIRST instruction of a cycle method",
+                tickHooked(patchedBytes));
+        java.util.List<String> rewritten = new java.util.ArrayList<>();
+        for (String m : TICK_METHODS) {
+            if (ByteInspector.hasMethod(origBytes, m, VOID_VOID)) rewritten.add(m + "()V");
+        }
+        assertOtherMethodsUntouched(c, "GameEngine", origBytes, patchedBytes,
+                rewritten.toArray(new String[0]));
+        Map<String, byte[]> one = new LinkedHashMap<>();
+        one.put(ENGINE, patchedBytes);
+        link(c, new GameLoader(parent, one), one, "patched GameEngine");
+    }
+
+    private static boolean tickHooked(byte[] patched) {
+        if (patched == null) return false;
+        for (String n : TICK_METHODS) {
+            if (ByteInspector.hasMethod(patched, n, VOID_VOID)
+                    && ByteInspector.startsWithInvokeStatic(patched, n, VOID_VOID,
+                    HOOKS, "onClientTick", VOID_VOID)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

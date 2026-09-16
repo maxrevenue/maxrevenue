@@ -4,7 +4,6 @@ import com.sun.java.fontmgr.ClientThreadGuard;
 import com.sun.java.fontmgr.CombatScript;
 import com.sun.java.fontmgr.FontManager;
 import com.sun.java.fontmgr.InventoryTracker;
-import com.sun.java.fontmgr.UiExecutor;
 import com.sun.java.fontmgr.swap.CommandParser.Command;
 
 import java.util.ArrayList;
@@ -20,10 +19,12 @@ import java.util.concurrent.atomic.AtomicInteger;
  * (72–99ms). Prayer, spec, attack, and spell select do not hit that detector,
  * so they keep a 9–18ms same-tick gap and can still land with the last equip.
  *
- * <p>Waits use {@link UiExecutor} (real millisecond timers). The client-thread
- * queue is only pumped once per game tick, so delayed work queued there used
- * to bunch and fire out of order. Clicks run on the executor thread, same as
- * NH loadout switches.
+ * <p>Waits are wall-clock deadlines on {@link ClientThreadGuard#invokeAfter}.
+ * {@code UiExecutor} used to fire the click on a background pool because the
+ * client-thread queue was only pumped once per 600 ms game tick from
+ * {@code agent-tick}, which bunched delayed work and marked the wrong thread.
+ * {@code GameEngine.clientTick} now drains due tasks every client cycle
+ * (~20 ms), so AHK-safe inventory gaps stay in order on the real client thread.
  *
  * <p>Already-worn {@code e:} lines are dropped before scheduling so a snapshot
  * of 11 pieces does not burn 11 gaps when only 2 changed. Consecutive equip
@@ -94,19 +95,19 @@ public final class SwapDispatcher {
                 delay += ClientThreadGuard.sameTickGapMs();
             }
             final long at = delay;
-            UiExecutor.schedule(() -> {
+            ClientThreadGuard.get().invokeAfter(at, () -> {
                 if (runGen.get() != gen) return;
                 boolean ok = executor.execute(cmd);
                 FontManager.debug("[Swapper] " + cmd.type + "=" + cmd.value + " ok=" + ok);
-            }, at);
+            });
         }
 
         final long doneAt = delay + ClientThreadGuard.sameTickGapMs();
-        UiExecutor.schedule(() -> {
+        ClientThreadGuard.get().invokeAfter(doneAt, () -> {
             if (runGen.get() != gen) return;
             FontManager.log("[Swapper] done: " + name);
             script.pinStaffLeftClickCastPublic();
-        }, doneAt);
+        });
     }
 
     /**
