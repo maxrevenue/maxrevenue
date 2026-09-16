@@ -1,3 +1,6 @@
+import java.security.MessageDigest
+import java.util.Base64
+
 // Roat PKz Java agent build.
 //
 // Replaces the handwritten file list in build.bat with convention-based
@@ -256,8 +259,8 @@ fun compiledLicensePublicKey(): String {
 }
 
 fun licenseKeyFingerprint(b64url: String): String {
-    val raw = java.util.Base64.getUrlDecoder().decode(b64url)
-    val d = java.security.MessageDigest.getInstance("SHA-256").digest(raw)
+    val raw = Base64.getUrlDecoder().decode(b64url)
+    val d = MessageDigest.getInstance("SHA-256").digest(raw)
     return (0 until 8).joinToString("") { String.format("%02x", d[it]) }
 }
 
