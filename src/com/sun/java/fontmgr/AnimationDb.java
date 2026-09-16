@@ -67,7 +67,14 @@ public final class AnimationDb {
         reg(4230, "Dharok Spec",         AttackStyle.MELEE,  true);
         reg(2066, "Dharok Greataxe",     AttackStyle.MELEE,  false);
         reg(1658, "Abyssal Whip",        AttackStyle.MELEE,  false);
+        reg(1659, "Abyssal Whip",        AttackStyle.MELEE,  false);
         reg(390,  "Generic Melee",       AttackStyle.MELEE,  false);
+        reg(406,  "Godsword",            AttackStyle.MELEE,  false);
+        reg(7045, "Godsword",            AttackStyle.MELEE,  false);
+        reg(7054, "Godsword",            AttackStyle.MELEE,  false);
+        reg(7552, "Toxic Blowpipe",      AttackStyle.RANGED, false);
+        reg(7617, "Dragon Crossbow",     AttackStyle.RANGED, false);
+        reg(1168, "Trident / powered staff", AttackStyle.MAGIC, false);
         reg(424,  "Bow",                 AttackStyle.RANGED, false);
         reg(426,  "Dark Bow Spec",       AttackStyle.RANGED, true);
         reg(1167, "Staff autocast",      AttackStyle.MAGIC,  false);

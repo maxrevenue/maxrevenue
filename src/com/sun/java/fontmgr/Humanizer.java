@@ -81,16 +81,6 @@ public final class Humanizer {
         return ThreadLocalRandom.current().nextInt(100) < 18;
     }
 
-    /** Ticks before unfreeze to pre-wield melee (1–2, not robotic). */
-    static int nhMeleePrepTicks() {
-        return 1 + ThreadLocalRandom.current().nextInt(2);
-    }
-
-    /** Occasional missed def-pray switch — looks less bot-like. */
-    static boolean defPrayMiss() {
-        return ThreadLocalRandom.current().nextInt(100) < 8;
-    }
-
     /**
      * Eat-punish reaction center — clipped Gaussian via
      * {@link ClientThreadGuard#gaussianDelayMs(long, long)}.

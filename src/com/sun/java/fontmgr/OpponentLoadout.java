@@ -3,6 +3,7 @@ package com.sun.java.fontmgr;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * Immutable per-tick read-model of the opponent's worn equipment.
@@ -41,7 +42,9 @@ public final class OpponentLoadout {
     public static final int SLOT_LEGS   = 7;
     public static final int SLOT_GLOVES = 9;
     public static final int SLOT_BOOTS  = 10;
+    /** Valid only when {@link #slotCount()} is 14 (full RL equipment array). */
     public static final int SLOT_RING   = 12;
+    /** Valid only when {@link #slotCount()} is 14 (full RL equipment array). */
     public static final int SLOT_AMMO   = 13;
 
     /** Resolves an item id to its display name; may return null for unknown ids. */
@@ -177,6 +180,50 @@ public final class OpponentLoadout {
         return weaponStyle;
     }
 
+    /**
+     * OSRS base attack speed in game ticks — feeds def-pray swing-window prediction.
+     * Named weapons with large deltas (blowpipe, godsword, DH axe) are checked first.
+     */
+    public int attackCycleTicks() {
+        String w = InventoryTracker.stripName(weaponName()).toLowerCase(Locale.ROOT);
+        if (!w.isEmpty()) {
+            // 2-tick: only true rapid-speed weapons. Daggers are 4-tick (whip
+            // speed) and javelins are 3-tick, so neither belongs here.
+            if (w.contains("blowpipe") || w.contains("knife") || w.contains("dart")) {
+                return 2;
+            }
+            // 3-tick: shortbow rapid (incl. magic shortbow — a core NH weapon).
+            if (w.contains("chinchompa") || w.contains("shortbow")
+                    || w.contains("javelin")) {
+                return 3;
+            }
+            if (w.contains("greataxe") || (w.contains("dharok") && w.contains("axe"))) {
+                return 7;
+            }
+            // 6-tick two-handers; longbow and dark bow also swing slow.
+            if (w.contains("godsword") || w.contains("halberd") || w.contains("2h sword")
+                    || w.contains("scythe") || w.contains("granite maul")
+                    || w.contains("longbow") || w.contains("dark bow")) {
+                return 6;
+            }
+            if (w.contains("crossbow") || w.contains("ballista")
+                    || w.contains("bow") || w.contains("atlatl")) {
+                return 5;
+            }
+            if (w.contains("staff") || w.contains("wand") || w.contains("trident")
+                    || w.contains("sanguinesti") || w.contains("sceptre")) {
+                return 5;
+            }
+        }
+        return defaultAttackCycleTicks(weaponStyle);
+    }
+
+    private static int defaultAttackCycleTicks(AnimationDb.AttackStyle style) {
+        if (style == AnimationDb.AttackStyle.RANGED) return 5;
+        if (style == AnimationDb.AttackStyle.MAGIC) return 5;
+        return 4;
+    }
+
     private AnimationDb.AttackStyle classifyWeapon() {
         if (ids.length < SLOT_WEAPON + 1) return AnimationDb.AttackStyle.UNKNOWN;
         int wid = ids[SLOT_WEAPON];
@@ -186,9 +233,10 @@ public final class OpponentLoadout {
         // Eclipse atlatl / bows first — special is magic via AnimationDb, not gear.
         if (InventoryTracker.isEclipseAtlatl(wid, name)
                 || n.contains("bow") || n.contains("crossbow") || n.contains("ballista")
-                || n.contains("atlatl") || n.contains("thrownaxe") || n.contains("knife")
-                || n.contains("javelin") || n.contains("chinchompa") || n.contains("blowpipe")
-                || n.contains("dart")) {
+                || n.contains("atlatl") || n.contains("thrownaxe") || n.contains("throwing axe")
+                || n.contains("thrown axe") || n.contains("morrigan")
+                || n.contains("knife") || n.contains("javelin") || n.contains("chinchompa")
+                || n.contains("blowpipe") || n.contains("dart")) {
             return AnimationDb.AttackStyle.RANGED;
         }
         // Blue moon spear is a bladed staff (name has "spear") — treat as MAGIC for NH.

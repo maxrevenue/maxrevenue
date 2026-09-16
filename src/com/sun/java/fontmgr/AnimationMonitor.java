@@ -16,6 +16,7 @@ public final class AnimationMonitor {
     }
 
     private Listener listener;
+    private Object trackedTarget;
     private int lastLocalAnim = -1;
     private int lastTargetAnim = -1;
     private int consumeStartTick = -99;
@@ -35,6 +36,20 @@ public final class AnimationMonitor {
      * Call once per game tick after local/target sequence fields are read.
      */
     public void update(int tick, int localAnim, int targetAnim) {
+        update(tick, localAnim, targetAnim, null);
+    }
+
+    /**
+     * @param target combat target this tick; when identity changes, consume state resets
+     */
+    public void update(int tick, int localAnim, int targetAnim, Object target) {
+        if (target != trackedTarget) {
+            trackedTarget = target;
+            consumeStartTick = -99;
+            lastConsumeAnim = -1;
+            targetConsuming = false;
+            lastTargetAnim = -1;
+        }
         if (localAnim > 0 && localAnim != lastLocalAnim) {
             lastLocalAnim = localAnim;
             if (listener != null) listener.onLocalAnimation(tick, localAnim);
@@ -74,6 +89,7 @@ public final class AnimationMonitor {
     }
 
     public void reset() {
+        trackedTarget = null;
         lastLocalAnim = -1;
         lastTargetAnim = -1;
         consumeStartTick = -99;

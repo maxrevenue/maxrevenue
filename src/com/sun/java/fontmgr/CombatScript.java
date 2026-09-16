@@ -137,11 +137,12 @@ public class CombatScript implements TickListener {
      * is evidence of a real switch — enough to drop the stability wait that
      * otherwise costs a tick on ranged and melee switches.
      *
-     * <p>Off by default ({@code -Droatz.defpray.gear=true}, or the HUD toggle).
+     * <p>On by default ({@code -Droatz.defpray.gear=false} to disable, or HUD toggle).
      * When off, the corroboration is never even computed, so the prayer path is
      * bit-for-bit the old one and the animation fallback is untouched.
      */
-    public volatile boolean gearCorroboratedDefPrayer = Boolean.getBoolean("roatz.defpray.gear");
+    public volatile boolean gearCorroboratedDefPrayer =
+            !"false".equalsIgnoreCase(System.getProperty("roatz.defpray.gear", "true"));
 
     /**
      * Defensive-prayer branch taken this tick, for the HUD, the command socket
@@ -360,6 +361,8 @@ public class CombatScript implements TickListener {
     private volatile boolean pendingBarrage = false;
     /** Tick after spellbook select — cast on target (toxic SOTD / trident / sanguinesti). */
     private volatile boolean pendingIceCast = false;
+    /** Auto-freeze retry counter — a moving target can miss the first cast. */
+    private int iceCastAttempts = 0;
     /** Advanced Swapper cast that needs a second tick after spell select. */
     private volatile boolean pendingSwapCast = false;
     private volatile String pendingSwapCastLabel = null;
@@ -405,7 +408,6 @@ public class CombatScript implements TickListener {
     /** Target's weapon style for damage prediction. */
     private AnimationDb.AttackStyle lastTargetWeaponStyle = AnimationDb.AttackStyle.UNKNOWN;
     /** Last tick we attempted predictive prayer switch. */
-    private int lastPredictivePrayerTick = -1;
     /** Last tick we walked under due to freeze. */
     private int lastFreezeWalkUnderTick = -1;
     /** Target's estimated max hit for damage prediction. */
@@ -438,6 +440,22 @@ public class CombatScript implements TickListener {
      * Without this gate, enabling NH V2 (or Edge NH preset) yanked gear mid-fight.
      */
     public volatile boolean nhAutoGearEnabled = false;
+    /**
+     * Re-attack the target after each NH gear switch (range/melee), and let the
+     * auto-freeze actually cast Ice Barrage on the target instead of only arming
+     * it. Default ON — this is what makes NH V2 deal damage rather than just swap
+     * gear. Never fires while a cast is armed, so it cannot cancel left-click Ice.
+     * Disable with {@code -Droatz.nh.attack=false} or the HUD toggle.
+     */
+    public volatile boolean nhAutoAttack =
+            !"false".equalsIgnoreCase(System.getProperty("roatz.nh.attack", "true"));
+    /**
+     * NH uses the selected spec combo (AGS / claws / gmaul / …) to finish a target
+     * inside spec range when energy is funded. Default ON; disable with
+     * {@code -Droatz.nh.spec=false} or the HUD toggle.
+     */
+    public volatile boolean nhAutoSpec =
+            !"false".equalsIgnoreCase(System.getProperty("roatz.nh.spec", "true"));
     /**
      * Staff = left-click Ice Barrage. While any mage staff/wand is equipped
      * Ice stays selected via opcode 626 (the only doAction that returns before
@@ -632,6 +650,8 @@ public class CombatScript implements TickListener {
     private Object opponentLoadoutTarget = null;
     /** Tick the cached loadout was captured on, so it is refreshed exactly once per tick. */
     private int opponentLoadoutTick = -99;
+    /** Opponent weapon style as of the previous tick, for "just switched to X" detection. */
+    private AnimationDb.AttackStyle prevOpponentWeaponStyle = AnimationDb.AttackStyle.UNKNOWN;
     /** Reused name resolver — avoids a lambda allocation on the per-tick path. */
     private final OpponentLoadout.NameResolver nameResolver = this::resolveItemName;
     /** Last tick the opponent attacked or landed a hit on us. */
@@ -1010,7 +1030,7 @@ public class CombatScript implements TickListener {
                 reequipWhipAndDef();
             }
 
-            if (!enabled && !nhEnabled && !nhV2Enabled && !simpleNHEnabled
+            if (!enabled && !nhV2Enabled && !simpleNHEnabled
                     && !dharokEnabled && !eatPunishEnabled && !autoSpecEnabled) {
                 drainActionQueue();
                 return;
@@ -1106,12 +1126,6 @@ public class CombatScript implements TickListener {
                 simpleNH.onTick(tick);
             }
             
-            // Legacy NH systems (keep for compatibility)
-            if (nhEnabled) {
-                runNhTick(tick);
-                runAdvancedNhFeatures(tick);
-            }
-
             // NH V2 engine (UI-driven): prayers + freeze/range/melee loop.
             if (nhV2Enabled) {
                 runNhV2System(tick);
@@ -1122,7 +1136,7 @@ public class CombatScript implements TickListener {
             // NH spec-survive eat: react to a fresh opponent spec animation by
             // eating out of the one-shot bracket. NH-only — regular PK stays
             // fully manual (keys 1-4 / Q).
-            if (!dharokEnabled && (nhEnabled || nhV2Enabled)
+            if (!dharokEnabled && nhV2Enabled
                     && isFreshOpponentSpec()
                     && tryEatOffOpponentSpec(tick)) {
                 return;
@@ -1131,7 +1145,7 @@ public class CombatScript implements TickListener {
             // NH one-shot protection vs Dharok greataxe (normal swing, not a
             // spec). When we're inside their stacked max-hit bracket and a DH
             // swing anim is live, eat out of the danger band.
-            if (!dharokEnabled && (nhEnabled || nhV2Enabled) && inDhDanger
+            if (!dharokEnabled && nhV2Enabled && inDhDanger
                     && AnimationDb.isDharokAnimation(lastTargetAnim)) {
                 eatOffDhStackForced();
                 return;
@@ -1147,7 +1161,7 @@ public class CombatScript implements TickListener {
                 return;
             }
 
-            if (enabled && !nhEnabled) ensurePiety();
+            if (enabled && !nhV2Enabled) ensurePiety();
 
             // Eats are keybind-only (1-4). No auto combo-eat in regular PK.
             if (autoSpecEnabled && tryAutoSpecDump(tick)) {
@@ -1212,7 +1226,7 @@ public class CombatScript implements TickListener {
             FontManager.debug("tick err " + t.getClass().getSimpleName());
             lastAction = "ERR_" + t.getClass().getSimpleName() + "@" + tick;
         } finally {
-            animationMonitor.update(tick, localAnim, lastTargetAnim);
+            animationMonitor.update(tick, localAnim, lastTargetAnim, cachedTarget);
             if (stateReader != null) {
                 stateReader.publishTick(cachedTarget, lastTargetAnim,
                         animationMonitor.isTargetConsuming());
@@ -1976,6 +1990,7 @@ public class CombatScript implements TickListener {
         int ourHp = readLocalHp();
         int ourMax = stateReader != null ? stateReader.getMaxHp() : 99;
         int str = stateReader != null ? stateReader.getStrength() : 99;
+        prevOpponentWeaponStyle = opponentLoadout.weaponStyle();
         readTargetHealth(cachedTarget);
         refreshOpponentLoadout(cachedTarget);
         opponentIsDh = targetLooksLikeDharok(cachedTarget)
@@ -3676,39 +3691,229 @@ public class CombatScript implements TickListener {
         return true;
     }
 
+    /**
+     * Worn item ids by equipment slot. Prefers interface 1688 (the ids packet
+     * 146 expects) over {@code myPlayerEquipmentIds}.
+     */
+    public int[] wornEquipmentIds() {
+        int[] iface = readEquipmentInterface1688();
+        if (iface != null && !allEmpty(iface)) return iface;
+        int[] eq = readAllEquipmentIds();
+        if (eq == null) return null;
+        int[] out = new int[eq.length];
+        for (int i = 0; i < eq.length; i++) out[i] = decodeEquipId(eq[i]);
+        return out;
+    }
+
     /** Unequip by item id via PacketHelper frame 146 on iface 1688. */
     public boolean removeEquipById(int itemId) {
-        if (itemId <= 0) return false;
-        int[] eq = readAllEquipmentIds();
-        if (eq == null) return false;
-        for (int slot = 0; slot < eq.length; slot++) {
-            int id = decodeEquipId(eq[slot]);
-            if (id == itemId) return removeEquipSlot(slot, itemId);
-        }
-        return false;
+        return removeEquippedSpec(Integer.toString(itemId)) > 0;
     }
 
     public boolean removeEquipByName(String nameFragment) {
-        if (nameFragment == null || nameFragment.isEmpty()) return false;
-        int[] eq = readAllEquipmentIds();
-        if (eq == null) return false;
-        for (int slot = 0; slot < eq.length; slot++) {
-            int id = decodeEquipId(eq[slot]);
-            if (id <= 0) continue;
-            String name = resolveItemName(id);
-            if (name != null && InventoryTracker.nameMatches(name, nameFragment))
-                return removeEquipSlot(slot, id);
+        return removeEquippedSpec(nameFragment) > 0;
+    }
+
+    public boolean removeEquipBySlot(int slot) {
+        int[] worn = wornEquipmentIds();
+        if (worn == null || slot < 0 || slot >= worn.length) return false;
+        int id = worn[slot];
+        if (id <= 0) return true;
+        return removeEquipSlot(slot, id);
+    }
+
+    public boolean hasDharokEquipped() {
+        return countWornMatching(true, false, -1, null) > 0;
+    }
+
+    public boolean isEquipSlotOccupied(int slot) {
+        int[] worn = wornEquipmentIds();
+        return worn != null && slot >= 0 && slot < worn.length && worn[slot] > 0;
+    }
+
+    /**
+     * True when {@code r:spec} still has something to click: item id/name,
+     * slot alias, Dharok set, or {@code all}.
+     */
+    public boolean isRemoveTargetWorn(String spec) {
+        return countWornMatchingSpec(spec) > 0;
+    }
+
+    /**
+     * Unequip every worn piece matching {@code spec}.
+     * Accepts item id, name (all matches), slot ({@code weapon}/{@code helm}/…),
+     * {@code dh}/{@code dharok}, or {@code all}. Comma lists are AND.
+     * @return number of remove packets sent
+     */
+    public int removeEquippedSpec(String spec) {
+        if (spec == null) return 0;
+        spec = spec.trim();
+        if (spec.isEmpty()) return 0;
+        if (spec.indexOf(',') >= 0) {
+            int n = 0;
+            for (String part : spec.split(",")) n += removeEquippedSpec(part.trim());
+            return n;
         }
-        return false;
+        if (isAllEquipAlias(spec)) return removeAllWorn();
+        if (isDhEquipAlias(spec)) return removeWornMatching(true, false, -1, null);
+        int slot = equipmentSlotByName(spec);
+        if (slot >= 0) {
+            int[] worn = wornEquipmentIds();
+            if (worn == null || slot >= worn.length || worn[slot] <= 0) return 0;
+            return removeEquipBySlot(slot) ? 1 : 0;
+        }
+        try {
+            int itemId = Integer.parseInt(spec);
+            return removeWornMatching(false, true, itemId, null);
+        } catch (NumberFormatException ignored) {}
+        return removeWornMatching(false, false, -1, spec);
+    }
+
+    public int removeAllWorn() {
+        return removeWornMatching(false, false, -1, null);
+    }
+
+    private int countWornMatchingSpec(String spec) {
+        if (spec == null) return 0;
+        spec = spec.trim();
+        if (spec.isEmpty()) return 0;
+        if (spec.indexOf(',') >= 0) {
+            int n = 0;
+            for (String part : spec.split(",")) n += countWornMatchingSpec(part.trim());
+            return n;
+        }
+        if (isAllEquipAlias(spec)) return countWornMatching(false, false, -1, null);
+        if (isDhEquipAlias(spec)) return countWornMatching(true, false, -1, null);
+        int slot = equipmentSlotByName(spec);
+        if (slot >= 0) return isEquipSlotOccupied(slot) ? 1 : 0;
+        try {
+            return countWornMatching(false, true, Integer.parseInt(spec), null);
+        } catch (NumberFormatException ignored) {}
+        return countWornMatching(false, false, -1, spec);
+    }
+
+    private int removeWornMatching(boolean dharokOnly, boolean byId, int itemId, String name) {
+        int[] worn = wornEquipmentIds();
+        if (worn == null) return 0;
+        int n = 0;
+        for (int slot = 0; slot < worn.length; slot++) {
+            int id = worn[slot];
+            if (id <= 0) continue;
+            if (!slotMatches(id, dharokOnly, byId, itemId, name)) continue;
+            if (removeEquipSlot(slot, id)) n++;
+        }
+        return n;
+    }
+
+    private int countWornMatching(boolean dharokOnly, boolean byId, int itemId, String name) {
+        int[] worn = wornEquipmentIds();
+        if (worn == null) return 0;
+        int n = 0;
+        for (int slot = 0; slot < worn.length; slot++) {
+            int id = worn[slot];
+            if (id <= 0) continue;
+            if (slotMatches(id, dharokOnly, byId, itemId, name)) n++;
+        }
+        return n;
+    }
+
+    private boolean slotMatches(int id, boolean dharokOnly, boolean byId,
+                                int itemId, String name) {
+        String resolved = resolveItemName(id);
+        if (dharokOnly) return InventoryTracker.isDharokPiece(id, resolved);
+        if (byId) return id == itemId || (id > 256 && id - 256 == itemId)
+                || (itemId > 256 && id == itemId - 256);
+        if (name != null && !name.isEmpty()) {
+            return resolved != null && InventoryTracker.nameMatches(resolved, name);
+        }
+        return true;
+    }
+
+    private static boolean isDhEquipAlias(String spec) {
+        String n = equipAliasKey(spec);
+        return n.equals("dh") || n.equals("dharok") || n.equals("dharoks")
+                || n.equals("dharoksset") || n.equals("dharokset");
+    }
+
+    private static boolean isAllEquipAlias(String spec) {
+        String n = equipAliasKey(spec);
+        return n.equals("all") || n.equals("everything") || n.equals("worn")
+                || n.equals("equipped");
+    }
+
+    private static String equipAliasKey(String spec) {
+        if (spec == null) return "";
+        return spec.toLowerCase().replace("'", "").replace(" ", "")
+                .replace("_", "").replace("-", "").trim();
+    }
+
+    /** OSRS equipment container slots (6/8/11 unused). */
+    private static int equipmentSlotByName(String spec) {
+        if (spec == null) return -1;
+        switch (equipAliasKey(spec)) {
+            case "helm": case "helmet": case "hat": case "head": case "hood":
+            case "slot0": return 0;
+            case "cape": case "cloak": case "back": case "slot1": return 1;
+            case "amulet": case "ammy": case "neck": case "necklace":
+            case "slot2": return 2;
+            case "weapon": case "wep": case "mainhand": case "mh": case "2h":
+            case "slot3": return 3;
+            case "body": case "chest": case "plate": case "torso": case "top":
+            case "slot4": return 4;
+            case "shield": case "offhand": case "oh": case "book":
+            case "defender": case "slot5": return 5;
+            case "legs": case "leg": case "skirt": case "bottoms": case "bottom":
+            case "slot7": return 7;
+            case "gloves": case "glove": case "hands": case "slot9": return 9;
+            case "boots": case "boot": case "feet": case "slot10": return 10;
+            case "ring": case "slot12": return 12;
+            case "ammo": case "arrows": case "arrow": case "bolts":
+            case "quiver": case "slot13": return 13;
+            default: return -1;
+        }
     }
 
     private boolean removeEquipSlot(int slot, int itemId) {
         // Roat equipment (iface 1688) unequips via packet 146, not opcode 322
         // (322 is "delete from ignore list" on this client).
-        if (sendInterfaceItemClick(1688, slot, itemId, 1)) return true;
-        if (sendInterfaceItemClick(1688, slot, itemId, 0)) return true;
+        // Remove is actions[0] — sending row 1 first used to "succeed" as Operate.
+        int row = equipmentRemoveRow();
+        if (sendInterfaceItemClick(1688, slot, itemId, row)) {
+            FontManager.debug("[CombatScript] unequip slot=" + slot + " id=" + itemId
+                    + " row=" + row);
+            return true;
+        }
         FontManager.debug("[CombatScript] removeEquip packet 146 failed slot=" + slot);
         return false;
+    }
+
+    private int cachedEquipRemoveRow = -1;
+
+    /** Menu row for "Remove" on iface 1688 (almost always 0). */
+    private int equipmentRemoveRow() {
+        if (cachedEquipRemoveRow >= 0) return cachedEquipRemoveRow;
+        int row = 0;
+        if (interfaceCacheField != null) {
+            try {
+                Object[] cache = (Object[]) interfaceCacheField.get(null);
+                if (cache != null && cache.length > 1688 && cache[1688] != null) {
+                    Field actionsF = cache[1688].getClass().getField("actions");
+                    actionsF.setAccessible(true);
+                    String[] actions = (String[]) actionsF.get(cache[1688]);
+                    if (actions != null) {
+                        for (int i = 0; i < actions.length; i++) {
+                            if (actions[i] != null
+                                    && actions[i].toLowerCase().contains("remove")) {
+                                row = i;
+                                break;
+                            }
+                        }
+                    }
+                }
+            } catch (Exception ignored) {}
+        }
+        cachedEquipRemoveRow = row;
+        return row;
     }
 
     private int inventoryActionRow(int itemId, String... want) {
@@ -4417,6 +4622,7 @@ public class CombatScript implements TickListener {
         int wid = readEquippedWeaponId();
         if (wid <= 0) return false;
         String name = resolveItemName(wid);
+        if (InventoryTracker.isThrownOrRangedWeaponName(name)) return false;
         return InventoryTracker.isMageStaff(wid, name)
                 || InventoryTracker.isBlueMoonSpear(wid, name)
                 || InventoryTracker.isLearnedMageWeapon(wid);
@@ -5059,7 +5265,7 @@ public class CombatScript implements TickListener {
             lastSeenLocalHp = hp;
             return;
         }
-        if (dharokEnabled || enabled || nhEnabled) {
+        if (dharokEnabled || enabled || nhV2Enabled) {
             tickTrace[tickTraceCount++ % TRACE_LEN] =
                     "t" + tick + " hp=" + hp + " opp=" + liveTargetHp()
                     + " spec=" + specEnergy
@@ -6211,16 +6417,9 @@ public class CombatScript implements TickListener {
         lastAction = "ICE_Q@" + currentTick;
     }
 
+    /** Legacy NH toggle — now drives the single V2 engine. */
     public void toggleNhAuto() {
-        nhEnabled = !nhEnabled;
-        if (nhEnabled) {
-            nhV2Enabled = false;
-            simpleNHEnabled = false;
-            simpleNH.enabled = false;
-        }
-        nhPhaseName = nhEnabled ? "AUTO" : "IDLE";
-        lastAction = nhEnabled ? "NH_ON" : "NH_OFF";
-        FontManager.log("[CombatScript] NH auto " + (nhEnabled ? "ON" : "OFF"));
+        toggleNhV2();
     }
 
     public int freezeTicksLeft() {
@@ -6245,13 +6444,30 @@ public class CombatScript implements TickListener {
     public void nhSwitchRange() {
         nhPhaseName = "RANGE";
         dropIceForMeleeOrRangePublic();
-        executeItemLoadout("R", rangeLoadout, this::ensureEagleEye);
+        executeItemLoadout("R", rangeLoadout, () -> {
+            ensureEagleEye();
+            nhAttackAfterSwitch();
+        });
     }
 
     public void nhSwitchMelee() {
         nhPhaseName = "MELEE";
         dropIceForMeleeOrRangePublic();
-        executeItemLoadout("M", meleeLoadout, this::ensurePiety);
+        executeItemLoadout("M", meleeLoadout, () -> {
+            ensurePiety();
+            nhAttackAfterSwitch();
+        });
+    }
+
+    /**
+     * Re-engage after a gear switch so the new weapon actually attacks. Skipped
+     * while a cast is armed or pending — a click there would fire the spell
+     * instead of a melee/ranged attack.
+     */
+    private void nhAttackAfterSwitch() {
+        if (!nhAutoAttack) return;
+        if (isSpellArmedPublic() || pendingIceCast) return;
+        reAttackTarget();
     }
 
     /** E / PK overlay — wield VLS first, spec next tick, armor fills in background. */
@@ -6385,7 +6601,7 @@ public class CombatScript implements TickListener {
     }
 
     private boolean isNhHolding() {
-        return nhEnabled && (isNhFrozen() || nhSwitchBusy()
+        return nhV2Enabled && (isNhFrozen() || nhSwitchBusy()
                 || (lastBarrageTick >= 0 && currentTick - lastBarrageTick <= BARRAGE_CAST_TICKS + 2));
     }
 
@@ -6395,7 +6611,32 @@ public class CombatScript implements TickListener {
         if (nhSwitchBusy()) return;
 
         int left = freezeTicksLeft();
-        boolean needFreeze = left <= REFREEZE_LEAD_TICKS;
+        boolean targetLow = targetHp > 0 && targetHp <= nhFinishRange();
+
+        // Reset the finish commit when it no longer applies (they healed back out
+        // of the bracket), so the next low window can commit again.
+        if (nhMeleedThisFreeze && !targetLow) nhMeleedThisFreeze = false;
+
+        // Kill priority outranks the re-freeze: a target already inside one-shot
+        // range is finished, not locked back down at range. Evaluated before
+        // needFreeze so a low target that drops in the last ticks still commits.
+        if (nhAutoGearEnabled && targetLow && !nhMeleedThisFreeze && nhRangedThisFreeze) {
+            nhMeleedThisFreeze = true;
+            if (nhFireSpecFinish(tick)) {
+                nhPhaseName = "KO_SPEC";
+                return;
+            }
+            nhSwitchMelee();
+            nhPhaseName = "KO_MELEE";
+            if (nhAutoWalkUnderEnabled) tryNhAutoWalkUnder(tick, left);
+            return;
+        }
+
+        // While committed to a finish on a still-frozen low target, do NOT
+        // re-freeze — re-locking them at range just buys them time to heal.
+        // Re-freeze resumes once they climb out of the bracket or the freeze ends.
+        boolean needFreeze = left <= REFREEZE_LEAD_TICKS
+                && !(nhMeleedThisFreeze && targetLow && left > 0);
 
         if (needFreeze) {
             if (tick - lastBarrageTick < BARRAGE_CAST_TICKS) {
@@ -6421,33 +6662,70 @@ public class CombatScript implements TickListener {
         }
 
         nhPhaseName = "FZ" + left;
-        // Range/melee loadouts only when Auto Gear is explicitly on. Manual NH
-        // (hotkeys / Equip / snapshot buttons) still calls nhSwitch* directly.
-        if (nhAutoGearEnabled) {
-            if (!nhRangedThisFreeze && tick - lastBarrageTick >= BARRAGE_CAST_TICKS + 1) {
-                nhRangedThisFreeze = true;
-                nhSwitchRange();
-                return;
-            }
-            if (nhRangedThisFreeze && !nhMeleedThisFreeze) {
-                if (targetHp > 0 && targetHp <= nhKoHp) {
-                    nhMeleedThisFreeze = true;
-                    nhSwitchMelee();
-                    nhPhaseName = "KO_MELEE";
-                    return;
-                }
-                if (left <= Humanizer.nhMeleePrepTicks()) {
-                    nhMeleedThisFreeze = true;
-                    nhSwitchMelee();
-                    nhPhaseName = "PRE_MELEE";
-                }
-            }
+        // Range loadout only when Auto Gear is on and we have not ranged yet this
+        // freeze. The melee switch is the kill path above, not a timer.
+        if (nhAutoGearEnabled && !nhRangedThisFreeze
+                && tick - lastBarrageTick >= BARRAGE_CAST_TICKS + 1) {
+            nhRangedThisFreeze = true;
+            nhSwitchRange();
         }
-        
-        // 🔥 Auto Walk-Under Logic (NH Mode Only)
+
         if (nhAutoWalkUnderEnabled) {
             tryNhAutoWalkUnder(tick, left);
         }
+    }
+
+    /**
+     * Funded spec finish for the NH melee phase. Fires the selected spec combo
+     * (AGS / claws / gmaul / …) when the target is inside its kill range and spec
+     * energy is up, then lets the existing combo state machine run. Returns true
+     * when a spec sequence was started.
+     */
+    private boolean nhFireSpecFinish(int tick) {
+        if (!nhAutoSpec) return false;
+        if (isSpecSequenceBusy()) return false;
+        if (isMageStaffEquipped()) return false;
+        if (specEnergy < primaryMinSpecPct()) return false;
+        if (targetHp <= 0 || targetHp > nhSpecFinishHp()) return false;
+        if (tick - lastHeadlessSpecTick <= SPEC_COOLDOWN) return false;
+        if (nhSpecWeapon() == null) return false;
+        selectedSpec = comboSpec();
+        forceGmaulFollow = true;
+        lastHeadlessSpecTick = tick;
+        lastAction = "NH_SPEC@" + tick + " hp=" + targetHp;
+        FontManager.log("[NH] spec finish hp=" + targetHp + " energy=" + specEnergy
+                + " setup=" + comboSetupName());
+        executeSpec();
+        if (autoVengEnabled) tryCastVengeanceEngage();
+        return true;
+    }
+
+    /** Target HP at or below which the NH finish commits to the funded spec. */
+    private int nhSpecFinishHp() {
+        int spec = estimateOurSpecDamage();
+        return Math.min(99, Math.max(nhKoHp, spec > 0 ? spec : nhKoHp));
+    }
+
+    /**
+     * Target HP at or below which NH commits to the finish. Widened to the spec
+     * kill range while a spec is funded so the finish actually uses it; falls back
+     * to {@link #nhKoHp} (plain melee) when energy is short.
+     */
+    private int nhFinishRange() {
+        int hp = Math.max(1, nhKoHp);
+        if (nhAutoSpec && specEnergy >= primaryMinSpecPct()) {
+            hp = Math.max(hp, nhSpecFinishHp());
+        }
+        return hp;
+    }
+
+    /** The spec weapon the current combo will use, or null when it is not carried. */
+    private WeaponRef nhSpecWeapon() {
+        if (isGmaulOnly()) return findWeapon(true);
+        if (isVlsCombo()) return findGear(InventoryTracker::isVls);
+        if (isVoidwakerCombo()) return findGear(InventoryTracker::isVoidwaker);
+        if (isDbowCombo()) return findGear(InventoryTracker::isDarkBow);
+        return findWeapon(false);   // AGS / claws / dmace, chosen by the combo
     }
     
     /**
@@ -6466,8 +6744,10 @@ public class CombatScript implements TickListener {
         Object target = cachedTarget != null ? cachedTarget : stickyTarget;
         if (target == null) return;
         
-        // Don't walk under if we're switching gear or busy
-        if (nhSwitchBusy()) return;
+        // Walk-under is safe during a gear swap (equips are queued through the
+        // executor, movement is a separate packet). Do not gate on nhSwitchBusy():
+        // the phase triggers below fire on the same tick the switch is decided,
+        // which is exactly when the swap sets nhSwitchBusyUntilMs.
         
         boolean shouldWalkUnder = false;
         String reason = "";
@@ -6495,9 +6775,10 @@ public class CombatScript implements TickListener {
         // 4. ❄️ Freeze Walk-Under - Walk under during freeze (already handled in advanced features)
         // This is handled in runAdvancedNhFeatures, but we can add additional freeze logic here
         
-        // 5. 🛡️ Melee Defense - Walk under when opponent switches to melee and we're maging
-        if (!shouldWalkUnder && nhPhaseName != null && nhPhaseName.equals("MAGE") 
-                && isTargetInMeleeGear(target)) {
+        // 5. 🛡️ Melee Defense - Walk under when the opponent pulls melee gear while
+        // we're on a mage staff and the freeze is about to break (they'll rush us).
+        if (!shouldWalkUnder && opponentJustWentMelee()
+                && isMageStaffEquippedPublic() && freezeLeft <= 2) {
             shouldWalkUnder = true;
             reason = "MELEE_DEFENSE";
         }
@@ -6539,29 +6820,14 @@ public class CombatScript implements TickListener {
         return false;
     }
     
-    /** Check if target appears to be in melee gear (rough heuristic). */
-    private boolean isTargetInMeleeGear(Object target) {
-        try {
-            if (target == null) return false;
-            Field eqField = equipmentField(target.getClass());
-            if (eqField == null) return false;
-            
-            int[] equipment = (int[]) eqField.get(target);
-            if (equipment == null || equipment.length <= 3) return false;
-            
-            int weaponId = equipment[3] - 1; // Weapon slot
-            if (weaponId > 0) {
-                String weaponName = resolveItemName(weaponId);
-                if (weaponName != null) {
-                    String name = InventoryTracker.stripName(weaponName);
-                    // Detect common melee weapons
-                    return name.contains("whip") || name.contains("scimitar") || 
-                           name.contains("sword") || name.contains("mace") || 
-                           name.contains("dagger") || name.contains("claw");
-                }
-            }
-        } catch (Exception ignored) {}
-        return false;
+    /**
+     * True when the opponent's weapon style flipped to MELEE this tick — the
+     * "they just pulled melee to rush us" edge. Uses the per-tick loadout and
+     * the previous-tick style cached in {@link #refreshPvpVitals()}.
+     */
+    private boolean opponentJustWentMelee() {
+        return prevOpponentWeaponStyle != AnimationDb.AttackStyle.MELEE
+                && opponentLoadout.weaponStyle() == AnimationDb.AttackStyle.MELEE;
     }
     
     // ───────────────────────────────────────────────────────────────────────────────────
@@ -6598,6 +6864,11 @@ public class CombatScript implements TickListener {
 
         // Freeze -> range -> melee-KO engine (the same machine legacy NH uses).
         runNhTick(tick);
+
+        // Predictive eat / walk-under / spec timing + animation tracking (legacy NH
+        // used to gate this behind nhEnabled only — NH V2 needs it too).
+        runAdvancedNhFeatures(tick);
+
         nhCurrentPhase = nhPhaseName != null ? nhPhaseName : "IDLE";
     }
 
@@ -6605,23 +6876,6 @@ public class CombatScript implements TickListener {
         nhFreezeTicksLeft = freezeTicksLeft();
     }
 
-    private void switchToNhMage(int tick) {
-        nhCurrentPhase = "MAGE";
-        executeItemLoadout("G", mageLoadout, this::ensureMysticMight);
-    }
-    
-    private void switchToNhRange(int tick) {
-        nhCurrentPhase = "RANGE";
-        dropIceForMeleeOrRangePublic();
-        executeItemLoadout("R", rangeLoadout, this::ensureEagleEye);
-    }
-    
-    private void switchToNhMelee(int tick) {
-        nhCurrentPhase = "MELEE";
-        dropIceForMeleeOrRangePublic();
-        executeItemLoadout("M", meleeLoadout, this::ensurePiety);
-    }
-    
     // Public methods for overlay/control
     public void toggleNhV2() {
         nhV2Enabled = !nhV2Enabled;
@@ -6643,41 +6897,16 @@ public class CombatScript implements TickListener {
     }
     
     public void nhV2ForceBarrage() {
-        FontManager.log("[NH V2] Force barrage button clicked!");
-        
-        // Test 1: Just try to select the spell
-        try {
-            if (selectIceBarrageSpell()) {
-                FontManager.log("[NH V2] SUCCESS: Ice barrage spell selected!");
-            } else {
-                FontManager.log("[NH V2] FAILED: Could not select ice barrage");
-            }
-        } catch (Exception e) {
-            FontManager.log("[NH V2] ERROR selecting ice barrage: " + e.getMessage());
+        if (doActionMethod == null) return;
+        ensureMagicTab();
+        armLeftClickIceBarrage();
+        if (nhAutoBarrageEnabled) {
+            iceCastAttempts = 0;
+            pendingIceCast = true;
         }
-        
-        // Test 2: Try magic tab first
-        try {
-            ensureMagicTab();
-            FontManager.log("[NH V2] Magic tab ensured");
-        } catch (Exception e) {
-            FontManager.log("[NH V2] Magic tab error: " + e.getMessage());
-        }
-        
-        // Test 3: Try the widget click directly
-        try {
-            if (clickSpellOnBook(iceBarrageWidgetId, "Ice Barrage")) {
-                FontManager.log("[NH V2] SUCCESS: Widget click worked!");
-            } else {
-                FontManager.log("[NH V2] FAILED: Widget click failed");
-            }
-        } catch (Exception e) {
-            FontManager.log("[NH V2] Widget click error: " + e.getMessage());
-        }
-        
-        if (nhV2Enabled) {
-            nhCurrentPhase = "FORCE_CAST";
-        }
+        if (nhV2Enabled) nhCurrentPhase = "FORCE_CAST";
+        lastAction = "NH_FORCE_BARRAGE@" + currentTick;
+        FontManager.log("[NH V2] forced barrage");
     }
     
     public String getNhV2Status() {
@@ -6687,36 +6916,20 @@ public class CombatScript implements TickListener {
     }
     
     /**
-     * Advanced NH features for competitive edge (NH mode only).
-     * 
-     * Features:
-     * - Smart health prediction: Pre-eat based on incoming damage prediction
-     * - Frame-perfect prayer switching: Switch prayers based on opponent animation timing  
-     * - Auto walk-under on freeze: Walk under opponent when frozen to reduce damage
-     * - Predictive spec timing: Spec when opponent is low but before they react
+     * Advanced NH features (NH V2): opponent animation tracking for cast / low-HP
+     * detection, predictive eating, and walk-under while the target is frozen.
+     * Spec finishing lives in {@link #runNhTick} via {@link #nhFireSpecFinish}.
      */
     private void runAdvancedNhFeatures(int tick) {
         Object target = cachedTarget;
         if (target == null) return;
-        
-        // Track opponent's animation changes for prediction
+
         trackOpponentAnimation(target, tick);
-        
-        // 🔥 Frame-Perfect Prayer Switching (NH only)
-        if (tick - lastPredictivePrayerTick >= 2) { // Throttle to prevent spam
-            tryPredictivePrayerSwitch(target, tick);
-        }
-        
-        // 🔥 Smart Health Prediction (NH only)
         tryPredictiveEating(target, tick);
-        
-        // 🔥 Auto Walk-Under on Freeze (NH only)
+
         if (isNhFrozen() && tick - lastFreezeWalkUnderTick >= 3) {
             tryFreezeWalkUnder(target, tick);
         }
-        
-        // 🔥 Predictive Spec Timing (NH only)
-        tryPredictiveSpecTiming(target, tick);
     }
     
     /**
@@ -6725,44 +6938,24 @@ public class CombatScript implements TickListener {
     private void trackOpponentAnimation(Object target, int tick) {
         try {
             int currentAnim = readSequence(target);
-            
-            // Detect animation change
-            if (currentAnim != lastTargetAnimation && currentAnim > 0) {
+            // Idle / no animation between swings: reset so the next positive
+            // animation counts as a fresh rising edge. Without this,
+            // targetAnimationStartTick freezes on the first swing and every
+            // consumer (isTargetCasting, predictive eat, low-HP walk-under)
+            // silently goes stale for the rest of the fight.
+            if (currentAnim <= 0) {
+                lastTargetAnimation = -1;
+                return;
+            }
+            if (currentAnim != lastTargetAnimation) {
                 lastTargetAnimation = currentAnim;
                 targetAnimationStartTick = tick;
-                
-                // Update weapon style based on equipped weapon
                 lastTargetWeaponStyle = targetWeaponStyle(target);
-                
-                // Estimate max hit based on weapon and combat level
                 targetEstimatedMaxHit = estimateTargetMaxHit(target);
-                
                 FontManager.debug("[NH] Target anim change: " + currentAnim + " style=" + lastTargetWeaponStyle + " maxHit=" + targetEstimatedMaxHit);
             }
         } catch (Exception e) {
             FontManager.debug("[NH] Error tracking opponent animation: " + e.getMessage());
-        }
-    }
-    
-    /**
-     * 🔥 Frame-Perfect Prayer Switching based on opponent's attack animation timing.
-     */
-    private void tryPredictivePrayerSwitch(Object target, int tick) {
-        if (!defensivePrayersEnabled || lastTargetAnimation <= 0) return;
-        
-        // Calculate ticks since opponent started their attack animation
-        int animTicks = tick - targetAnimationStartTick;
-        
-        // Most attack animations hit on tick 2-4, switch prayer on tick 1-2 for perfect timing
-        if (animTicks >= 1 && animTicks <= 2) {
-            AnimationDb.AttackStyle style = detectDefPrayStyle();
-            int correctPrayer = getCorrectPrayerForStyle(style);
-            
-            if (correctPrayer > 0 && activeProtectPrayer != correctPrayer) {
-                queueProtectPrayer(correctPrayer);
-                lastPredictivePrayerTick = tick;
-                FontManager.debug("[NH] Predictive prayer switch: " + AnimationDb.protectPrayerName(correctPrayer) + " for style " + style);
-            }
         }
     }
     
@@ -6817,118 +7010,80 @@ public class CombatScript implements TickListener {
         }
     }
     
-    /**
-     * 🔥 Predictive Spec Timing - spec when opponent is low but before they can react.
-     */
-    private void tryPredictiveSpecTiming(Object target, int tick) {
-        if (!autoSpecEnabled) return;
-        
-        int currentTargetHp = targetHp;
-        int ourSpecEnergy = readSpecEnergy();
-        
-        if (currentTargetHp <= 0 || ourSpecEnergy < 50) return;
-        
-        // Estimate our spec damage range
-        int specDamageMax = estimateOurSpecDamage();
-        
-        // Check if target is in KO range and hasn't eaten recently
-        if (currentTargetHp <= specDamageMax && tick - getTargetLastEatTick() > 3) {
-            // Also check if they're not currently eating/switching
-            if (!isTargetEatingOrSwitching(target, tick)) {
-                if (tryAutoSpecDump(tick)) {
-                    FontManager.log("[NH] Predictive spec: targetHp=" + currentTargetHp + " specMax=" + specDamageMax);
-                }
-            }
-        }
-    }
-    
     // ── Helper Methods ─────────────────────────────────────────────────────────────
     
-    private int getCorrectPrayerForStyle(AnimationDb.AttackStyle style) {
-        switch (style) {
-            case MAGIC:  return livePrayerId("PROTECT_FROM_MAGIC", 16);
-            case RANGED: return livePrayerId("PROTECT_FROM_MISSILES", 17);
-            case MELEE:
-            default:     return livePrayerId("PROTECT_FROM_MELEE", 18);
-        }
-    }
-    
     private int calculatePredictedDamage() {
-        // Base prediction on opponent's estimated max hit
         int baseDamage = targetEstimatedMaxHit;
-        
-        // Add some randomness - assume 60-95% of max hit for prediction
+        if (baseDamage <= 0) return 0;
+        int spec = MaxHitCalculator.opponentSpecThreat(lastTargetAnimation);
+        if (spec > 0) return spec;
         int minDamage = Math.max(5, (baseDamage * 6) / 10);
         int maxDamage = Math.max(minDamage + 5, (baseDamage * 95) / 100);
-        
-        // Use average for prediction
         return (minDamage + maxDamage) / 2;
     }
-    
+
     private int estimateTargetMaxHit(Object target) {
-        try {
-            // Default estimate
-            int estimate = 35;
-            
-            // Try to get more accurate estimate based on equipment
-            Field eqField = equipmentField(target.getClass());
-            if (eqField != null) {
-                int[] equipment = (int[]) eqField.get(target);
-                if (equipment != null && equipment.length > 3) {
-                    int weaponId = equipment[3] - 1; // Weapon slot
-                    if (weaponId > 0) {
-                        String weaponName = resolveItemName(weaponId);
-                        
-                        // Rough max hit estimates based on common weapons
-                        if (weaponName != null) {
-                            String name = InventoryTracker.stripName(weaponName);
-                            if (name.contains("dharok") && name.contains("axe")) {
-                                estimate = 60; // DH axe can hit very high when low HP
-                            } else if (name.contains("godsword")) {
-                                estimate = 45;
-                            } else if (name.contains("whip") || name.contains("tentacle")) {
-                                estimate = 35;
-                            } else if (name.contains("staff") || name.contains("wand")) {
-                                estimate = 30; // Barrage
-                            } else if (name.contains("bow")) {
-                                estimate = 40;
-                            }
-                        }
-                    }
-                }
-            }
-            
-            return estimate;
-        } catch (Exception e) {
-            return 35; // Safe default
+        int animThreat = MaxHitCalculator.opponentSpecThreat(lastTargetAnimation);
+        if (animThreat > 0) return animThreat;
+
+        OpponentLoadout lo = loadoutFor(target);
+        if (lo.looksLikeDharok() || AnimationDb.isDharokAnimation(lastTargetAnimation)) {
+            int hp = targetHp > 0 ? targetHp : 1;
+            int max = targetMaxHp > 0 ? targetMaxHp : 99;
+            return MaxHitCalculator.opponentDhThreat(hp, max);
+        }
+
+        AnimationDb.AttackStyle style = lo.weaponStyle();
+        int strBonus = weaponStrengthBonus(lo);
+        switch (style) {
+            case MAGIC:
+                return MaxHitCalculator.opponentMagicThreat(lo.weaponName());
+            case RANGED:
+                return MaxHitCalculator.baseMaxHit(MaxHitCalculator.THREAT_STR, strBonus)
+                        + MaxHitCalculator.THREAT_MARGIN;
+            case MELEE:
+                return MaxHitCalculator.baseMaxHit(MaxHitCalculator.THREAT_STR, strBonus)
+                        + MaxHitCalculator.THREAT_MARGIN;
+            default:
+                return MaxHitCalculator.baseMaxHit(MaxHitCalculator.THREAT_STR, 80)
+                        + MaxHitCalculator.THREAT_MARGIN;
         }
     }
-    
+
+    private static int weaponStrengthBonus(OpponentLoadout lo) {
+        if (lo == null || lo.isEmpty()) return 80;
+        String wpn = InventoryTracker.stripName(lo.weaponName());
+        if (wpn.contains("godsword") || wpn.contains("scythe")) return 132;
+        if (wpn.contains("whip") || wpn.contains("tentacle") || wpn.contains("rapier")) return 82;
+        if (wpn.contains("bow") || wpn.contains("ballista") || wpn.contains("blowpipe")) return 100;
+        if (wpn.contains("staff") || wpn.contains("wand")) return 0;
+        return 80;
+    }
+
     private int estimateOurSpecDamage() {
-        // Estimate based on current spec weapon setup
-        if (!isDmaceCombo() && !isClawsCombo() && !isDbowCombo() && !isVlsCombo() && !isVoidwakerCombo()) return 55; // AGS spec
-        if (isClawsCombo()) return 65; // Claws 4-hit
-        if (isVoidwakerCombo()) return 60; // Voidwaker high damage potential
-        if (isStatiusCombo()) return 45; // Statius hammer
-        return 40; // Default estimate
+        int str = stateReader != null ? stateReader.getStrength() : 99;
+        if (isClawsCombo()) {
+            return MaxHitCalculator.agsSpecMaxHit(str);
+        }
+        if (isVoidwakerCombo()) {
+            return MaxHitCalculator.baseMaxHit(str, 100) + 15;
+        }
+        if (isStatiusCombo()) {
+            return MaxHitCalculator.statiusSpecMaxHit(str);
+        }
+        if (isDbowCombo()) {
+            return MaxHitCalculator.baseMaxHit(str, 100) + MaxHitCalculator.THREAT_MARGIN;
+        }
+        if (isVlsCombo()) {
+            return MaxHitCalculator.baseMaxHit(str, 75) + 10;
+        }
+        return MaxHitCalculator.agsSpecMaxHit(str);
     }
     
     private boolean isUnderTarget(Object target) {
         return walkUnder != null && walkUnder.standingOn(target);
     }
     
-    private int getTargetLastEatTick() {
-        // For now, return a safe estimate. Could be enhanced to track opponent's eating patterns.
-        return currentTick - 5;
-    }
-    
-    private boolean isTargetEatingOrSwitching(Object target, int tick) {
-        // Check if target has recent animation that suggests eating/switching
-        // This is a simplified check - could be enhanced with more specific animation IDs
-        int animTicks = tick - targetAnimationStartTick;
-        return animTicks >= 0 && animTicks <= 2 && lastTargetAnimation > 0;
-    }
-
     /**
      * Ice barrage — MANUAL cast. Arms the spell so the player's left-click on a
      * target casts it (no auto-target). The player attacks via explicit
@@ -6942,23 +7097,42 @@ public class CombatScript implements TickListener {
         ensureMagicTab();
         lastBarrageTick = currentTick;
         nhPhaseName = "ICE";
-        // Arm Ice Barrage for manual left-click cast — never auto-cast on a target.
         armLeftClickIceBarrage();
-        lastAction = "ICE_ARM@" + currentTick;
+        if (nhAutoBarrageEnabled) {
+            // Auto-freeze: cast on the target next tick (nhFinishBarrageCast).
+            // The manual path (flag off) stays arm-only for the player's click.
+            iceCastAttempts = 0;
+            pendingIceCast = true;
+            lastAction = "ICE_AUTO_ARM@" + currentTick;
+        } else {
+            lastAction = "ICE_ARM@" + currentTick;
+        }
     }
 
     /** Second tick after spellbook select — cast on target (opcode 365 / frame 249). */
     private boolean nhFinishBarrageCast() {
         refreshAttackTarget();
-        if (cachedAttackId < 0) return false;
+        if (cachedAttackId < 0) {
+            retryIceCast();
+            return false;
+        }
         if (!isIceBarrageArmed()) {
             selectIceBarrageSpell();
         }
         if (castIceOnTarget("Ice Barrage") || castIceOnTarget("Ice barrage")) {
+            iceCastAttempts = 0;
             lastAction = "ICE_CAST@" + currentTick;
             return true;
         }
+        retryIceCast();
         return false;
+    }
+
+    /** Re-queue a failed auto-freeze for a few ticks (target still moving into range). */
+    private void retryIceCast() {
+        if (nhAutoBarrageEnabled && iceCastAttempts++ < 4) {
+            pendingIceCast = true;
+        }
     }
 
     private boolean isIceBarrageArmed() {
@@ -7305,6 +7479,7 @@ public class CombatScript implements TickListener {
                     }
                 }
             }
+            if (InventoryTracker.isBrew(id, name)) lastDhBrewTick = currentTick;
             // Opcode 74 = inventory Eat/Drink on this client (packet 122). Do not use 447 (Use).
             if (doActionMethod != null) {
                 doActionMethod.invoke(clientInstance, 0, slot, 3214, 74, id, 0, action, "", -1, -1);
@@ -7321,6 +7496,13 @@ public class CombatScript implements TickListener {
     /** Sip sanfew or super restore. */
     private void drinkSanfew() {
         if (currentTick == lastSanfewTick) return;
+        // Never two potions in one game tick: a brew this tick means sanfew must
+        // wait. Re-arm so the auto loop (or a later manual press) retries next
+        // tick instead of the server silently dropping the second sip.
+        if (currentTick == lastDhBrewTick) {
+            pendingSanfew = true;
+            return;
+        }
         int[] inv = getInventorySnapshot();
         int slot = InventoryTracker.findRestoreSlot(inv);
         if (slot < 0) {

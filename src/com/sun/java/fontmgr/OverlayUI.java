@@ -591,15 +591,13 @@ public class OverlayUI {
 
     private JPanel buildNhPage() {
         JPanel page = vbox();
-        
-        // NH V2 — auto barrage, prayers, walk-under
+
         JLabel nhv2Title = createLabel("NH V2", ACCENT_GOLD, 12f, true);
         nhv2Title.setAlignmentX(Component.LEFT_ALIGNMENT);
         page.add(nhv2Title);
         page.add(Box.createVerticalStrut(6));
-        
-        // Main NH V2 toggle
-        nhModeToggle = miniToggle(script.actions().nhV2Enabled() ? "NH V2: ACTIVE" : "NH V2: OFF", script.actions().nhV2Enabled(), "New reliable NH system");
+
+        nhModeToggle = miniToggle(script.actions().nhV2Enabled() ? "NH V2: ACTIVE" : "NH V2: OFF", script.actions().nhV2Enabled(), "Master NH switch");
         nhModeToggle.setAlignmentX(Component.LEFT_ALIGNMENT);
         nhModeToggle.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
         nhModeToggle.addActionListener(e -> {
@@ -611,123 +609,46 @@ public class OverlayUI {
         });
         page.add(nhModeToggle);
         page.add(Box.createVerticalStrut(4));
-        
-        // Status display
+
         nhStatusLabel = createLabel("Status: " + script.actions().nhV2Status(), ACCENT_BLUE, 10.5f, false);
         nhStatusLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
         page.add(nhStatusLabel);
-        page.add(Box.createVerticalStrut(6));
-        
-        // Feature toggles
-        JToggleButton autoPrayerToggle = miniToggle("Auto Prayer", script.actions().nhAutoPrayerEnabled(), "Smart prayer switching");
-        autoPrayerToggle.addActionListener(e -> {
-            script.actions().toggleNhAutoPrayer();
-            styleMiniToggle(autoPrayerToggle, script.actions().nhAutoPrayerEnabled());
-            saveConfig();
-        });
-        
-        JToggleButton autoBarrageToggle = miniToggle("Auto Barrage", script.actions().nhAutoBarrageEnabled(), "Automatic ice barrage casting + mage gear at freeze");
-        autoBarrageToggle.addActionListener(e -> {
-            script.actions().toggleNhAutoBarrage();
-            styleMiniToggle(autoBarrageToggle, script.actions().nhAutoBarrageEnabled());
-            saveConfig();
-        });
+        page.add(Box.createVerticalStrut(8));
 
-        JToggleButton autoGearToggle = miniToggle("Auto Gear", script.actions().nhAutoGearEnabled(),
-                "OFF = no auto range/melee swaps after freeze. Hotkeys and Equip still work. Turn ON only if you want NH to gear for you.");
-        autoGearToggle.addActionListener(e -> {
-            script.actions().toggleNhAutoGear();
-            styleMiniToggle(autoGearToggle, script.actions().nhAutoGearEnabled());
-            saveConfig();
-        });
-        
-        JPanel featureRow = new JPanel(new GridLayout(1, 2, 4, 0));
-        featureRow.setOpaque(false);
-        featureRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 26));
-        featureRow.add(autoPrayerToggle);
-        featureRow.add(autoBarrageToggle);
-        page.add(featureRow);
-        page.add(Box.createVerticalStrut(4));
-        autoGearToggle.setAlignmentX(Component.LEFT_ALIGNMENT);
-        autoGearToggle.setMaximumSize(new Dimension(Integer.MAX_VALUE, 26));
-        page.add(autoGearToggle);
-        page.add(Box.createVerticalStrut(4));
-        
-        // Auto walk-under toggle
-        JToggleButton walkUnderToggle = miniToggle("Auto Walk-Under", script.actions().nhAutoWalkUnderEnabled(), "Smart walk-under positioning");
-        walkUnderToggle.addActionListener(e -> {
-            script.actions().toggleNhAutoWalkUnder();
-            styleMiniToggle(walkUnderToggle, script.actions().nhAutoWalkUnderEnabled());
-            saveConfig();
-        });
-        
-        JToggleButton protItemToggle = miniToggle("Protect Item", script.actions().protectItemEnabled(), "Auto protect item in PvP");
-        protItemToggle.addActionListener(e -> {
-            script.actions().setProtectItem(protItemToggle.isSelected());
-            styleMiniToggle(protItemToggle, script.actions().protectItemEnabled());
-            saveConfig();
-        });
-        
-        JPanel utilRow = new JPanel(new GridLayout(1, 2, 4, 0));
-        utilRow.setOpaque(false);
-        utilRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 26));
-        utilRow.add(walkUnderToggle);
-        utilRow.add(protItemToggle);
-        page.add(utilRow);
-        page.add(Box.createVerticalStrut(4));
+        JPanel grid = new JPanel(new GridLayout(0, 2, 4, 4));
+        grid.setOpaque(false);
+        grid.setMaximumSize(new Dimension(Integer.MAX_VALUE, 4 * 26 + 3 * 4));
+        addNhToggle(grid, "Auto Prayer",  script.actions().nhAutoPrayerEnabled(),   "Switch overheads to the target's style", script.actions()::setNhAutoPrayer);
+        addNhToggle(grid, "Auto Barrage", script.actions().nhAutoBarrageEnabled(),  "Auto-cast Ice Barrage at the freeze window", script.actions()::setNhAutoBarrage);
+        addNhToggle(grid, "Auto Gear",    script.actions().nhAutoGearEnabled(),     "Auto mage to range to melee gear swaps", script.actions()::setNhAutoGear);
+        addNhToggle(grid, "Auto Attack",  script.actions().nhAutoAttack(),          "Re-attack after each gear swap", script.actions()::setNhAutoAttack);
+        addNhToggle(grid, "Auto Spec",    script.actions().nhAutoSpec(),            "Spec finish when the target is in range", script.actions()::setNhAutoSpec);
+        addNhToggle(grid, "Walk-Under",   script.actions().nhAutoWalkUnderEnabled(), "Walk under while frozen / low HP", script.actions()::setNhAutoWalkUnder);
+        addNhToggle(grid, "Protect Item", script.actions().protectItemEnabled(),     "Auto Protect Item in PvP", script.actions()::setProtectItem);
+        page.add(grid);
+        page.add(Box.createVerticalStrut(8));
 
-        // Staff LC lives on Fight (above NH) so it is not buried under this block.
-
-        // Manual controls
-        JButton forceBarrageBtn = new JButton("Test Barrage");
-        styleBtn(forceBarrageBtn, ACCENT_BLUE);
-        forceBarrageBtn.setAlignmentX(Component.LEFT_ALIGNMENT);
-        forceBarrageBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 22));
-        forceBarrageBtn.addActionListener(e -> script.actions().forceNhBarrage());
-        
-        JButton walkUnderBtn = new JButton("Test Walk-Under");
-        styleBtn(walkUnderBtn, ACCENT_PURPLE);
-        walkUnderBtn.setAlignmentX(Component.LEFT_ALIGNMENT);
-        walkUnderBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 22));
-        walkUnderBtn.addActionListener(e -> ClientThreadGuard.get().invokeLater(() -> {
-            boolean result = script.actions().walkUnderNow();
-            FontManager.log("[WalkUnder] Test button result=" + result);
-        }));
-        
-        JButton prayerTestBtn = new JButton("Test Prayer");
-        styleBtn(prayerTestBtn, ACCENT_GREEN);
-        prayerTestBtn.setAlignmentX(Component.LEFT_ALIGNMENT);
-        prayerTestBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 22));
-        prayerTestBtn.addActionListener(e -> script.actions().testPrayerSwitch());
-        
-        JPanel controlRow1 = new JPanel(new GridLayout(1, 2, 4, 0));
-        controlRow1.setOpaque(false);
-        controlRow1.setMaximumSize(new Dimension(Integer.MAX_VALUE, 22));
-        controlRow1.add(forceBarrageBtn);
-        controlRow1.add(walkUnderBtn);
-        
-        JPanel controlRow2 = new JPanel(new GridLayout(1, 1, 4, 0));
-        controlRow2.setOpaque(false);
-        controlRow2.setMaximumSize(new Dimension(Integer.MAX_VALUE, 22));
-        controlRow2.add(prayerTestBtn);
-        
-        page.add(controlRow1);
-        page.add(Box.createVerticalStrut(3));
-        page.add(controlRow2);
-        page.add(Box.createVerticalStrut(6));
-        
-        // KO HP — auto NH loop only. Swapper-driven NH ignores this.
-        page.add(stepper("KO HP (auto melee switch)", script.actions().nhKoHp(), 1, 99, 1,
+        page.add(stepper("KO HP (finish trigger)", script.actions().nhKoHp(), 1, 99, 1,
                 v -> { script.actions().setNhKoHp(v); saveConfig(); }));
         page.add(Box.createVerticalStrut(8));
-        
-        // Info
-        page.add(infoLine("NH V2: ice barrage + smart prayers + auto walk-under"));
-        page.add(infoLine("Cycle: Freeze → Range → Melee KO"));
-        page.add(infoLine("Set gear in Swapper → NH Loadouts"));
-        page.add(infoLine("A/S/D eat · Space ice · T tank · Z/X/C overheads"));
+
+        page.add(infoLine("Freeze -> Range -> Melee/Spec finish. Gear in Swapper -> NH Loadouts."));
         return page;
     }
+
+    private void addNhToggle(JPanel page, String label, boolean on, String tip, BoolSetter setter) {
+        JToggleButton b = miniToggle(label, on, tip);
+        b.setAlignmentX(Component.LEFT_ALIGNMENT);
+        b.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
+        b.addActionListener(e -> {
+            setter.set(b.isSelected());
+            styleMiniToggle(b, b.isSelected());
+            saveConfig();
+        });
+        page.add(b);
+    }
+
+    private interface BoolSetter { void set(boolean on); }
 
     private JPanel buildDhPage() {
         JPanel page = vbox();
@@ -1304,11 +1225,13 @@ public class OverlayUI {
                 if (p.containsKey("protectitem")) script.autoProtectItemEnabled = "true".equalsIgnoreCase(p.getProperty("protectitem"));
                 // Master auto-eat switch (absent in older configs => keep default ON).
                 if (p.containsKey("autoeat")) script.autoEatEnabled = "true".equalsIgnoreCase(p.getProperty("autoeat"));
-                if (p.containsKey("nh")) script.nhEnabled = "true".equalsIgnoreCase(p.getProperty("nh"));
+                if (p.containsKey("nh")) script.nhV2Enabled = "true".equalsIgnoreCase(p.getProperty("nh"));
                 if (p.containsKey("nhv2")) script.nhV2Enabled = "true".equalsIgnoreCase(p.getProperty("nhv2"));
                 if (p.containsKey("nhpray")) script.nhAutoPrayerEnabled = "true".equalsIgnoreCase(p.getProperty("nhpray"));
                 if (p.containsKey("nhbarrage")) script.nhAutoBarrageEnabled = "true".equalsIgnoreCase(p.getProperty("nhbarrage"));
                 if (p.containsKey("nhgear")) script.nhAutoGearEnabled = "true".equalsIgnoreCase(p.getProperty("nhgear"));
+                if (p.containsKey("nhattack")) script.nhAutoAttack = "true".equalsIgnoreCase(p.getProperty("nhattack"));
+                if (p.containsKey("nhspec")) script.nhAutoSpec = "true".equalsIgnoreCase(p.getProperty("nhspec"));
                 if (p.containsKey("nhwalk")) script.nhAutoWalkUnderEnabled = "true".equalsIgnoreCase(p.getProperty("nhwalk"));
                 if (p.containsKey("stafflc")) script.staffLcCast = "true".equalsIgnoreCase(p.getProperty("stafflc"));
                 // NH engines are exclusive — NH V2 wins when both were persisted.
@@ -1349,11 +1272,13 @@ public class OverlayUI {
             p.setProperty("combat", Boolean.toString(script.comboEatEnabled));
             p.setProperty("protectitem", Boolean.toString(script.autoProtectItemEnabled));
             p.setProperty("autoeat", Boolean.toString(script.autoEatEnabled));
-            p.setProperty("nh", Boolean.toString(script.nhEnabled));
+            p.setProperty("nh", Boolean.toString(script.nhV2Enabled));
             p.setProperty("nhv2", Boolean.toString(script.nhV2Enabled));
             p.setProperty("nhpray", Boolean.toString(script.nhAutoPrayerEnabled));
             p.setProperty("nhbarrage", Boolean.toString(script.nhAutoBarrageEnabled));
             p.setProperty("nhgear", Boolean.toString(script.nhAutoGearEnabled));
+            p.setProperty("nhattack", Boolean.toString(script.nhAutoAttack));
+            p.setProperty("nhspec", Boolean.toString(script.nhAutoSpec));
             p.setProperty("nhwalk", Boolean.toString(script.nhAutoWalkUnderEnabled));
             p.setProperty("stafflc", Boolean.toString(script.staffLcCast));
             p.setProperty("nhkohp", Integer.toString(script.nhKoHp));

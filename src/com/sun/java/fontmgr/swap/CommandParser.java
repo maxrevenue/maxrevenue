@@ -5,7 +5,7 @@ import java.util.List;
 
 /**
  * Ganom Advanced Swapper DSL parser.
- * Supports e/r/drop/p/a/c/o/u/spec/walkunder with OR operators and comments.
+ * Supports e/r/unequip/drop/p/a/c/o/u/spec/walkunder with OR operators and comments.
  */
 public final class CommandParser {
 
@@ -93,6 +93,16 @@ public final class CommandParser {
             cmd.value = rest != null ? rest.trim() : "3";
             return cmd;
         }
+        if (prefix.equals("unequip") || prefix.equals("uneq") || prefix.equals("takeoff")) {
+            Command cmd = new Command();
+            cmd.type = "r";
+            if (rest != null && !rest.trim().isEmpty()) {
+                parseItemWithOptionalIdentifier(rest, cmd);
+            } else {
+                cmd.value = "all";
+            }
+            return cmd;
+        }
 
         if (colon < 0) {
             if (looksLikeSpell(raw)) {
@@ -127,9 +137,13 @@ public final class CommandParser {
                     parseItemWithOptionalIdentifier(rest, cmd);
                 }
                 break;
-            case "r": case "remove":
+            case "r": case "remove": case "unequip": case "uneq": case "takeoff":
                 cmd.type = "r";
-                parseItemWithOptionalIdentifier(rest, cmd);
+                if (rest == null || rest.trim().isEmpty()) {
+                    cmd.value = "all";
+                } else {
+                    parseItemWithOptionalIdentifier(rest, cmd);
+                }
                 break;
             case "drop":
                 cmd.type = "drop";

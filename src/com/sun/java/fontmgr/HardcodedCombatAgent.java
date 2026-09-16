@@ -299,5 +299,6 @@ public final class HardcodedCombatAgent implements ClassFileTransformer {
         // Do NOT force defensivePrayersEnabled / comboEat off — MiniOverlay + user toggles own those.
         script.animTriggerEnabled      = false;
         script.damageTriggerEnabled    = false;
+        script.gearCorroboratedDefPrayer = true;
     }
 }

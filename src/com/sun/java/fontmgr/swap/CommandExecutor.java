@@ -121,15 +121,49 @@ public final class CommandExecutor {
         return false;
     }
 
+    /**
+     * Unequip. Commas are AND (dh + weapon in one line). {@code |} stays OR
+     * (first worn variant). Set aliases ({@code dh}) remove every matching piece
+     * so a 4-piece Dharok's can come off with vengeance on the same tick.
+     */
     private boolean tryRemoveSpec(String spec) {
         if (spec == null || spec.isEmpty()) return false;
-        int itemId = resolveId(spec);
-        if (itemId > 0) {
-            if (!script.isEquippedId(itemId)) return true;
-            return script.removeEquipById(itemId);
+        if (spec.indexOf(',') >= 0) {
+            boolean any = false;
+            boolean allClear = true;
+            for (String part : spec.split(",")) {
+                String p = part.trim();
+                if (p.isEmpty()) continue;
+                if (script.isRemoveTargetWorn(p)) allClear = false;
+                if (tryRemoveSpec(p)) any = true;
+            }
+            return any || allClear;
         }
-        if (!script.isEquippedName(spec)) return true;
-        return script.removeEquipByName(spec);
+        if (script.isRemoveTargetWorn(spec)) {
+            int n = script.removeEquippedSpec(spec);
+            if (n > 0) FontManager.log("[Swapper] unequip " + spec + " x" + n);
+            if (!isVengAlias(spec)) return n > 0;
+        } else if (!isVengAlias(spec)) {
+            return true;
+        }
+        if (isVengAlias(spec)) {
+            FontManager.log("[Swapper] unequip-line veng");
+            return script.castSpellNamed("vengeance");
+        }
+        return false;
+    }
+
+    static boolean isVengAlias(String spec) {
+        if (spec == null) return false;
+        if (spec.indexOf(',') >= 0) {
+            for (String part : spec.split(",")) {
+                if (isVengAlias(part.trim())) return true;
+            }
+            return false;
+        }
+        String n = spec.toLowerCase().replace("'", "").replace(" ", "")
+                .replace("_", "").replace("-", "");
+        return n.equals("veng") || n.equals("vengeance") || n.equals("vengenace");
     }
 
     private boolean executeDrop(Command cmd) {
