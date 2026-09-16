@@ -74,14 +74,28 @@ try {
     $z = [System.IO.Compression.ZipFile]::OpenRead($BuiltAgentJar)
     $entry = $z.Entries | Where-Object { $_.FullName -eq 'com/sun/java/fontmgr/Product.class' } | Select-Object -First 1
     if ($entry) {
-        $sr = New-Object System.IO.StreamReader($entry.Open())
-        $bytes = New-Object byte[] $entry.Length
-        [void]$entry.Open().Read($bytes, 0, $bytes.Length)
+        $stream = $entry.Open()
+        try {
+            $bytes = New-Object byte[] $entry.Length
+            $read = 0
+            while ($read -lt $bytes.Length) {
+                $n = $stream.Read($bytes, $read, $bytes.Length - $read)
+                if ($n -le 0) { break }
+                $read += $n
+            }
+        } finally {
+            $stream.Dispose()
+        }
         $ascii = [Text.Encoding]::ASCII.GetString($bytes)
         # Prefer the highest 1.x.y string in Product.class (avoids stale literals).
-        $found = [regex]::Matches($ascii, '1\.\d+\.\d+') | ForEach-Object { $_.Value } | Sort-Object -Unique
-        if ($found) {
-            $ver = $found[-1]
+        # @(...) is load-bearing: a single match is a scalar [string], and
+        # indexing a string with [-1] returns its last CHARACTER ('8', not '1.0.8').
+        # Sort by [version] so 1.10.0 outranks 1.9.0 (plain string sort does not).
+        $found = @([regex]::Matches($ascii, '1\.\d+\.\d+') |
+            ForEach-Object { $_.Value } |
+            Sort-Object -Unique)
+        if ($found.Count -gt 0) {
+            $ver = @($found | Sort-Object { [version]$_ })[-1]
             Write-Host ("  Product.VERSION in jar: {0}  <- HUD title must show this after Attach" -f $ver) -ForegroundColor Cyan
             if ($ver -ne '1.0.8') {
                 Write-Host "  STALE AGENT - expected 1.0.8. Run: git pull   then relaunch." -ForegroundColor Red
