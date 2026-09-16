@@ -35,7 +35,7 @@ Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host "  Client Launcher" -ForegroundColor Cyan
 Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host "  Tip: git pull first so Attach gets the latest HUD." -ForegroundColor DarkGray
-Write-Host "  After Attach, title must show Roatz 1.0.8 + a Mini button." -ForegroundColor DarkGray
+Write-Host "  After Attach, title must show Roatz 1.0.9 + a Mini button." -ForegroundColor DarkGray
 
 # -- Official launcher mode (recommended when login is broken) --------------
 if ($Official) {
@@ -97,8 +97,8 @@ try {
         if ($found.Count -gt 0) {
             $ver = @($found | Sort-Object { [version]$_ })[-1]
             Write-Host ("  Product.VERSION in jar: {0}  <- HUD title must show this after Attach" -f $ver) -ForegroundColor Cyan
-            if ($ver -ne '1.0.8') {
-                Write-Host "  STALE AGENT - expected 1.0.8. Run: git pull   then relaunch." -ForegroundColor Red
+            if ($ver -ne '1.0.9') {
+                Write-Host "  STALE AGENT - expected 1.0.9. Run: git pull   then relaunch." -ForegroundColor Red
                 Read-Host "Press Enter to exit"
                 exit 1
             }
