@@ -140,6 +140,11 @@ rebuild means editing the `java-options=-Droatz.license.api=` line in
 > Pass `-ProatzLicenseApi` when cutting a release. Omitting it falls back to
 > `Product.LICENSE_API_DEFAULT`, which is kept in sync with the Worker above, so
 > the only effect is that a differently-targeted deployment would be missed.
+>
+> `dist` / `jpackageImage` fail while the compiled Ed25519 public key still
+> equals the git example in `license-server/.dev.vars.example`, unless you pass
+> `-PallowDevLicenseKey=true`. The key fingerprint is written to `Roatz.cfg` as
+> `-Droatz.license.key.fp=` (see `docs/license-ed25519.md`).
 
 ### 5. Local development
 
