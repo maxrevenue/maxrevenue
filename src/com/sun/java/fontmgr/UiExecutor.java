@@ -1,28 +1,25 @@
 package com.sun.java.fontmgr;
 
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ThreadFactory;
-import java.util.concurrent.TimeUnit;
-
 /**
- * Single shared executor for UI-initiated background tasks.
+ * Facade for delayed / off-EDT work that must still mutate client state.
+ *
+ * <p>This used to be a {@code ScheduledExecutorService} named {@code ui} that
+ * ran the action itself. Swap clicks, eats, and delayed wields therefore
+ * happened on a daemon thread while {@link ClientThreadGuard#pump()} (called
+ * from {@code agent-tick}) had marked that poller as the "client thread", so
+ * {@link ClientThreadGuard#assertClientThread()} could not catch it.
+ *
+ * <p>Timing is now a wall-clock deadline on {@link ClientThreadGuard}; the
+ * GameEngine tick hook drains due tasks on the real client thread. AHK-safe
+ * inventory gaps stay millisecond-accurate provided {@code clientTick} runs
+ * every client cycle (~20 ms), not once per 600 ms game tick.
  */
 public final class UiExecutor {
-    private static final ScheduledExecutorService EXEC =
-            Executors.newSingleThreadScheduledExecutor(new ThreadFactory() {
-                @Override
-                public Thread newThread(Runnable r) {
-                    Thread t = new Thread(r, FontManager.threadName("ui"));
-                    t.setDaemon(true);
-                    return t;
-                }
-            });
 
     private UiExecutor() {}
 
     public static void exec(Runnable r, String name) {
-        EXEC.submit(() -> {
+        ClientThreadGuard.get().invokeLater(() -> {
             try {
                 r.run();
             } catch (Throwable t) {
@@ -33,6 +30,6 @@ public final class UiExecutor {
     }
 
     public static void schedule(Runnable r, long delayMs) {
-        EXEC.schedule(r, delayMs, TimeUnit.MILLISECONDS);
+        ClientThreadGuard.get().invokeAfter(delayMs, r);
     }
 }

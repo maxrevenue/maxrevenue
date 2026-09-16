@@ -306,6 +306,17 @@ See `config/gsoft-ags-gmaul-combo.gsoft` for an example block.
   `-Dagent.filelog=true`. Unresolved client reflection handles and listener
   errors are reported as `WARN` entries so a client update cannot make the agent
   silently inert again.
+- **Client-thread dispatch.** `doAction` / prayer / spec / swap clicks are
+  queued on `ClientThreadGuard` and drained by an ASM prepend on
+  `GameEngine.clientTick` (fallbacks: `processGameLoop`, `doCycle`,
+  `graphicsTick`) — the same idiom as the `MouseHandler` hooks. `TickEngine`
+  (`agent-tick`, ~600 ms) still runs combat *decisions* but must not drain the
+  queue: that used to mark the poller as the client thread, so
+  `assertClientThread()` was a no-op and `UiExecutor` (a background pool) mutated
+  client state. Inventory gaps stay wall-clock deadlines (AHK-safe 72–99 ms);
+  `clientTick` runs every client cycle (~20 ms) so they do not bunch. If the
+  cycle method is renamed, `TickEngine` warns that queued tasks are stalled
+  instead of silently clicking off-thread.
 - The prayer diagnostics file (`fontconfig-pray.dat`) is now written only when
   `-Dfontmgr.praylog=true` (or with file logging on), not on every session.
 - The game JAR is located under `%USERPROFILE%\rpkzclient\` and is copied to

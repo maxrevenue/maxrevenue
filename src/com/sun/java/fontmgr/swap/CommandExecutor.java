@@ -1,6 +1,7 @@
 package com.sun.java.fontmgr.swap;
 
 import com.sun.java.fontmgr.CombatScript;
+import com.sun.java.fontmgr.ClientThreadGuard;
 import com.sun.java.fontmgr.FontManager;
 import com.sun.java.fontmgr.swap.CommandParser.Command;
 
@@ -17,6 +18,7 @@ public final class CommandExecutor {
 
     public boolean execute(Command cmd) {
         if (cmd == null || script == null) return false;
+        ClientThreadGuard.get().assertClientThread();
         FontManager.debug("[Swapper] type=" + cmd.type + " value=" + cmd.value);
         switch (cmd.type) {
             case "e":         return executeEquip(cmd);

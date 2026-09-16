@@ -396,6 +396,8 @@ public final class PrayerController {
 
     void fireProtectNow(int prayerId) {
         script.lastAction("PROT_NOW_" + prayerId + "@" + script.currentTick());
+        // Hotkey path: hop to the GameEngine tick drain. Auto-pray from
+        // CombatScript.onTick still runs on agent-tick (decision pipeline).
         ClientThreadGuard.get().invokeLater(() ->
                 activateProtectPrayer(prayerId, AnimationDb.protectPrayerName(prayerId), true));
     }

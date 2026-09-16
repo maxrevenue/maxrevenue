@@ -20,6 +20,7 @@ repositories {
 // anywhere on the client's classpath, so these classes cannot be shadowed.
 dependencies {
     implementation("org.ow2.asm:asm:9.4")
+    testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")
 }
 
 java {
@@ -27,7 +28,10 @@ java {
     // so compile to release 11 even though we build with a newer toolchain.
     sourceCompatibility = JavaVersion.VERSION_11
     targetCompatibility = JavaVersion.VERSION_11
+}
 
+tasks.test {
+    useJUnitPlatform()
 }
 
 // Agent source lives directly under src/ (not the default src/main/java).
@@ -36,6 +40,11 @@ java {
 sourceSets {
     main {
         java.setSrcDirs(listOf("src"))
+    }
+    test {
+        // Must stay outside src/ — main's srcDir is `src`, which would otherwise
+        // compile tests into the agent JAR.
+        java.setSrcDirs(listOf("test"))
     }
     create("launcher") {
         java.setSrcDirs(listOf("launcher/src"))
@@ -124,10 +133,11 @@ val verifyHarness by tasks.registering(JavaCompile::class) {
     destinationDirectory.set(layout.buildDirectory.dir("verify/harness"))
 }
 
-// Patches the four real client classes out of game.jar, defines them in a fresh
-// class loader, force-links them with resolveClass (a VerifyError fails the
-// link), then re-runs the agent via -javaagent and via Dynamic Attach against
-// stubs that carry branches/switch/try-catch.
+// Patches the four telemetry classes out of game.jar (plus GameEngine when
+// present), defines them in a fresh class loader, force-links them with
+// resolveClass (a VerifyError fails the link), then re-runs the agent via
+// -javaagent and via Dynamic Attach against stubs that carry
+// branches/switch/try-catch (including GameEngine.clientTick).
 tasks.register<JavaExec>("verify") {
     group = "verification"
     description = "Patch/link/verify the real client classes and both agent entry points"

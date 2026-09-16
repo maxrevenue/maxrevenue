@@ -271,12 +271,12 @@ public final class HotkeyManager {
         // Spec combo: only the configurable bind (default R). Q/W/E free for Swapper.
         // A Swapper hotkey on the same key still wins — trySwapHotkey runs first.
         if (code == specKey) {
-            script.triggerSpecNow();
+            ClientThreadGuard.get().invokeLater(script::triggerSpecNow);
             return true;
         }
         // NH manual ice barrage (Space).
         if (code == KeyEvent.VK_SPACE) {
-            script.triggerBarrageNow();
+            ClientThreadGuard.get().invokeLater(script::triggerBarrageNow);
             return true;
         }
         // Auto-pray toggle (Num9) — defensive prayer switching on/off.
@@ -305,7 +305,7 @@ public final class HotkeyManager {
             return true;
         }
         if (code == vengKey) {
-            script.triggerVengNow();
+            ClientThreadGuard.get().invokeLater(script::triggerVengNow);
             return true;
         }
         if (code == setupKey) {
