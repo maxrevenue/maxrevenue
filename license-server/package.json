@@ -4,7 +4,8 @@
   "scripts": {
     "dev": "wrangler dev --port 8787",
     "deploy": "wrangler deploy",
-    "types": "wrangler types"
+    "types": "wrangler types",
+    "test": "node --test test/token.test.mjs"
   },
   "devDependencies": {
     "wrangler": "^4.45.0"

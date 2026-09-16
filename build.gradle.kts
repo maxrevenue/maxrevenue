@@ -20,6 +20,8 @@ repositories {
 // anywhere on the client's classpath, so these classes cannot be shadowed.
 dependencies {
     implementation("org.ow2.asm:asm:9.4")
+    // Ed25519 verify for LicenseToken (Java 11 — JDK EdDSA is 15+).
+    implementation("net.i2p.crypto:eddsa:0.3.0")
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")
 }
 
@@ -176,6 +178,11 @@ val launcherJar by tasks.registering(Jar::class) {
         // Shared palette: roatz.launcher.Theme delegates to it, so the launcher
         // must not depend on agent.jar being on the classpath after it.
         include("com/sun/java/fontmgr/Theme.class")
+    }
+    from(configurations.runtimeClasspath.map { cfg ->
+        cfg.map { dep -> if (dep.isDirectory) dep else zipTree(dep) }
+    }) {
+        include("net/i2p/**")
     }
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
     manifest {
