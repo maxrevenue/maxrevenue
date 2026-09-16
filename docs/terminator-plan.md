@@ -1,7 +1,8 @@
 # Terminator work queue (items 1–11)
 
-Trunk is `integration/roatz-de09`. This branch stacks on PR #12
-(`cursor/tickdecision-arbiter-de09`, which includes merged PR #13).
+Trunk is `integration/roatz-de09`. This branch stacks on PR #14
+(`cursor/live-kill-math-5863`), which stacks on PR #12
+(`cursor/tickdecision-arbiter-de09`, including merged PR #13).
 Never merge `origin/main`.
 
 CombatState is a **read-model**: published once per tick, never fed by the HUD.
@@ -64,13 +65,14 @@ Counter-spec remains a named dump. `nhSpecFinishReady` still calls
 | Goldens | AGS window uses finish HP not 77; bighit/hardHit HOLD; accuracy 0.5 tightens; Auto Gear off + worn spec SPECs |
 | `OverlayUI` Auto Spec tooltip | Requires Auto Gear or spec already equipped |
 
-## 4. Data-driven combos
+## 4. Data-driven combos — shipped
 
 | File | Change |
 |---|---|
-| `src/.../combo/Combo.java` (new) | Descriptor: spec weapon, energy %, follow-up, condition, tick offsets, max-hit contribution |
-| `CombatScript.SpecWeapon` / `executeSpec` | Dispatch through descriptors |
-| Replay goldens | AGS/Gmaul, claws, dmace, dbow, VLS, voidwaker identical unless a measured change |
+| `src/.../combo/Combo.java` | Descriptor: family, executor, energy %, gmaul follow, str bonus, hit formula |
+| `CombatScript.SpecWeapon` / `executeSpec` | Dispatch through `Combo.of(selectedSpec).executor` |
+| `TickDecision.estimateSpecDamage` | `Combo.specMaxHit` — one table with the window |
+| Replay goldens | Each HUD combo SPECs at its own `expectedFinishHp` and HOLDs at +1. Claws still AGS-equivalent |
 
 ## 5. Canonical overhead
 

@@ -1,5 +1,7 @@
 package com.sun.java.fontmgr;
 
+import com.sun.java.fontmgr.combo.Combo;
+
 /**
  * OSRS melee max-hit estimates used for 1-tick KO and DH one-shot safety.
  * Ours are conservative (don't waste spec). Theirs are pessimistic (don't get sacked).
@@ -164,30 +166,7 @@ public final class MaxHitCalculator {
     }
 
     public static int strBonusForCombo(CombatScript.SpecWeapon combo) {
-        if (combo == null) return AGS_STR_BONUS;
-        switch (combo) {
-            case GMAUL:
-                return GMAUL_STR_BONUS;
-            case CLAWS_GMAUL:
-                // 4-hit spec total is not weapon-bonus * 1.375. Item 4 replaces
-                // this stand-in; keep the AGS-equivalent finish until then.
-                return AGS_STR_BONUS;
-            case STATIUS:
-            case STATIUS_GMAUL:
-                return STATIUS_STR_BONUS;
-            case DMACE:
-            case DMACE_GMAUL:
-                return DMACE_STR_BONUS;
-            case VLS:
-                return VLS_STR_BONUS;
-            case VOIDWAKER:
-            case VOIDWAKER_GMAUL:
-                return VOIDWAKER_STR_BONUS;
-            case DBOW_AXES:
-                return DBOW_STR_BONUS;
-            default:
-                return AGS_STR_BONUS;
-        }
+        return Combo.of(combo).strBonus;
     }
 
     public static int weaponStrBonus(int itemId, String name) {
