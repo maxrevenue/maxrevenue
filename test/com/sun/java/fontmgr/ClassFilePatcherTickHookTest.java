@@ -64,6 +64,43 @@ public class ClassFilePatcherTickHookTest {
     }
 
     /**
+     * The regression that motivated stopping at the first alias: a class with
+     * both {@code clientTick} and {@code graphicsTick} must be hooked exactly
+     * once. Hooking both pumps the guard twice per cycle and, when the two
+     * methods run on different threads, makes {@code markClientThread()}
+     * flip-flop so {@code assertClientThread()} stops meaning anything.
+     */
+    @Test
+    public void hooksOnlyTheFirstCycleAlias() {
+        byte[] out = HardcodedCombatAgent.TRANSFORMER.transform(
+                null, "com/roatpkz/client/game/engine/GameEngine", null, null,
+                syntheticEngineWithTwoAliases());
+        assertTrue(out != null && out.length > 0);
+        assertTrue(startsWithInvokeStatic(out, "clientTick", "()V",
+                        HOOKS, "onClientTick", "()V"),
+                "game-logic cycle must be hooked");
+        assertFalse(startsWithInvokeStatic(out, "graphicsTick", "()V",
+                        HOOKS, "onClientTick", "()V"),
+                "second alias must NOT be hooked (double pump / thread flip-flop)");
+    }
+
+    /** Engine exposing two cycle aliases; only the first must be hooked. */
+    private static byte[] syntheticEngineWithTwoAliases() {
+        ClassWriter cw = new ClassWriter(0);
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC | Opcodes.ACC_SUPER,
+                "com/roatpkz/client/game/engine/GameEngine", null, "java/lang/Object", null);
+        for (String name : new String[] {"clientTick", "graphicsTick"}) {
+            MethodVisitor mv = cw.visitMethod(Opcodes.ACC_PUBLIC, name, "()V", null, null);
+            mv.visitCode();
+            mv.visitInsn(Opcodes.RETURN);
+            mv.visitMaxs(0, 1);
+            mv.visitEnd();
+        }
+        cw.visitEnd();
+        return cw.toByteArray();
+    }
+
+    /**
      * Minimal classfile with a branched {@code clientTick} (or only {@code sentinel}).
      */
     private static byte[] syntheticEngine(boolean withClientTick) {
