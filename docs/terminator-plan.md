@@ -53,26 +53,32 @@ item 3.
 `CombatState` the HUD will read, calls `TickDecision.decide`, and acts:
 EAT → existing survive-eat, SPEC → `executeSpec`, HOLD → nothing. Scattered
 spec branches (outBigHit / oppSpec dump / ko / hardHit / `nhFireSpecFinish` /
-`tryAutoSpecDump`) no longer decide to spec. Goldens, including
-`TickDecisionParityTest` under `-Droatz.dryrun=true`, run through that path.
+`tryAutoSpecDump` / `tryEnqueueKillTickIfReady`) no longer decide to spec —
+the dump and kill-tick methods are deleted. `LiveDecisionConfigRoundTripTest`
+under `-Droatz.dryrun=true` checks `applyCfg` → `liveDecisionConfig()` and
+that `applyTickDecision` emits the `[DryRun] intent` line. Shared-function
+coverage with full `onTick` is the code sharing, not that test.
 
 **Window that actually shipped** (not yet the tight KO formula):
 
 - PK: `inKillRange && inActiveFight`, funded, not busy, not cooling.
-- NH: `targetHp ≤ nhSpecFinishHp` where the HP cap is
+- NH: Auto Gear **on**, `targetHp ≤ nhSpecFinishHp` where the HP cap is
   `max(nhKoHp, estimateSpecDamage(s.ourStr > 0 ? s.ourStr : cfg.ourStr))`
   clipped by `ourMaxHp` when readable; spec weapon carried; not on a mage staff.
+  Auto Gear **off** (default) closes the NH window — `ed2f83c`. `nhSpecFinishReady`
+  calls `TickDecision.killWindowOpen` / `nhSpecFinishHp` so the melee switch
+  cannot disagree with the arbiter.
 - Additional SPEC paths that still exist (known waste): fresh outgoing splat
   ≥ `damageTriggerMin` (`bighit`), fresh incoming splat ≥ that (`hardHit`).
 - Survive still wins: DH axe / opponent spec eat before any SPEC.
 
 | File | Change |
 |---|---|
-| `TickDecision.java` | Fidelity: fresh-splat, `inActiveFight`, hardHit, NH weapon/staff, `ourStr` |
+| `TickDecision.java` | Fidelity: fresh-splat, `inActiveFight`, hardHit, NH weapon/staff, `ourStr`, `nhAutoGear` |
 | `CombatScript.onTick` | Sole spec/eat arbiter; `captureCombatState` shared with publish |
 | `ReplayHarness.java` | `oneShotDeaths` latches per exposure; `windowsSuppressedBySurvival` |
-| `test/.../TickDecisionParityTest.java` | DryRun intent sequence == TickDecision sequence |
-| Goldens | Bighit waste still fires on a *fresh* splat; stale splat HOLDs; drained `ostr` shrinks the NH window |
+| `test/.../LiveDecisionConfigRoundTripTest.java` | Flag round-trip + DryRun intent line (not full onTick) |
+| Goldens | Bighit waste still fires on a *fresh* splat; stale splat HOLDs; drained `ostr` shrinks the NH window; Auto Gear off HOLDs in RANGE |
 
 Remainder of item 3 (later): window iff HP ≤ expectedMaxHit(best finish) with
 margin and overhead correct; spec waste outside a window → 0. That change

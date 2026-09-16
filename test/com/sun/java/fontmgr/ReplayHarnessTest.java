@@ -295,6 +295,37 @@ public class ReplayHarnessTest {
     }
 
     @Test
+    public void nhAutoGearOffHoldsInRangePhaseEvenWhenHpIsInFinishWindow() {
+        ReplayHarness.Config cfg = nhNoGear();
+        int finish = TickDecision.nhSpecFinishHp(cfg);
+        CombatState range = pk(32)
+                .targetHp(finish).specEnergy(100)
+                .nhV2Enabled(true).nhPhase("RANGE").nhFreezeTicksLeft(8)
+                .inActiveFight(true).hasSpecWeapon(true)
+                .mageStaffEquipped(false)
+                .build();
+        ReplayHarness.Report r = ReplayHarness.run(Arrays.asList(range), cfg);
+        assertEquals("HOLD:hold", r.actionSequence().get(0));
+        assertFalse(r.decisions.get(0).killWindowOpen,
+                "ed2f83c: Auto Gear off must not NH-finish / yank spec mid-range");
+    }
+
+    @Test
+    public void nhAutoGearOnSpecsInRangePhaseWhenHpIsInFinishWindow() {
+        ReplayHarness.Config cfg = nh();
+        int finish = TickDecision.nhSpecFinishHp(cfg);
+        CombatState range = pk(32)
+                .targetHp(finish).specEnergy(100)
+                .nhV2Enabled(true).nhPhase("RANGE").nhFreezeTicksLeft(8)
+                .inActiveFight(true).hasSpecWeapon(true)
+                .mageStaffEquipped(false)
+                .build();
+        ReplayHarness.Report r = ReplayHarness.run(Arrays.asList(range), cfg);
+        assertEquals("SPEC:kill-window", r.actionSequence().get(0));
+        assertTrue(r.decisions.get(0).killWindowOpen);
+    }
+
+    @Test
     public void nhFinishRequiresCarriedSpecWeapon() {
         ReplayHarness.Config cfg = nh();
         int finish = TickDecision.nhSpecFinishHp(cfg);
@@ -345,12 +376,21 @@ public class ReplayHarnessTest {
         return c;
     }
 
+    /** NH V2 with Auto Gear — the finish-enabled config. Production default is off. */
     private static ReplayHarness.Config nh() {
         ReplayHarness.Config c = new ReplayHarness.Config();
         c.nhV2 = true;
         c.nhAutoSpec = true;
+        c.nhAutoGear = true;
         c.autoSpec = true;
         c.autoEat = true;
+        return c;
+    }
+
+    /** Production defaults: NH Auto Spec on, Auto Gear off ({@code ed2f83c}). */
+    private static ReplayHarness.Config nhNoGear() {
+        ReplayHarness.Config c = nh();
+        c.nhAutoGear = false;
         return c;
     }
 
