@@ -29,6 +29,16 @@ public final class TickDecision {
         public int minSpecPct = 50;
         public int nhKoHp = 35;
         public int ourStr = 99;
+        /** Combo/worn strength bonus. {@code <= 0} uses {@link MaxHitCalculator#strBonusForCombo}. */
+        public int strBonus;
+        /**
+         * Strength-prayer multiplier. {@code <= 0} means no prayer (1.0), not piety.
+         * Harness PK/NH helpers set piety explicitly.
+         */
+        public double prayerMult = MaxHitCalculator.PIETY_STR;
+        public int stanceBonus = MaxHitCalculator.STANCE_AGGRESSIVE;
+        /** 1.0 = max hit. Lower tightens {@link TickDecision#expectedFinishHp}. */
+        public double accuracy = MaxHitCalculator.DEFAULT_ACCURACY;
         public int damageTriggerMin = 40;
         public boolean nhV2;
         public boolean nhAutoSpec;
@@ -171,27 +181,63 @@ public final class TickDecision {
 
     /** Same table as {@code CombatScript.estimateOurSpecDamage}. */
     public static int estimateSpecDamage(CombatScript.SpecWeapon combo, int boostedStr) {
+        return estimateSpecDamage(combo, boostedStr, 0, MaxHitCalculator.PIETY_STR,
+                MaxHitCalculator.STANCE_AGGRESSIVE);
+    }
+
+    public static int estimateSpecDamage(CombatScript.SpecWeapon combo, int boostedStr,
+                                         int strBonus, double prayerMult, int stanceBonus) {
         int str = boostedStr > 0 ? boostedStr : 99;
+        int bonus = strBonus > 0 ? strBonus : MaxHitCalculator.strBonusForCombo(combo);
+        double pray = prayerMult > 0 ? prayerMult : 1.0;
+        int stance = stanceBonus >= 0 ? stanceBonus : MaxHitCalculator.STANCE_AGGRESSIVE;
         if (combo == CombatScript.SpecWeapon.CLAWS_GMAUL) {
-            return MaxHitCalculator.agsSpecMaxHit(str);
+            return MaxHitCalculator.agsSpecMaxHit(str, bonus, pray, stance);
         }
         if (combo == CombatScript.SpecWeapon.VOIDWAKER
                 || combo == CombatScript.SpecWeapon.VOIDWAKER_GMAUL) {
-            return MaxHitCalculator.baseMaxHit(str, 100) + 15;
+            return MaxHitCalculator.baseMaxHit(str, bonus, pray, stance) + 15;
         }
         if (combo == CombatScript.SpecWeapon.DMACE
-                || combo == CombatScript.SpecWeapon.DMACE_GMAUL
-                || combo == CombatScript.SpecWeapon.STATIUS
+                || combo == CombatScript.SpecWeapon.DMACE_GMAUL) {
+            return MaxHitCalculator.specMaxHit(str, bonus, pray, stance,
+                    MaxHitCalculator.DMACE_SPEC_MULT);
+        }
+        if (combo == CombatScript.SpecWeapon.STATIUS
                 || combo == CombatScript.SpecWeapon.STATIUS_GMAUL) {
-            return MaxHitCalculator.statiusSpecMaxHit(str);
+            return MaxHitCalculator.specMaxHit(str, bonus, pray, stance,
+                    MaxHitCalculator.STATIUS_SPEC_MULT);
         }
         if (combo == CombatScript.SpecWeapon.DBOW_AXES) {
-            return MaxHitCalculator.baseMaxHit(str, 100) + MaxHitCalculator.THREAT_MARGIN;
+            return MaxHitCalculator.baseMaxHit(str, bonus, pray, stance)
+                    + MaxHitCalculator.THREAT_MARGIN;
         }
         if (combo == CombatScript.SpecWeapon.VLS) {
-            return MaxHitCalculator.baseMaxHit(str, 75) + 10;
+            return MaxHitCalculator.specMaxHit(str, bonus, pray, stance,
+                    MaxHitCalculator.VLS_SPEC_MULT);
         }
-        return MaxHitCalculator.agsSpecMaxHit(str);
+        if (combo == CombatScript.SpecWeapon.GMAUL) {
+            return MaxHitCalculator.gmaulSpecMaxHit(str, bonus, pray, stance);
+        }
+        return MaxHitCalculator.agsSpecMaxHit(str, bonus, pray, stance);
+    }
+
+    public static int estimateSpecDamage(CombatState s, Config cfg) {
+        if (cfg == null) cfg = new Config();
+        return estimateSpecDamage(cfg.combo, effectiveStr(s, cfg), cfg.strBonus,
+                cfg.prayerMult, cfg.stanceBonus);
+    }
+
+    public static int expectedFinishHp(CombatState s, Config cfg) {
+        if (cfg == null) cfg = new Config();
+        int spec = estimateSpecDamage(s, cfg);
+        int expected = MaxHitCalculator.expectedHit(spec, cfg.accuracy);
+        int cap = (s != null && s.ourMaxHp > 0) ? s.ourMaxHp : 99;
+        int floor = cfg.nhKoHp > 0 ? cfg.nhKoHp : 0;
+        if (cfg.nhV2 && cfg.nhAutoSpec) {
+            return Math.min(cap, Math.max(floor, expected > 0 ? expected : floor));
+        }
+        return Math.min(cap, expected);
     }
 
     /**
@@ -209,10 +255,7 @@ public final class TickDecision {
     }
 
     public static int nhSpecFinishHp(CombatState s, Config cfg) {
-        if (cfg == null) cfg = new Config();
-        int spec = estimateSpecDamage(cfg.combo, effectiveStr(s, cfg));
-        int cap = (s != null && s.ourMaxHp > 0) ? s.ourMaxHp : 99;
-        return Math.min(cap, Math.max(cfg.nhKoHp, spec > 0 ? spec : cfg.nhKoHp));
+        return expectedFinishHp(s, cfg);
     }
 
     public static boolean overheadWrong(CombatState s) {

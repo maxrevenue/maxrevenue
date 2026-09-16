@@ -1263,6 +1263,10 @@ public class CombatScript implements TickListener {
         c.nhKoHp = nhKoHp;
         c.ourStr = stateReader != null ? stateReader.getStrength() : 99;
         if (c.ourStr <= 0) c.ourStr = 99;
+        c.strBonus = liveStrBonus();
+        c.prayerMult = livePrayerMult();
+        c.stanceBonus = MaxHitCalculator.STANCE_AGGRESSIVE;
+        c.accuracy = MaxHitCalculator.DEFAULT_ACCURACY;
         c.damageTriggerMin = damageTriggerMin;
         c.nhV2 = nhV2Enabled;
         c.nhAutoSpec = nhAutoSpec;
@@ -1960,31 +1964,19 @@ public class CombatScript implements TickListener {
 
         WeaponRef axe = findGreataxe();
         WeaponRef ags = findWeapon(false);
-        int dhHit = axe != null ? MaxHitCalculator.dharokMaxHit(str, ourHp, ourMax) : 0;
-        int agsHit = ags != null ? agsMaxHit : 0;
-        estimatedOurMaxHit = Math.max(dhHit, agsHit);
+        int dhHit = axe != null
+                ? MaxHitCalculator.dharokMaxHit(str, ourHp, ourMax,
+                    MaxHitCalculator.DH_AXE_STR_BONUS, livePrayerMult(),
+                    MaxHitCalculator.STANCE_AGGRESSIVE)
+                : 0;
+        int specHit = ags != null || nhSpecWeapon() != null ? estimateOurSpecDamage() : 0;
+        estimatedOurMaxHit = Math.max(dhHit, specHit);
         if (dharokEnabled) {
             wouldDhKoIfStacked();
         } else {
             inKillRange = targetHp > 0 && estimatedOurMaxHit >= targetHp;
         }
         inDhDanger = opponentIsDh && ourHp > 0 && ourHp <= estimatedOppDhHit;
-    }
-
-    /**
-     * Stay stacked. Wield greataxe → one attack at current HP → combo eat →
-     * whip + tank next tick. Super combat is left to the player.
-     */
-    private void executeDhAxeThenHeal(WeaponRef axe) {
-        if (axe == null) return;
-        int hp = readLocalHp();
-        int maxHp = stateReader != null ? stateReader.getMaxHp() : 99;
-        int targetHp = Math.max(1, (maxHp * dharokTargetHpPct) / 100);
-        if (hp > targetHp + 8) {
-            lastAction = "DH_WAIT_STACK@" + currentTick;
-            return;
-        }
-        tryOdablockDhAxe();
     }
 
     /** Next tick: restore fang/whip + dragon defender after an offensive swap. */
@@ -6986,23 +6978,28 @@ public class CombatScript implements TickListener {
     }
 
     private int estimateOurSpecDamage() {
+        return TickDecision.estimateSpecDamage(comboSpec(), liveStr(), liveStrBonus(),
+                livePrayerMult(), MaxHitCalculator.STANCE_AGGRESSIVE);
+    }
+
+    private int liveStr() {
         int str = stateReader != null ? stateReader.getStrength() : 99;
-        if (isClawsCombo()) {
-            return MaxHitCalculator.agsSpecMaxHit(str);
+        return str > 0 ? str : 99;
+    }
+
+    private double livePrayerMult() {
+        return stateReader != null
+                ? stateReader.strengthPrayerMultiplier()
+                : MaxHitCalculator.PIETY_STR;
+    }
+
+    private int liveStrBonus() {
+        WeaponRef w = nhSpecWeapon();
+        if (w != null && w.equipped) {
+            int worn = MaxHitCalculator.weaponStrBonus(w.itemId, w.name);
+            if (worn > 0) return worn;
         }
-        if (isVoidwakerCombo()) {
-            return MaxHitCalculator.baseMaxHit(str, 100) + 15;
-        }
-        if (isStatiusCombo()) {
-            return MaxHitCalculator.statiusSpecMaxHit(str);
-        }
-        if (isDbowCombo()) {
-            return MaxHitCalculator.baseMaxHit(str, 100) + MaxHitCalculator.THREAT_MARGIN;
-        }
-        if (isVlsCombo()) {
-            return MaxHitCalculator.baseMaxHit(str, 75) + 10;
-        }
-        return MaxHitCalculator.agsSpecMaxHit(str);
+        return MaxHitCalculator.strBonusForCombo(comboSpec());
     }
     
     private boolean isUnderTarget(Object target) {
