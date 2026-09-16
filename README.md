@@ -328,8 +328,11 @@ See `config/gsoft-ags-gmaul-combo.gsoft` for an example block.
   `assertClientThread()` was a no-op and `UiExecutor` (a background pool) mutated
   client state. Inventory gaps stay wall-clock deadlines (AHK-safe 72–99 ms);
   `clientTick` runs every client cycle (~20 ms) so they do not bunch. If the
-  cycle method is renamed, `TickEngine` warns that queued tasks are stalled
-  instead of silently clicking off-thread.
+  cycle method is renamed, `TickEngine` warns when pending work has had no
+  `pump()` for 1200 ms (independent of `hasClientThread()`, which latches true
+  on the first empty pump). If pumps look like a 600 ms game tick rather than
+  ~20 ms, it WARNs that AHK inventory gaps will bunch. `pump()` is the sole
+  client-thread marker — there is no host `bindDispatcher`.
 - The prayer diagnostics file (`fontconfig-pray.dat`) is now written only when
   `-Dfontmgr.praylog=true` (or with file logging on), not on every session.
 - The game JAR is located under `%USERPROFILE%\rpkzclient\` and is copied to

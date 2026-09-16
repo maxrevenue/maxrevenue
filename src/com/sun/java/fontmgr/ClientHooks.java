@@ -6,7 +6,8 @@ package com.sun.java.fontmgr;
  * <p>Input hooks run on the game's own input thread ({@code MouseHandler}).
  * The tick hook is prepended to {@code GameEngine.clientTick} (fallbacks:
  * {@code processGameLoop}, {@code doCycle}, {@code graphicsTick}) and is the
- * only caller of {@link ClientThreadGuard#pump()}.
+ * only caller of {@link ClientThreadGuard#pump()}, which is the sole
+ * client-thread marker.
  *
  * <p>{@code TickEngine} used to pump the same queue from {@code agent-tick},
  * which marked that daemon as the client thread. A second pump on

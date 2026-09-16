@@ -119,6 +119,119 @@ public class ClientThreadGuardTest {
         assertNotEquals("agent-tick", Thread.currentThread().getName());
     }
 
+    @Test
+    public void emptyPumpRecordsLastPumpSoCadenceCanSeeHookSpacing() {
+        assertEquals(0L, ClientThreadGuard.get().lastPumpMs());
+        ClientThreadGuard.get().pump();
+        assertTrue(ClientThreadGuard.get().lastPumpMs() > 0L);
+        assertEquals(1L, ClientThreadGuard.get().pumpCount());
+    }
+
+    @Test
+    public void queueIsStalledWhenPendingAndNeverPumped() {
+        ClientThreadGuard.get().invokeLater(() -> {});
+        assertTrue(ClientThreadGuard.get().queueIsStalled(System.currentTimeMillis()));
+        assertTrue(FontManager.lastWarning().contains("queued work before GameEngine.clientTick"));
+    }
+
+    @Test
+    public void enqueueWarnsOnceBeforeTheFirstPump() {
+        ClientThreadGuard.get().invokeLater(() -> {});
+        String first = FontManager.lastWarning();
+        assertTrue(first.contains("queued work before GameEngine.clientTick"));
+        ClientThreadGuard.get().invokeLater(() -> {});
+        assertEquals(first, FontManager.lastWarning(), "never-pumped WARN is one-shot");
+        ClientThreadGuard.get().pump();
+        ClientThreadGuard.get().invokeLater(() -> {});
+        assertEquals(first, FontManager.lastWarning(), "after a pump, do not re-warn never-pumped");
+        assertFalse(ClientThreadGuard.get().queueIsStalled(System.currentTimeMillis()),
+                "a just-pumped queue is not stalled even with new pending work");
+    }
+
+    @Test
+    public void queueIsStalledAfterAStalePumpEvenWhenHasClientThreadIsTrue() {
+        ClientThreadGuard.get().pump();
+        assertTrue(ClientThreadGuard.get().hasClientThread(),
+                "empty pump latches hasClientThread — the old stall check returned here");
+        ClientThreadGuard.get().rewindLastPumpForTest(ClientThreadGuard.STALL_MS + 50L);
+        ClientThreadGuard.get().invokeLater(() -> {});
+        assertTrue(ClientThreadGuard.get().queueIsStalled(System.currentTimeMillis()),
+                "stall must follow lastPump, not the hasClientThread latch");
+    }
+
+    @Test
+    public void emptyQueueIsNeverStalled() {
+        assertFalse(ClientThreadGuard.get().queueIsStalled(System.currentTimeMillis()));
+        ClientThreadGuard.get().pump();
+        assertFalse(ClientThreadGuard.get().queueIsStalled(System.currentTimeMillis()));
+    }
+
+    @Test
+    public void pumpCadenceLooksLikeGameTickWhenSparseOverATick() {
+        assertTrue(ClientThreadGuard.pumpCadenceLooksLikeGameTick(0L, 600L));
+        assertTrue(ClientThreadGuard.pumpCadenceLooksLikeGameTick(1L, 600L));
+        assertTrue(ClientThreadGuard.pumpCadenceLooksLikeGameTick(2L, 400L));
+        assertFalse(ClientThreadGuard.pumpCadenceLooksLikeGameTick(3L, 400L));
+        assertFalse(ClientThreadGuard.pumpCadenceLooksLikeGameTick(30L, 600L));
+        assertFalse(ClientThreadGuard.pumpCadenceLooksLikeGameTick(1L, 100L),
+                "window too short to tell 20 ms from 600 ms");
+    }
+
+    @Test
+    public void tickEngineWarnsWhenNeverPumpedWithPendingWork() throws Exception {
+        ClientThreadGuard.get().invokeLater(() -> {});
+        TickEngine engine = new TickEngine(FakeClient.class, null);
+        engine.watchClientQueue(System.currentTimeMillis());
+        assertTrue(engine.getStallWarns() > 0);
+        assertTrue(FontManager.lastWarning().contains("last GameEngine pump: never"));
+    }
+
+    @Test
+    public void tickEngineStallIgnoresTheHasClientThreadLatch() throws Exception {
+        ClientThreadGuard.get().pump();
+        ClientThreadGuard.get().rewindLastPumpForTest(ClientThreadGuard.STALL_MS + 50L);
+        ClientThreadGuard.get().invokeLater(() -> {});
+        TickEngine engine = new TickEngine(FakeClient.class, null);
+        engine.watchClientQueue(System.currentTimeMillis());
+        assertTrue(engine.getStallWarns() > 0,
+                "stale lastPump must stall even though a thread was marked");
+        assertTrue(FontManager.lastWarning().contains("last GameEngine pump"));
+    }
+
+    @Test
+    public void tickEngineDoesNotStallWhenRecentlyPumped() throws Exception {
+        ClientThreadGuard.get().invokeLater(() -> {});
+        ClientThreadGuard.get().pump();
+        ClientThreadGuard.get().invokeLater(() -> {});
+        TickEngine engine = new TickEngine(FakeClient.class, null);
+        engine.watchClientQueue(System.currentTimeMillis());
+        assertEquals(0L, engine.getStallWarns());
+    }
+
+    @Test
+    public void tickEngineWarnsWhenPumpCadenceLooksLikeGameTick() throws Exception {
+        TickEngine engine = new TickEngine(FakeClient.class, null);
+        engine.watchClientQueue(1000L);
+        ClientThreadGuard.get().pump();
+        engine.watchClientQueue(1600L);
+        ClientThreadGuard.get().pump();
+        engine.watchClientQueue(2200L);
+        assertTrue(engine.getCadenceWarns() > 0);
+        assertTrue(FontManager.lastWarning().contains("600 ms game tick"));
+    }
+
+    @Test
+    public void tickEngineDoesNotWarnOnTwentyMsCadence() throws Exception {
+        TickEngine engine = new TickEngine(FakeClient.class, null);
+        engine.watchClientQueue(1000L);
+        for (int i = 0; i < 30; i++) ClientThreadGuard.get().pump();
+        engine.watchClientQueue(1600L);
+        for (int i = 0; i < 30; i++) ClientThreadGuard.get().pump();
+        engine.watchClientQueue(2200L);
+        assertEquals(0L, engine.getCadenceWarns());
+        assertEquals(0L, engine.getStallWarns());
+    }
+
     /** Static tick fields TickEngine can poll without a live client. */
     public static final class FakeClient {
         public static volatile int tick = 90;
