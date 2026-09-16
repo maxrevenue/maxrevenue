@@ -12,8 +12,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Golden decision sequences. Would fail if survive lost priority to spec, if
- * an unfunded kill range converted, or if the big-hit waste path disappeared
- * before item 3 closes it on purpose.
+ * an unfunded kill range converted, or if a spec fired outside the
+ * expectedMaxHit window.
  */
 public class ReplayHarnessTest {
 
@@ -47,9 +47,10 @@ public class ReplayHarnessTest {
     @Test
     public void agsGmaulWindowConverts() {
         ReplayHarness.Config cfg = pkCfg();
+        int finish = TickDecision.expectedFinishHp(null, cfg);
         CombatState s = pk(10)
-                .targetHp(70).inKillRange(true).specEnergy(100)
-                .estimatedOurMaxHit(77).inActiveFight(true)
+                .targetHp(finish).specEnergy(100)
+                .inActiveFight(true)
                 .build();
         ReplayHarness.Report r = ReplayHarness.run(Arrays.asList(s), cfg);
         assertEquals("SPEC:kill-window", r.actionSequence().get(0));
@@ -63,8 +64,9 @@ public class ReplayHarnessTest {
     public void clawsGmaulUsesTheSameKillWindowRule() {
         ReplayHarness.Config cfg = pkCfg();
         cfg.combo = CombatScript.SpecWeapon.CLAWS_GMAUL;
+        int finish = TickDecision.expectedFinishHp(null, cfg);
         CombatState s = pk(10)
-                .targetHp(60).inKillRange(true).specEnergy(50)
+                .targetHp(finish).specEnergy(50)
                 .inActiveFight(true)
                 .build();
         ReplayHarness.Report r = ReplayHarness.run(Arrays.asList(s), cfg);
@@ -146,25 +148,26 @@ public class ReplayHarnessTest {
     }
 
     @Test
-    public void bigHitStillSpecsOutsideTheKillWindow_currentWaste() {
+    public void bigHitOutsideTheWindowHolds_wasteClosed() {
         ReplayHarness.Config cfg = pkCfg();
         CombatState s = pk(12)
-                .targetHp(90).inKillRange(false).specEnergy(100)
+                .targetHp(90).specEnergy(100)
                 .lastHitsplatDmg(50).inActiveFight(true)
                 .hitsplatChangeTick(12)
                 .agsSpecTick(-99)
                 .build();
         ReplayHarness.Report r = ReplayHarness.run(Arrays.asList(s), cfg);
-        assertEquals("SPEC:bighit", r.actionSequence().get(0));
-        assertEquals(1, r.metrics.specsOutsideWindow);
+        assertEquals("HOLD:hold", r.actionSequence().get(0));
+        assertEquals(0, r.metrics.specsOutsideWindow);
         assertEquals(0, r.metrics.killWindowsEntered);
     }
 
     @Test
     public void unfundedKillRangeIsAMissedWindow() {
         ReplayHarness.Config cfg = pkCfg();
+        int finish = TickDecision.expectedFinishHp(null, cfg);
         CombatState s = pk(3)
-                .targetHp(40).inKillRange(true).specEnergy(0)
+                .targetHp(finish).specEnergy(0)
                 .inActiveFight(true)
                 .build();
         ReplayHarness.Report r = ReplayHarness.run(Arrays.asList(s), cfg);
@@ -191,10 +194,10 @@ public class ReplayHarnessTest {
     public void tsvRoundTripFeedsTheHarness() {
         String tsv = ""
                 + "tick\tseq\ttgt\tthp\ttmax\tspec\tokill\todh\towpn\tostyle\toh\tanim\ttanim\tdefpray\taction\n"
-                + "10\t1\tpker\t70\t99\t100\t1\t0\t11802\tMELEE\tMELEE\t-1\t-1\t\tAGS\n";
+                + "10\t1\tpker\t55\t99\t100\t1\t0\t11802\tMELEE\tMELEE\t-1\t-1\t\tAGS\n";
         List<CombatState> ticks = TickTsv.parse(tsv);
         assertEquals(1, ticks.size());
-        assertEquals(70, ticks.get(0).targetHp);
+        assertEquals(55, ticks.get(0).targetHp);
         assertTrue(ticks.get(0).inKillRange);
         ReplayHarness.Report r = ReplayHarness.run(ticks, pkCfg());
         assertEquals(TickDecision.Intent.SPEC, r.decisions.get(0).intent);
@@ -247,16 +250,48 @@ public class ReplayHarnessTest {
     }
 
     @Test
-    public void hardHitSpecsOutsideTheKillWindow_currentWaste() {
+    public void hardHitOutsideTheWindowHolds_wasteClosed() {
         ReplayHarness.Config cfg = pkCfg();
         CombatState s = pk(12)
-                .targetHp(90).inKillRange(false).specEnergy(100)
+                .targetHp(90).specEnergy(100)
                 .lastIncomingDmg(50).incomingChangeTick(12)
                 .inActiveFight(true)
                 .build();
         ReplayHarness.Report r = ReplayHarness.run(Arrays.asList(s), cfg);
-        assertEquals("SPEC:hardHit", r.actionSequence().get(0));
-        assertEquals(1, r.metrics.specsOutsideWindow);
+        assertEquals("HOLD:hold", r.actionSequence().get(0));
+        assertEquals(0, r.metrics.specsOutsideWindow);
+    }
+
+    @Test
+    public void wrongOverheadClosesTheKillWindow() {
+        ReplayHarness.Config cfg = pkCfg();
+        int finish = TickDecision.expectedFinishHp(null, cfg);
+        CombatState s = pk(10)
+                .opponentLoadout(TickTsv.loadout(1, "MELEE", false))
+                .ourOverhead("MAGIC")
+                .targetHp(finish).specEnergy(100)
+                .inActiveFight(true)
+                .build();
+        ReplayHarness.Report r = ReplayHarness.run(Arrays.asList(s), cfg);
+        assertTrue(r.decisions.get(0).overheadWrong);
+        assertEquals("HOLD:hold", r.actionSequence().get(0));
+        assertFalse(r.decisions.get(0).killWindowOpen);
+    }
+
+    @Test
+    public void nhAutoGearOffSpecsWhenSpecWeaponAlreadyWorn() {
+        ReplayHarness.Config cfg = nhNoGear();
+        int finish = TickDecision.nhSpecFinishHp(cfg);
+        CombatState melee = pk(32)
+                .targetHp(finish).specEnergy(100)
+                .nhV2Enabled(true).nhPhase("MELEE").nhFreezeTicksLeft(8)
+                .inActiveFight(true).hasSpecWeapon(true)
+                .specWeaponEquipped(true)
+                .mageStaffEquipped(false)
+                .build();
+        ReplayHarness.Report r = ReplayHarness.run(Arrays.asList(melee), cfg);
+        assertEquals("SPEC:kill-window", r.actionSequence().get(0));
+        assertTrue(r.decisions.get(0).killWindowOpen);
     }
 
     @Test
@@ -292,6 +327,23 @@ public class ReplayHarnessTest {
                 ReplayHarness.run(Arrays.asList(inMaxedOnly), cfg).decisions.get(0).intent);
         assertEquals("SPEC:kill-window",
                 ReplayHarness.run(Arrays.asList(stillInMaxed), cfg).actionSequence().get(0));
+    }
+
+    @Test
+    public void accuracyBelowOneTightensThePkWindow() {
+        ReplayHarness.Config cfg = pkCfg();
+        cfg.accuracy = 0.5;
+        int full = TickDecision.estimateSpecDamage(null, cfg);
+        int expected = TickDecision.expectedFinishHp(null, cfg);
+        assertTrue(expected < full);
+        CombatState over = pk(10)
+                .targetHp(full).specEnergy(100).inActiveFight(true)
+                .build();
+        CombatState in = pk(10)
+                .targetHp(expected).specEnergy(100).inActiveFight(true)
+                .build();
+        assertEquals("HOLD:hold", ReplayHarness.run(Arrays.asList(over), cfg).actionSequence().get(0));
+        assertEquals("SPEC:kill-window", ReplayHarness.run(Arrays.asList(in), cfg).actionSequence().get(0));
     }
 
     @Test
@@ -360,8 +412,9 @@ public class ReplayHarnessTest {
     @Test
     public void pkKillWindowRequiresActiveFight() {
         ReplayHarness.Config cfg = pkCfg();
+        int finish = TickDecision.expectedFinishHp(null, cfg);
         CombatState s = pk(10)
-                .targetHp(40).inKillRange(true).specEnergy(100)
+                .targetHp(finish).specEnergy(100)
                 .inActiveFight(false)
                 .build();
         ReplayHarness.Report r = ReplayHarness.run(Arrays.asList(s), cfg);

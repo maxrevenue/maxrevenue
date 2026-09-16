@@ -1230,6 +1230,7 @@ public class CombatScript implements TickListener {
                 .specSequenceBusy(isSpecSequenceBusy())
                 .mageStaffEquipped(isMageStaffEquipped())
                 .hasSpecWeapon(nhSpecWeapon() != null)
+                .specWeaponEquipped(specWeaponCurrentlyEquipped())
                 .specEnergy(specEnergy)
                 .ourHp(readLocalHp())
                 .ourMaxHp(stateReader != null ? stateReader.getMaxHp() : -1)
@@ -1305,16 +1306,10 @@ public class CombatScript implements TickListener {
             case SPEC:
                 lastHeadlessSpecTick = tick;
                 if (d.combo != null) selectedSpec = d.combo;
-                if ("bighit".equals(d.reason)) {
-                    forceGmaulFollow = false;
-                    lastAction = "BIGHIT_SPEC@" + tick + " hit=" + lastHitsplatDmg;
-                } else if ("opp-spec".equals(d.reason)) {
+                if ("opp-spec".equals(d.reason)) {
                     lastConsumedSpecAnim = lastTargetAnim;
                     forceGmaulFollow = true;
                     lastAction = "COUNTER_SPEC@" + tick;
-                } else if ("hardHit".equals(d.reason)) {
-                    forceGmaulFollow = true;
-                    lastAction = "HARDHIT_SPEC@" + tick;
                 } else {
                     forceGmaulFollow = true;
                     lastAction = (nhV2Enabled ? "NH_SPEC@" : "KO_SPEC@") + tick
@@ -6975,6 +6970,11 @@ public class CombatScript implements TickListener {
         if (wpn.contains("bow") || wpn.contains("ballista") || wpn.contains("blowpipe")) return 100;
         if (wpn.contains("staff") || wpn.contains("wand")) return 0;
         return 80;
+    }
+
+    private boolean specWeaponCurrentlyEquipped() {
+        WeaponRef w = nhSpecWeapon();
+        return w != null && w.equipped;
     }
 
     private int estimateOurSpecDamage() {

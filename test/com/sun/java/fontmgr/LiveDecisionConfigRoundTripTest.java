@@ -43,8 +43,8 @@ public class LiveDecisionConfigRoundTripTest {
     }
 
     @Test
-    public void applyCfgRoundTripsBighitWaste() throws Exception {
-        assertRoundTrip(Arrays.asList(bighit()), pkCfg());
+    public void applyCfgRoundTripsOutsideWindowHold() throws Exception {
+        assertRoundTrip(Arrays.asList(outsideWindow()), pkCfg());
     }
 
     @Test
@@ -238,13 +238,15 @@ public class LiveDecisionConfigRoundTripTest {
     }
 
     private static CombatState agsWindow() {
+        ReplayHarness.Config cfg = pkCfg();
+        int finish = TickDecision.expectedFinishHp(null, cfg);
         return pk(10)
-                .targetHp(70).inKillRange(true).specEnergy(100)
-                .estimatedOurMaxHit(77).inActiveFight(true)
+                .targetHp(finish).specEnergy(100)
+                .inActiveFight(true)
                 .build();
     }
 
-    private static CombatState bighit() {
+    private static CombatState outsideWindow() {
         return pk(12)
                 .targetHp(90).inKillRange(false).specEnergy(100)
                 .lastHitsplatDmg(50).inActiveFight(true)

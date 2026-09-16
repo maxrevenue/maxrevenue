@@ -622,7 +622,7 @@ public class OverlayUI {
         addNhToggle(grid, "Auto Barrage", script.actions().nhAutoBarrageEnabled(),  "Auto-cast Ice Barrage at the freeze window", script.actions()::setNhAutoBarrage);
         addNhToggle(grid, "Auto Gear",    script.actions().nhAutoGearEnabled(),     "Auto mage to range to melee gear swaps", script.actions()::setNhAutoGear);
         addNhToggle(grid, "Auto Attack",  script.actions().nhAutoAttack(),          "Re-attack after each gear swap", script.actions()::setNhAutoAttack);
-        addNhToggle(grid, "Auto Spec",    script.actions().nhAutoSpec(),            "Spec finish when the target is in range", script.actions()::setNhAutoSpec);
+        addNhToggle(grid, "Auto Spec",    script.actions().nhAutoSpec(),            "Spec finish when the target is in KO range. Needs Auto Gear, or the spec weapon already equipped (no yank).", script.actions()::setNhAutoSpec);
         addNhToggle(grid, "Walk-Under",   script.actions().nhAutoWalkUnderEnabled(), "Walk under while frozen / low HP", script.actions()::setNhAutoWalkUnder);
         addNhToggle(grid, "Protect Item", script.actions().protectItemEnabled(),     "Auto Protect Item in PvP", script.actions()::setProtectItem);
         page.add(grid);

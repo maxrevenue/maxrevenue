@@ -6,10 +6,10 @@ package com.sun.java.fontmgr;
  * {@link ReplayHarness} runs the same function, so goldens describe the
  * shipped bot rather than a parallel model.
  *
- * <p>Extracted from {@link CombatScript#onTick} / {@code nhFireSpecFinish} /
- * {@code tryEatOffOpponentSpec} as they exist today — including spec-on-big-hit
- * waste (fresh splat only). Item 3 will tighten the window; these tests are
- * the before.
+ * <p>The kill window is {@code targetHp <= expectedMaxHit(best finish)}
+ * with overhead correct, weapon carried, and (for NH) Auto Gear or the
+ * spec weapon already worn. Big-hit / hardHit dumps outside that window
+ * are gone — spec waste is 0.
  *
  * <p>Does not mutate client state and does not send packets.
  */
@@ -44,9 +44,10 @@ public final class TickDecision {
         public boolean nhAutoSpec;
         /**
          * NH mage→range→melee swaps. Default {@code false} matches
-         * {@link CombatScript#nhAutoGearEnabled}. The NH kill window is
-         * gated on this so Auto Spec cannot yank gear while Auto Gear is off
-         * ({@code ed2f83c}).
+         * {@link CombatScript#nhAutoGearEnabled}. The NH kill window requires
+         * this <em>or</em> {@link CombatState#specWeaponEquipped} so Auto Spec
+         * cannot yank gear while Auto Gear is off ({@code ed2f83c}) but still
+         * finishes when the spec weapon is already worn.
          */
         public boolean nhAutoGear;
         public boolean autoSpec = true;
@@ -56,7 +57,7 @@ public final class TickDecision {
     }
 
     public final Intent intent;
-    /** Stable token: {@code dh-axe}, {@code opp-spec}, {@code kill-window}, {@code hardHit}, {@code bighit}, {@code hold}. */
+    /** Stable token: {@code dh-axe}, {@code opp-spec}, {@code kill-window}, {@code hold}. */
     public final String reason;
     public final boolean killWindowOpen;
     public final boolean overheadWrong;
@@ -81,8 +82,7 @@ public final class TickDecision {
 
     /**
      * Mutable across a replay so cooldown / eaten-anim / consumed-spec match
-     * live onTick. Freshness of the splat itself lives on {@link CombatState}
-     * ({@code hitsplatChangeTick} / {@code incomingChangeTick}).
+     * live onTick.
      */
     static final class Session {
         int lastSpecTick = -99;
@@ -118,7 +118,6 @@ public final class TickDecision {
         boolean cooling = s.tick - session.lastSpecTick <= SPEC_COOLDOWN;
         boolean busy = s.specSequenceBusy;
         boolean specEnabled = cfg.autoSpec || (cfg.nhV2 && cfg.nhAutoSpec);
-        int trigger = Math.max(1, cfg.damageTriggerMin);
 
         // Counter-spec dump. Immediate (no Humanizer jitter). Survive already ran.
         if (cfg.counterSpec && specEnabled && funded && !cooling && !busy
@@ -134,49 +133,28 @@ public final class TickDecision {
             return new TickDecision(Intent.SPEC, "kill-window", window, wrongOh, oneShot, combo);
         }
 
-        // Incoming splat ≥ damageTriggerMin this tick (live hardHit).
-        boolean hardHit = s.incomingChangeTick == s.tick && s.lastIncomingDmg >= trigger;
-        if (cfg.autoSpec && s.inActiveFight && hardHit && funded && !cooling && !busy) {
-            session.lastSpecTick = s.tick;
-            return new TickDecision(Intent.SPEC, "hardHit", window, wrongOh, oneShot, combo);
-        }
-
-        // Outgoing splat ≥ trigger THIS tick, not a held reading. Matches
-        // CombatScript outBigHit (fresh splat, agsSpecTick>6, not our spec anim).
-        boolean bighit = cfg.autoSpec
-                && hasCombatTarget(s)
-                && s.inActiveFight
-                && s.hitsplatChangeTick == s.tick
-                && s.lastHitsplatDmg >= trigger
-                && !busy
-                && funded
-                && !cooling
-                && (s.tick - s.agsSpecTick > 6)
-                && !AnimationDb.isSpecAnimation(s.lastAnimSeen);
-        if (bighit) {
-            session.lastSpecTick = s.tick;
-            return new TickDecision(Intent.SPEC, "bighit", window, wrongOh, oneShot, combo);
-        }
-
         return new TickDecision(Intent.HOLD, "hold", window, wrongOh, oneShot, combo);
     }
 
     /**
-     * PK: published {@link CombatState#inKillRange} while
-     * {@link CombatState#inActiveFight}. NH finish: Auto Gear on, target HP
-     * at or below {@link #nhSpecFinishHp(CombatState, Config)}, spec weapon
-     * carried, not on a mage staff. Auto Gear off closes the NH window —
-     * the spec used to fire only from {@code runNhTick}'s melee-commit
-     * branch, which is gated on {@code nhAutoGearEnabled} ({@code ed2f83c}).
+     * Window iff HP ≤ {@link #expectedFinishHp} (live max hit of the best
+     * finish, times accuracy), in an active fight, overhead correct, spec
+     * weapon carried. NH additionally requires Auto Gear <em>or</em> the spec
+     * weapon already worn (no yank), and not a mage staff.
      */
     public static boolean killWindowOpen(CombatState s, Config cfg) {
         if (s == null || s.targetHp <= 0) return false;
-        if (cfg != null && cfg.nhV2 && cfg.nhAutoSpec) {
-            if (!cfg.nhAutoGear) return false;
+        if (!s.inActiveFight) return false;
+        if (overheadWrong(s)) return false;
+        if (cfg == null) cfg = new Config();
+        if (cfg.nhV2 && cfg.nhAutoSpec) {
+            boolean canFinish = cfg.nhAutoGear || s.specWeaponEquipped;
+            if (!canFinish) return false;
             if (s.mageStaffEquipped || !s.hasSpecWeapon) return false;
-            return s.targetHp <= nhSpecFinishHp(s, cfg);
+            return s.targetHp <= expectedFinishHp(s, cfg);
         }
-        return s.inKillRange && s.inActiveFight;
+        if (!s.hasSpecWeapon) return false;
+        return s.targetHp <= expectedFinishHp(s, cfg);
     }
 
     /** Same table as {@code CombatScript.estimateOurSpecDamage}. */
@@ -262,10 +240,6 @@ public final class TickDecision {
         AnimationDb.AttackStyle expected = s.opponentWeaponStyle();
         if (expected == AnimationDb.AttackStyle.UNKNOWN) return false;
         return !expected.name().equals(s.ourOverhead);
-    }
-
-    private static boolean hasCombatTarget(CombatState s) {
-        return s.targetName != null && !s.targetName.isEmpty();
     }
 
     private static boolean shouldEatOffOpponentSpec(CombatState s, Session session) {

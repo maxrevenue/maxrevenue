@@ -46,7 +46,7 @@ public final class TickRecorder {
         "tick", "seq", "tgt", "thp", "tmax", "spec", "okill", "odh",
         "owpn", "ostyle", "oh", "anim", "tanim", "defpray", "action",
         "ohp", "omax", "ostr", "ourhit", "opphit", "dhdanger", "nhphase", "freeze", "nhv2",
-        "splatTick", "inTick", "agsTick", "busy", "staff", "specwpn"
+        "splatTick", "inTick", "agsTick", "busy", "staff", "specwpn", "specworn"
     };
 
     private static final TickRecorder DISABLED = new TickRecorder(null);
@@ -205,7 +205,8 @@ public final class TickRecorder {
           .append(s.agsSpecTick).append('\t')
           .append(s.specSequenceBusy ? 1 : 0).append('\t')
           .append(s.mageStaffEquipped ? 1 : 0).append('\t')
-          .append(s.hasSpecWeapon ? 1 : 0);
+          .append(s.hasSpecWeapon ? 1 : 0).append('\t')
+          .append(s.specWeaponEquipped ? 1 : 0);
         return sb.toString();
     }
 
