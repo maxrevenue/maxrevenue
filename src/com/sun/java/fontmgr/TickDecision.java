@@ -1,5 +1,7 @@
 package com.sun.java.fontmgr;
 
+import com.sun.java.fontmgr.combo.Combo;
+
 /**
  * Current combat decision rules, evaluated against an immutable
  * {@link CombatState}. {@link CombatScript#onTick} consults this and
@@ -157,7 +159,7 @@ public final class TickDecision {
         return s.targetHp <= expectedFinishHp(s, cfg);
     }
 
-    /** Same table as {@code CombatScript.estimateOurSpecDamage}. */
+    /** Same table as {@code Combo.specMaxHit} / {@code CombatScript.estimateOurSpecDamage}. */
     public static int estimateSpecDamage(CombatScript.SpecWeapon combo, int boostedStr) {
         return estimateSpecDamage(combo, boostedStr, 0, MaxHitCalculator.PIETY_STR,
                 MaxHitCalculator.STANCE_AGGRESSIVE);
@@ -165,39 +167,8 @@ public final class TickDecision {
 
     public static int estimateSpecDamage(CombatScript.SpecWeapon combo, int boostedStr,
                                          int strBonus, double prayerMult, int stanceBonus) {
-        int str = boostedStr > 0 ? boostedStr : 99;
-        int bonus = strBonus > 0 ? strBonus : MaxHitCalculator.strBonusForCombo(combo);
-        double pray = prayerMult > 0 ? prayerMult : 1.0;
-        int stance = stanceBonus >= 0 ? stanceBonus : MaxHitCalculator.STANCE_AGGRESSIVE;
-        if (combo == CombatScript.SpecWeapon.CLAWS_GMAUL) {
-            return MaxHitCalculator.agsSpecMaxHit(str, bonus, pray, stance);
-        }
-        if (combo == CombatScript.SpecWeapon.VOIDWAKER
-                || combo == CombatScript.SpecWeapon.VOIDWAKER_GMAUL) {
-            return MaxHitCalculator.baseMaxHit(str, bonus, pray, stance) + 15;
-        }
-        if (combo == CombatScript.SpecWeapon.DMACE
-                || combo == CombatScript.SpecWeapon.DMACE_GMAUL) {
-            return MaxHitCalculator.specMaxHit(str, bonus, pray, stance,
-                    MaxHitCalculator.DMACE_SPEC_MULT);
-        }
-        if (combo == CombatScript.SpecWeapon.STATIUS
-                || combo == CombatScript.SpecWeapon.STATIUS_GMAUL) {
-            return MaxHitCalculator.specMaxHit(str, bonus, pray, stance,
-                    MaxHitCalculator.STATIUS_SPEC_MULT);
-        }
-        if (combo == CombatScript.SpecWeapon.DBOW_AXES) {
-            return MaxHitCalculator.baseMaxHit(str, bonus, pray, stance)
-                    + MaxHitCalculator.THREAT_MARGIN;
-        }
-        if (combo == CombatScript.SpecWeapon.VLS) {
-            return MaxHitCalculator.specMaxHit(str, bonus, pray, stance,
-                    MaxHitCalculator.VLS_SPEC_MULT);
-        }
-        if (combo == CombatScript.SpecWeapon.GMAUL) {
-            return MaxHitCalculator.gmaulSpecMaxHit(str, bonus, pray, stance);
-        }
-        return MaxHitCalculator.agsSpecMaxHit(str, bonus, pray, stance);
+        return Combo.of(combo)
+                .specMaxHit(boostedStr, strBonus, prayerMult, stanceBonus);
     }
 
     public static int estimateSpecDamage(CombatState s, Config cfg) {

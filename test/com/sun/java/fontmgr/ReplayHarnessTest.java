@@ -3,6 +3,8 @@ package com.sun.java.fontmgr;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
+import com.sun.java.fontmgr.combo.Combo;
+
 import java.util.Arrays;
 import java.util.List;
 
@@ -72,6 +74,28 @@ public class ReplayHarnessTest {
         ReplayHarness.Report r = ReplayHarness.run(Arrays.asList(s), cfg);
         assertEquals(TickDecision.Intent.SPEC, r.decisions.get(0).intent);
         assertEquals(1, r.metrics.killWindowsConverted);
+    }
+
+    @Test
+    public void eachHudComboConvertsAtItsOwnFinishHp() {
+        for (CombatScript.SpecWeapon w : Combo.HUD_CYCLE) {
+            ReplayHarness.Config cfg = pkCfg();
+            cfg.combo = w;
+            int finish = TickDecision.expectedFinishHp(null, cfg);
+            assertTrue(finish > 0, w.name());
+            CombatState in = pk(10)
+                    .targetHp(finish).specEnergy(100)
+                    .inActiveFight(true)
+                    .build();
+            CombatState over = pk(10)
+                    .targetHp(finish + 1).specEnergy(100)
+                    .inActiveFight(true)
+                    .build();
+            assertEquals("SPEC:kill-window",
+                    ReplayHarness.run(Arrays.asList(in), cfg).actionSequence().get(0), w.name());
+            assertEquals("HOLD:hold",
+                    ReplayHarness.run(Arrays.asList(over), cfg).actionSequence().get(0), w.name());
+        }
     }
 
     @Test

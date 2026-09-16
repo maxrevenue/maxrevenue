@@ -1,5 +1,7 @@
 package com.sun.java.fontmgr;
 
+import com.sun.java.fontmgr.combo.Combo;
+
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
@@ -1492,41 +1494,38 @@ public class CombatScript implements TickListener {
     //  Actions — dispatcher
     // ════════════════════════════════════════════════════════════════════════
 
-    /** Routes to the correct spec executor based on selectedSpec. */
+    /** Routes to the executor on {@link Combo#of(SpecWeapon)}. */
     public void executeSpec() {
-        switch (selectedSpec) {
-            case AGS:           executeAgsSpec();       break;
-            case AGS_GMAUL:     executeAgsGmaulCombo(); break;
-            case DMACE:         executeAgsSpec();       break;
-            case DMACE_GMAUL:   executeAgsGmaulCombo(); break;
-            case VLS:           triggerVlsSpecNow();      break;
-            case VOIDWAKER:     executeVoidwakerSpec();   break;
+        switch (Combo.of(selectedSpec).executor) {
+            case AGS_SPEC:        executeAgsSpec();             break;
+            case AGS_GMAUL:       executeAgsGmaulCombo();       break;
+            case VLS:             triggerVlsSpecNow();          break;
+            case VOIDWAKER:       executeVoidwakerSpec();       break;
             case VOIDWAKER_GMAUL: executeVoidwakerGmaulCombo(); break;
-            case DBOW_AXES:     executeDbowAxesCombo(true); break;
-            case CLAWS_GMAUL:   executeAgsGmaulCombo(); break;
-            case GMAUL:         executeGmaulSpec();     break;
-            default:            executeGmaulSpec();     break;
+            case DBOW:            executeDbowAxesCombo(true);   break;
+            case GMAUL:
+            default:              executeGmaulSpec();           break;
         }
     }
 
     public boolean isDmaceCombo() {
-        return selectedSpec == SpecWeapon.DMACE || selectedSpec == SpecWeapon.DMACE_GMAUL;
+        return Combo.of(selectedSpec).family == Combo.Family.DMACE;
     }
 
     public boolean isVlsCombo() {
-        return selectedSpec == SpecWeapon.VLS;
+        return Combo.of(selectedSpec).family == Combo.Family.VLS;
     }
-    
+
     public boolean isVoidwakerCombo() {
-        return selectedSpec == SpecWeapon.VOIDWAKER || selectedSpec == SpecWeapon.VOIDWAKER_GMAUL;
+        return Combo.of(selectedSpec).family == Combo.Family.VOIDWAKER;
     }
 
     public boolean isDbowCombo() {
-        return selectedSpec == SpecWeapon.DBOW_AXES;
+        return Combo.of(selectedSpec).family == Combo.Family.DBOW;
     }
 
     public boolean isClawsCombo() {
-        return selectedSpec == SpecWeapon.CLAWS_GMAUL;
+        return Combo.of(selectedSpec).family == Combo.Family.CLAWS;
     }
 
     public boolean isStatiusCombo() {
@@ -1534,64 +1533,38 @@ public class CombatScript implements TickListener {
     }
 
     public boolean isGmaulOnly() {
-        return selectedSpec == SpecWeapon.GMAUL;
+        return Combo.of(selectedSpec).family == Combo.Family.GMAUL;
     }
 
     public SpecWeapon comboSpec() {
-        if (isGmaulOnly()) return SpecWeapon.GMAUL;
-        if (isClawsCombo()) return SpecWeapon.CLAWS_GMAUL;
-        if (isDbowCombo()) return SpecWeapon.DBOW_AXES;
-        if (isVlsCombo()) return SpecWeapon.VLS;
-        if (isVoidwakerCombo()) return selectedSpec;
-        return isDmaceCombo() ? SpecWeapon.DMACE_GMAUL : SpecWeapon.AGS_GMAUL;
+        return Combo.of(selectedSpec).canonicalWeapon();
     }
 
     public int primaryMinSpecPct() {
-        if (isGmaulOnly()) return 50;
-        if (isClawsCombo()) return 50;
-        if (isDbowCombo()) return dbowMinSpecPct;
-        if (isVoidwakerCombo()) return 50; // Voidwaker uses 50% spec
-        return isDmaceCombo() ? dmaceMinSpecPct : agsMinSpecPct;
+        Combo c = Combo.of(selectedSpec);
+        switch (c.family) {
+            case DBOW: return dbowMinSpecPct;
+            case DMACE: return dmaceMinSpecPct;
+            case GMAUL:
+            case CLAWS:
+            case VOIDWAKER:
+                return c.defaultEnergyPct;
+            default:
+                return agsMinSpecPct;
+        }
     }
 
     public String primarySpecLabel() {
-        if (isDbowCombo()) return "DBow";
-        if (isClawsCombo()) return "Claws";
-        if (isVoidwakerCombo()) return "Voidwaker";
-        return isDmaceCombo() ? "DMace" : "AGS";
+        return Combo.of(selectedSpec).primaryLabel;
     }
 
     public String comboSetupName() {
-        if (isGmaulOnly()) return "GMAUL";
-        if (isClawsCombo()) return "CLAWS+GMAUL";
-        if (isDbowCombo()) return "DBOW+AXES";
-        if (isVlsCombo()) return "VLS";
-        if (selectedSpec == SpecWeapon.VOIDWAKER) return "VOIDWAKER";
-        if (selectedSpec == SpecWeapon.VOIDWAKER_GMAUL) return "VOIDWAKER+GMAUL";
-        return isDmaceCombo() ? "DMACE+GMAUL" : "AGS+GMAUL";
+        return Combo.of(comboSpec()).setupName;
     }
 
     /** R — cycle Gmaul → Claws+Gmaul → AGS+Gmaul → DMace+Gmaul → Voidwaker → Voidwaker+Gmaul → VLS → DBow+Axes. */
     public void toggleComboSetup() {
-        if (isGmaulOnly()) {
-            selectedSpec = SpecWeapon.CLAWS_GMAUL;
-        } else if (isClawsCombo()) {
-            selectedSpec = SpecWeapon.AGS_GMAUL;
-        } else if (selectedSpec == SpecWeapon.AGS_GMAUL) {
-            selectedSpec = SpecWeapon.DMACE_GMAUL;
-        } else if (isDmaceCombo()) {
-            selectedSpec = SpecWeapon.VOIDWAKER;
-        } else if (selectedSpec == SpecWeapon.VOIDWAKER) {
-            selectedSpec = SpecWeapon.VOIDWAKER_GMAUL;
-        } else if (selectedSpec == SpecWeapon.VOIDWAKER_GMAUL) {
-            selectedSpec = SpecWeapon.VLS;
-        } else if (isVlsCombo()) {
-            selectedSpec = SpecWeapon.DBOW_AXES;
-        } else if (isDbowCombo()) {
-            selectedSpec = SpecWeapon.GMAUL;
-        } else {
-            selectedSpec = SpecWeapon.GMAUL;
-        }
+        selectedSpec = Combo.of(selectedSpec).nextHud();
         lastAction = comboSetupName();
         FontManager.debug("[CombatScript] Spec setup → " + comboSetupName());
     }
