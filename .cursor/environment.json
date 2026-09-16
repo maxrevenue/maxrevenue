@@ -1,0 +1,12 @@
+{
+  "name": "Roatz",
+  "user": "ubuntu",
+  "install": "./.cursor/install.sh",
+  "terminals": [
+    {
+      "name": "license-server",
+      "command": "cd license-server && npx wrangler dev --port 8787 --ip 127.0.0.1"
+    }
+  ],
+  "ports": [8787]
+}
