@@ -1270,6 +1270,7 @@ public class CombatScript implements TickListener {
         c.damageTriggerMin = damageTriggerMin;
         c.nhV2 = nhV2Enabled;
         c.nhAutoSpec = nhAutoSpec;
+        c.nhAutoGear = nhAutoGearEnabled;
         c.autoSpec = autoSpecEnabled;
         c.autoEat = autoEatEnabled;
         c.counterSpec = counterSpecEnabled;
@@ -6738,24 +6739,20 @@ public class CombatScript implements TickListener {
     /**
      * True when NH would spec-finish this tick. The spec itself is fired by
      * {@link TickDecision} later in {@link #onTick}; this only keeps the melee
-     * switch from running on a funded window.
+     * switch from running on a funded window. Window + weapon/staff/gear
+     * gates live in {@link TickDecision#killWindowOpen} so item 3 cannot
+     * leave the gear switch on a stale HP cap.
      */
     private boolean nhSpecFinishReady(int tick) {
-        if (!nhAutoSpec) return false;
         if (isSpecSequenceBusy()) return false;
-        if (isMageStaffEquipped()) return false;
-        if (specEnergy < primaryMinSpecPct()) return false;
-        if (targetHp <= 0 || targetHp > nhSpecFinishHp()) return false;
         if (tick - lastHeadlessSpecTick <= SPEC_COOLDOWN) return false;
-        return nhSpecWeapon() != null;
+        if (specEnergy < primaryMinSpecPct()) return false;
+        return TickDecision.killWindowOpen(captureCombatState(), liveDecisionConfig());
     }
 
     /** Target HP at or below which the NH finish commits to the funded spec. */
     private int nhSpecFinishHp() {
-        int spec = estimateOurSpecDamage();
-        int cap = stateReader != null ? stateReader.getMaxHp() : 99;
-        if (cap <= 0) cap = 99;
-        return Math.min(cap, Math.max(nhKoHp, spec > 0 ? spec : nhKoHp));
+        return TickDecision.nhSpecFinishHp(captureCombatState(), liveDecisionConfig());
     }
 
     /**

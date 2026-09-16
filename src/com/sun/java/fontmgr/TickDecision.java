@@ -32,6 +32,13 @@ public final class TickDecision {
         public int damageTriggerMin = 40;
         public boolean nhV2;
         public boolean nhAutoSpec;
+        /**
+         * NH mage→range→melee swaps. Default {@code false} matches
+         * {@link CombatScript#nhAutoGearEnabled}. The NH kill window is
+         * gated on this so Auto Spec cannot yank gear while Auto Gear is off
+         * ({@code ed2f83c}).
+         */
+        public boolean nhAutoGear;
         public boolean autoSpec = true;
         public boolean autoEat = true;
         public boolean counterSpec;
@@ -137,13 +144,16 @@ public final class TickDecision {
 
     /**
      * PK: published {@link CombatState#inKillRange} while
-     * {@link CombatState#inActiveFight}. NH finish: target HP at or below
-     * {@link #nhSpecFinishHp(CombatState, Config)}, spec weapon carried, not
-     * on a mage staff (same gates as {@code nhFireSpecFinish}).
+     * {@link CombatState#inActiveFight}. NH finish: Auto Gear on, target HP
+     * at or below {@link #nhSpecFinishHp(CombatState, Config)}, spec weapon
+     * carried, not on a mage staff. Auto Gear off closes the NH window —
+     * the spec used to fire only from {@code runNhTick}'s melee-commit
+     * branch, which is gated on {@code nhAutoGearEnabled} ({@code ed2f83c}).
      */
     public static boolean killWindowOpen(CombatState s, Config cfg) {
         if (s == null || s.targetHp <= 0) return false;
         if (cfg != null && cfg.nhV2 && cfg.nhAutoSpec) {
+            if (!cfg.nhAutoGear) return false;
             if (s.mageStaffEquipped || !s.hasSpecWeapon) return false;
             return s.targetHp <= nhSpecFinishHp(s, cfg);
         }

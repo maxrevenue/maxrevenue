@@ -156,6 +156,7 @@ public class TickDecisionParityTest {
         s.autoSpecEnabled = c.autoSpec;
         s.nhV2Enabled = c.nhV2;
         s.nhAutoSpec = c.nhAutoSpec;
+        s.nhAutoGearEnabled = c.nhAutoGear;
         s.autoEatEnabled = c.autoEat;
         s.selectedSpec = c.combo;
         s.nhKoHp = c.nhKoHp;
@@ -176,6 +177,7 @@ public class TickDecisionParityTest {
         ReplayHarness.Config c = new ReplayHarness.Config();
         c.nhV2 = true;
         c.nhAutoSpec = true;
+        c.nhAutoGear = true;
         c.autoSpec = true;
         c.autoEat = true;
         return c;
