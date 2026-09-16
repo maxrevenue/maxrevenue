@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 
 import com.sun.java.fontmgr.combo.Combo;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
@@ -446,10 +447,39 @@ public class ReplayHarnessTest {
         assertEquals(0, r.metrics.killWindowsEntered);
     }
 
+    @Test
+    public void conservativeWindowConversionTradeIsOnTheRecord() {
+        ReplayHarness.Config cfg = pkCfg();
+        List<CombatState> funded = new ArrayList<>();
+        List<CombatState> unfunded = new ArrayList<>();
+        for (int hp = 1; hp <= 99; hp++) {
+            funded.add(pk(hp).targetHp(hp).specEnergy(100).inActiveFight(true).build());
+            unfunded.add(pk(hp).targetHp(hp).specEnergy(0).inActiveFight(true).build());
+        }
+        ReplayHarness.ConversionTrade fundedTrade = ReplayHarness.ConversionTrade.score(funded, cfg);
+        ReplayHarness.ConversionTrade missedTrade = ReplayHarness.ConversionTrade.score(unfunded, cfg);
+        int gmaul = Combo.AGS_GMAUL.followUpMaxHit(99, MaxHitCalculator.PIETY_STR,
+                MaxHitCalculator.STANCE_AGGRESSIVE);
+        assertEquals(55, fundedTrade.shippedFinishHp, fundedTrade.table());
+        assertEquals(55 + gmaul, fundedTrade.followUpFinishHp, fundedTrade.table());
+        assertEquals(29, gmaul);
+        assertEquals(55, fundedTrade.shippedConverted, fundedTrade.table());
+        assertEquals(84, fundedTrade.followUpConverted, fundedTrade.table());
+        assertEquals(77, fundedTrade.old77Converted, fundedTrade.table());
+        assertEquals(29, fundedTrade.leftOnTableVsFollowUp, fundedTrade.table());
+        assertEquals(22, fundedTrade.leftOnTableVs77, fundedTrade.table());
+        assertEquals(0, fundedTrade.shippedMissed);
+        assertEquals(0, fundedTrade.followUpMissed);
+        assertEquals(55, missedTrade.shippedMissed);
+        assertEquals(84, missedTrade.followUpMissed);
+        assertEquals(0, missedTrade.shippedConverted);
+    }
+
     private static ReplayHarness.Config pkCfg() {
         ReplayHarness.Config c = new ReplayHarness.Config();
         c.autoSpec = true;
         c.nhV2 = false;
+        c.prayerMult = MaxHitCalculator.PIETY_STR;
         return c;
     }
 
@@ -461,6 +491,7 @@ public class ReplayHarnessTest {
         c.nhAutoGear = true;
         c.autoSpec = true;
         c.autoEat = true;
+        c.prayerMult = MaxHitCalculator.PIETY_STR;
         return c;
     }
 

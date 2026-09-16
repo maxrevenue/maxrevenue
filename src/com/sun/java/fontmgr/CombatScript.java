@@ -1269,6 +1269,7 @@ public class CombatScript implements TickListener {
         c.strBonus = liveStrBonus();
         c.prayerMult = livePrayerMult();
         c.stanceBonus = MaxHitCalculator.STANCE_AGGRESSIVE;
+        // Live window is full max hit. accuracy=0.5 exists only in harness goldens.
         c.accuracy = MaxHitCalculator.DEFAULT_ACCURACY;
         c.damageTriggerMin = damageTriggerMin;
         c.nhV2 = nhV2Enabled;
@@ -1529,7 +1530,7 @@ public class CombatScript implements TickListener {
     }
 
     public boolean isStatiusCombo() {
-        return isDmaceCombo();
+        return Combo.of(selectedSpec).family == Combo.Family.STATIUS;
     }
 
     public boolean isGmaulOnly() {
@@ -6963,16 +6964,17 @@ public class CombatScript implements TickListener {
     private double livePrayerMult() {
         return stateReader != null
                 ? stateReader.strengthPrayerMultiplier()
-                : MaxHitCalculator.PIETY_STR;
+                : 1.0;
     }
 
     private int liveStrBonus() {
+        Combo c = Combo.of(comboSpec());
+        int worn = 0;
         WeaponRef w = nhSpecWeapon();
         if (w != null && w.equipped) {
-            int worn = MaxHitCalculator.weaponStrBonus(w.itemId, w.name);
-            if (worn > 0) return worn;
+            worn = MaxHitCalculator.weaponStrBonus(w.itemId, w.name);
         }
-        return MaxHitCalculator.strBonusForCombo(comboSpec());
+        return c.windowStrBonus(worn);
     }
     
     private boolean isUnderTarget(Object target) {

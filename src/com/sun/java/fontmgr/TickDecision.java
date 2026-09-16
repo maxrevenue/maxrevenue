@@ -35,11 +35,15 @@ public final class TickDecision {
         public int strBonus;
         /**
          * Strength-prayer multiplier. {@code <= 0} means no prayer (1.0), not piety.
-         * Harness PK/NH helpers set piety explicitly.
+         * Default is 1.0 (no prayer). Harness PK/NH helpers set piety explicitly.
          */
-        public double prayerMult = MaxHitCalculator.PIETY_STR;
+        public double prayerMult = 1.0;
         public int stanceBonus = MaxHitCalculator.STANCE_AGGRESSIVE;
-        /** 1.0 = max hit. Lower tightens {@link TickDecision#expectedFinishHp}. */
+        /**
+         * 1.0 = max hit. Live {@link CombatScript#liveDecisionConfig()} always
+         * sets {@link MaxHitCalculator#DEFAULT_ACCURACY} (1.0); the 0.5 case is
+         * harness-only.
+         */
         public double accuracy = MaxHitCalculator.DEFAULT_ACCURACY;
         public int damageTriggerMin = 40;
         public boolean nhV2;
@@ -145,18 +149,24 @@ public final class TickDecision {
      * weapon already worn (no yank), and not a mage staff.
      */
     public static boolean killWindowOpen(CombatState s, Config cfg) {
+        return windowGates(s, cfg) && s.targetHp <= expectedFinishHp(s, cfg);
+    }
+
+    /**
+     * Non-HP gates of the kill window. Shared with the conversion-trade scorer
+     * so a follow-up / old-77 counterfactual uses the same fight/overhead/weapon
+     * checks as the shipped window.
+     */
+    public static boolean windowGates(CombatState s, Config cfg) {
         if (s == null || s.targetHp <= 0) return false;
         if (!s.inActiveFight) return false;
         if (overheadWrong(s)) return false;
         if (cfg == null) cfg = new Config();
         if (cfg.nhV2 && cfg.nhAutoSpec) {
-            boolean canFinish = cfg.nhAutoGear || s.specWeaponEquipped;
-            if (!canFinish) return false;
-            if (s.mageStaffEquipped || !s.hasSpecWeapon) return false;
-            return s.targetHp <= expectedFinishHp(s, cfg);
+            if (!(cfg.nhAutoGear || s.specWeaponEquipped)) return false;
+            return !s.mageStaffEquipped && s.hasSpecWeapon;
         }
-        if (!s.hasSpecWeapon) return false;
-        return s.targetHp <= expectedFinishHp(s, cfg);
+        return s.hasSpecWeapon;
     }
 
     /** Same table as {@code Combo.specMaxHit} / {@code CombatScript.estimateOurSpecDamage}. */
@@ -178,9 +188,27 @@ public final class TickDecision {
     }
 
     public static int expectedFinishHp(CombatState s, Config cfg) {
+        return finishHp(s, cfg, false);
+    }
+
+    /**
+     * Counterfactual finish HP that adds {@link Combo#followUpMaxHit} when the
+     * combo has a gmaul follow. Not used by {@link #killWindowOpen} — the shipped
+     * window is primary-only. Used to put converted/missed cost on the record.
+     */
+    public static int expectedFinishHpWithFollowUp(CombatState s, Config cfg) {
+        return finishHp(s, cfg, true);
+    }
+
+    private static int finishHp(CombatState s, Config cfg, boolean includeFollowUp) {
         if (cfg == null) cfg = new Config();
         int spec = estimateSpecDamage(s, cfg);
         int expected = MaxHitCalculator.expectedHit(spec, cfg.accuracy);
+        if (includeFollowUp) {
+            Combo c = Combo.of(cfg.combo);
+            int follow = c.followUpMaxHit(effectiveStr(s, cfg), cfg.prayerMult, cfg.stanceBonus);
+            expected += MaxHitCalculator.expectedHit(follow, cfg.accuracy);
+        }
         int cap = (s != null && s.ourMaxHp > 0) ? s.ourMaxHp : 99;
         int floor = cfg.nhKoHp > 0 ? cfg.nhKoHp : 0;
         if (cfg.nhV2 && cfg.nhAutoSpec) {

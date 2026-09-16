@@ -6,6 +6,7 @@ import com.sun.java.fontmgr.TickDecision;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -67,6 +68,39 @@ public class ComboTest {
         assertTrue(Combo.GMAUL.specMaxHit(99, 0, MaxHitCalculator.PIETY_STR,
                 MaxHitCalculator.STANCE_AGGRESSIVE) < agsBase);
         assertEquals(MaxHitCalculator.AGS_STR_BONUS, Combo.CLAWS_GMAUL.strBonus);
+    }
+
+    @Test
+    public void clawsStandInIgnoresWornClawsBonus() {
+        assertEquals(MaxHitCalculator.CLAWS_STR_BONUS,
+                MaxHitCalculator.weaponStrBonus(0, "Dragon claws"));
+        assertEquals(MaxHitCalculator.AGS_STR_BONUS, Combo.CLAWS_GMAUL.windowStrBonus(56));
+        assertEquals(MaxHitCalculator.AGS_STR_BONUS, Combo.CLAWS_GMAUL.windowStrBonus(0));
+        assertEquals(MaxHitCalculator.AGS_STR_BONUS, Combo.AGS_GMAUL.windowStrBonus(132));
+        assertEquals(MaxHitCalculator.GMAUL_STR_BONUS, Combo.GMAUL.windowStrBonus(0));
+    }
+
+    @Test
+    public void primaryLabelsAreHonest() {
+        assertEquals("Gmaul", Combo.GMAUL.primaryLabel);
+        assertEquals("Statius", Combo.STATIUS.primaryLabel);
+        assertEquals("VLS", Combo.VLS.primaryLabel);
+        assertEquals("AGS", Combo.AGS_GMAUL.primaryLabel);
+        assertEquals("Claws", Combo.CLAWS_GMAUL.primaryLabel);
+    }
+
+    @Test
+    public void isStatiusComboIsFamilyNotDmace() throws Exception {
+        CombatScript script = new CombatScript(null, Object.class, null);
+        script.selectedSpec = CombatScript.SpecWeapon.STATIUS;
+        assertTrue(script.isStatiusCombo());
+        script.selectedSpec = CombatScript.SpecWeapon.STATIUS_GMAUL;
+        assertTrue(script.isStatiusCombo());
+        script.selectedSpec = CombatScript.SpecWeapon.DMACE_GMAUL;
+        assertTrue(script.isDmaceCombo());
+        assertFalse(script.isStatiusCombo());
+        script.selectedSpec = CombatScript.SpecWeapon.AGS_GMAUL;
+        assertFalse(script.isStatiusCombo());
     }
 
     @Test
