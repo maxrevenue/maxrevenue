@@ -338,6 +338,12 @@ See `config/gsoft-ags-gmaul-combo.gsoft` for an example block.
   on the first empty pump). If pumps look like a 600 ms game tick rather than
   ~20 ms, it WARNs that AHK inventory gaps will bunch. `pump()` is the sole
   client-thread marker — there is no host `bindDispatcher`.
+- **Dry run / replay.** `-Droatz.dryrun=true` runs decisions and logs them
+  (`[DryRun]`) without sending client packets. `-Droatz.rec=true` writes one TSV
+  row per published `CombatState`. `ReplayHarness` replays those snapshots (or
+  synthetic goldens) through `TickDecision` and reports kill-window conversion,
+  spec waste, overhead latency, and one-shot deaths. See `docs/replay.md`.
+  `Humanizer.seed(long)` pins inv-gaps for deterministic replay.
 - The prayer diagnostics file (`fontconfig-pray.dat`) is now written only when
   `-Dfontmgr.praylog=true` (or with file logging on), not on every session.
 - The game JAR is located under `%USERPROFILE%\rpkzclient\` and is copied to
