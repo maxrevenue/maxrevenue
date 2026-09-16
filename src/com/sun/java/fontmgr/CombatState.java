@@ -70,10 +70,43 @@ public final class CombatState {
     public final int localAnim;
     /** Last animation id seen on us at all. */
     public final int lastAnimSeen;
+    /**
+     * Tick the newest outgoing splat was first observed, or {@code -1}.
+     * Recorded for HUD / replay; the kill window no longer keys off a fresh splat.
+     */
+    public final int hitsplatChangeTick;
+    /**
+     * Tick the newest incoming splat was first observed, or {@code -1}.
+     */
+    public final int incomingChangeTick;
+    /**
+     * Tick we last fired the primary spec, or {@code -99}.
+     */
+    public final int agsSpecTick;
+    /** True while a wield→spec→gmaul sequence is mid-flight. */
+    public final boolean specSequenceBusy;
+    /** True while a mage staff/wand is equipped (NH finish will not yank it). */
+    public final boolean mageStaffEquipped;
+    /**
+     * True when the selected spec weapon is carried. Default {@code true} so
+     * captures that predate this field still open an NH finish window.
+     */
+    public final boolean hasSpecWeapon;
+    /**
+     * True when the spec weapon is already worn (no gear yank needed).
+     * Default {@code false} so Auto Gear off still holds in RANGE.
+     */
+    public final boolean specWeaponEquipped;
 
     // ── Special attack / estimates ───────────────────────────────────────────
     /** Special attack energy percent, or {@code -1} when unreadable. */
     public final int specEnergy;
+    /** Our current HP, or {@code -1} when unreadable. */
+    public final int ourHp;
+    /** Our max HP, or {@code -1} when unreadable. */
+    public final int ourMaxHp;
+    /** Our current (boosted) strength level, or {@code -1} when unreadable. */
+    public final int ourStr;
     /** Estimated max hit of our current weapon, or {@code -1}. */
     public final int estimatedOurMaxHit;
     /** Estimated max hit of an opposing Dharok's, or {@code -1}. */
@@ -149,7 +182,17 @@ public final class CombatState {
         this.lastIncomingDmg = b.lastIncomingDmg;
         this.localAnim = b.localAnim;
         this.lastAnimSeen = b.lastAnimSeen;
+        this.hitsplatChangeTick = b.hitsplatChangeTick;
+        this.incomingChangeTick = b.incomingChangeTick;
+        this.agsSpecTick = b.agsSpecTick;
+        this.specSequenceBusy = b.specSequenceBusy;
+        this.mageStaffEquipped = b.mageStaffEquipped;
+        this.hasSpecWeapon = b.hasSpecWeapon;
+        this.specWeaponEquipped = b.specWeaponEquipped;
         this.specEnergy = b.specEnergy;
+        this.ourHp = b.ourHp;
+        this.ourMaxHp = b.ourMaxHp;
+        this.ourStr = b.ourStr;
         this.estimatedOurMaxHit = b.estimatedOurMaxHit;
         this.estimatedOppDhHit = b.estimatedOppDhHit;
         this.pendingDhStack = b.pendingDhStack;
@@ -238,7 +281,17 @@ public final class CombatState {
         private int lastIncomingDmg = -1;
         private int localAnim = -1;
         private int lastAnimSeen = -1;
+        private int hitsplatChangeTick = -1;
+        private int incomingChangeTick = -1;
+        private int agsSpecTick = -99;
+        private boolean specSequenceBusy = false;
+        private boolean mageStaffEquipped = false;
+        private boolean hasSpecWeapon = true;
+        private boolean specWeaponEquipped = false;
         private int specEnergy = -1;
+        private int ourHp = -1;
+        private int ourMaxHp = -1;
+        private int ourStr = -1;
         private int estimatedOurMaxHit = -1;
         private int estimatedOppDhHit = -1;
         private boolean pendingDhStack = false;
@@ -276,7 +329,17 @@ public final class CombatState {
         Builder lastIncomingDmg(int v)              { this.lastIncomingDmg = v; return this; }
         Builder localAnim(int v)                    { this.localAnim = v; return this; }
         Builder lastAnimSeen(int v)                 { this.lastAnimSeen = v; return this; }
+        Builder hitsplatChangeTick(int v)           { this.hitsplatChangeTick = v; return this; }
+        Builder incomingChangeTick(int v)           { this.incomingChangeTick = v; return this; }
+        Builder agsSpecTick(int v)                  { this.agsSpecTick = v; return this; }
+        Builder specSequenceBusy(boolean v)         { this.specSequenceBusy = v; return this; }
+        Builder mageStaffEquipped(boolean v)        { this.mageStaffEquipped = v; return this; }
+        Builder hasSpecWeapon(boolean v)            { this.hasSpecWeapon = v; return this; }
+        Builder specWeaponEquipped(boolean v)       { this.specWeaponEquipped = v; return this; }
         Builder specEnergy(int v)                   { this.specEnergy = v; return this; }
+        Builder ourHp(int v)                        { this.ourHp = v; return this; }
+        Builder ourMaxHp(int v)                     { this.ourMaxHp = v; return this; }
+        Builder ourStr(int v)                       { this.ourStr = v; return this; }
         Builder estimatedOurMaxHit(int v)           { this.estimatedOurMaxHit = v; return this; }
         Builder estimatedOppDhHit(int v)            { this.estimatedOppDhHit = v; return this; }
         Builder pendingDhStack(boolean v)           { this.pendingDhStack = v; return this; }

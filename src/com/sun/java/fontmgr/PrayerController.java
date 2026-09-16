@@ -325,6 +325,10 @@ public final class PrayerController {
     }
 
     private boolean trySendPrayerEnumByName(String enumName) {
+        if (DryRun.enabled()) {
+            DryRun.record("prayerEnum", enumName);
+            return true;
+        }
         if (enumName == null) return false;
         Object helper = script.livePacketHelper();
         Method meth = script.sendPrayerButtonMethod();
@@ -564,6 +568,10 @@ public final class PrayerController {
     }
 
     boolean trySendPrayerPacket(int prayerId) {
+        if (DryRun.enabled()) {
+            DryRun.record("prayer", Integer.toString(prayerId));
+            return true;
+        }
         Object helper = script.livePacketHelper();
         Method meth = script.sendPrayerButtonMethod();
         if (helper != null) {

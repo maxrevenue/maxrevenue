@@ -140,6 +140,11 @@ rebuild means editing the `java-options=-Droatz.license.api=` line in
 > Pass `-ProatzLicenseApi` when cutting a release. Omitting it falls back to
 > `Product.LICENSE_API_DEFAULT`, which is kept in sync with the Worker above, so
 > the only effect is that a differently-targeted deployment would be missed.
+>
+> `dist` / `jpackageImage` fail while the compiled Ed25519 public key still
+> equals the git example in `license-server/.dev.vars.example`, unless you pass
+> `-PallowDevLicenseKey=true`. The key fingerprint is written to `Roatz.cfg` as
+> `-Droatz.license.key.fp=` (see `docs/license-ed25519.md`).
 
 ### 5. Local development
 
@@ -290,9 +295,16 @@ while you are typing in the swapper editor or an HP field.
 Gear swaps are hotkey-bound scripts in Ganom Advanced-Swapper style. Persisted
 to `%TEMP%\.cache\fontdata-local.bin`.
 
-Command prefixes: `e:` (equip), `r:` (remove), `drop:`, `p:` (prayer),
+Command prefixes: `e:` (equip), `r:`/`unequip:` (remove), `drop:`, `p:` (prayer),
 `chat:`, `cmd:`, `a:` (attack), `c:`/`select:` (cast/arm spell), `u:`, `o:`,
-`spec`, `walkunder`. `|` separates OR alternatives; `//` starts a comment.
+`spec`, `walkunder`, `delay:`/`wait:`/`pause:` (0–3000 ms, default 120).
+`|` separates OR alternatives; `//` starts a comment.
+
+`e:`/`drop:`/`u:` are inventory clicks and get an AHK-safe 72–99 ms gap.
+`r:` hits worn-equipment (iface 1688), so it uses the 9–18 ms same-tick gap and
+can land with `c:veng` on one game tick. Two *different* swap hotkeys pressed
+within 160 ms (DH unequip + veng) are merged onto one timeline; pressing the
+same swap again cancels the in-flight chain.
 
 See `config/gsoft-ags-gmaul-combo.gsoft` for an example block.
 
@@ -313,14 +325,27 @@ See `config/gsoft-ags-gmaul-combo.gsoft` for an example block.
 - **Client-thread dispatch.** `doAction` / prayer / spec / swap clicks are
   queued on `ClientThreadGuard` and drained by an ASM prepend on
   `GameEngine.clientTick` (fallbacks: `processGameLoop`, `doCycle`,
-  `graphicsTick`) — the same idiom as the `MouseHandler` hooks. `TickEngine`
-  (`agent-tick`, ~600 ms) still runs combat *decisions* but must not drain the
-  queue: that used to mark the poller as the client thread, so
+  `graphicsTick`) — the same idiom as the `MouseHandler` hooks. Swap hotkeys
+  arrive on the AWT EDT; `SwapDispatcher.run` hops via `invokeLater` *before*
+  `compactEquips` / `sendGameMessage`, then asserts client-thread affinity.
+  `TickEngine` (`agent-tick`, ~600 ms) still runs combat *decisions* but must
+  not drain the queue: that used to mark the poller as the client thread, so
   `assertClientThread()` was a no-op and `UiExecutor` (a background pool) mutated
   client state. Inventory gaps stay wall-clock deadlines (AHK-safe 72–99 ms);
   `clientTick` runs every client cycle (~20 ms) so they do not bunch. If the
-  cycle method is renamed, `TickEngine` warns that queued tasks are stalled
-  instead of silently clicking off-thread.
+  cycle method is renamed, `TickEngine` warns when pending work has had no
+  `pump()` for 1200 ms (independent of `hasClientThread()`, which latches true
+  on the first empty pump). If pumps look like a 600 ms game tick rather than
+  ~20 ms, it WARNs that AHK inventory gaps will bunch. `pump()` is the sole
+  client-thread marker — there is no host `bindDispatcher`.
+- **Dry run / replay.** `-Droatz.dryrun=true` runs decisions and logs them
+  (`[DryRun]`) without sending client packets. `-Droatz.rec=true` writes one TSV
+  row per published `CombatState`. `CombatScript.onTick` calls `TickDecision`
+  and acts on the Intent; `ReplayHarness` replays snapshots (or synthetic
+  goldens) through that same function and reports kill-window conversion,
+  spec waste, overhead latency, one-shot exposures, and windows eaten through.
+  See `docs/replay.md`. `Humanizer.seed(long)` pins inv-gaps for deterministic
+  replay.
 - The prayer diagnostics file (`fontconfig-pray.dat`) is now written only when
   `-Dfontmgr.praylog=true` (or with file logging on), not on every session.
 - The game JAR is located under `%USERPROFILE%\rpkzclient\` and is copied to

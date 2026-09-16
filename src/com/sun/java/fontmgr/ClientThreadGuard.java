@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
@@ -28,6 +29,11 @@ import java.util.function.Supplier;
  * are not quantized to a 600 ms game tick; {@code clientTick} runs every
  * client cycle (~20 ms) and only due tasks fire.
  *
+ * <p>{@link #pump()} is the <em>sole</em> client-thread marker. There is no
+ * host bind-dispatcher: forwarding {@link #invokeLater} to an unmarked sink
+ * re-entered work on a thread that was never marked and looped. Hosts must
+ * prepend {@link ClientHooks#onClientTick()} via the GameEngine hook.
+ *
  * <p>Inter-state delays use a clipped Gaussian (bell-curve) distribution so
  * polling and state transitions are not metronomic.
  *
@@ -48,21 +54,29 @@ public final class ClientThreadGuard {
     /** Hard cap on pending work to avoid unbounded growth under attach storms. */
     private static final int MAX_QUEUE = 256;
 
+    /**
+     * Two game ticks. Pending work with no {@link #pump()} in this window is
+     * a missed GameEngine hook, not a slow click.
+     */
+    public static final long STALL_MS = 1200L;
+
+    /** Cadence window: fewer than three pumps here looks like a 600 ms tick. */
+    public static final long CADENCE_WINDOW_MIN_MS = 400L;
+
     private final Object queueLock = new Object();
     private final List<QueuedTask> queue = new ArrayList<>();
 
-    /**
-     * Optional host-provided sink. When set, {@link #invokeLater} forwards
-     * immediately to the client's own invoke-later; when null, tasks sit in
-     * {@link #queue} until {@link #pump()}.
-     */
-    private volatile Consumer<Runnable> clientDispatcher;
-
-    /** Thread that is allowed to mutate client-facing state (set by host). */
+    /** Thread that is allowed to mutate client-facing state (set by {@link #pump()}). */
     private final AtomicReference<Thread> clientThread = new AtomicReference<>();
 
     /** Successful {@link #pump()} calls — watchdog / tests. */
     private final AtomicLong pumps = new AtomicLong();
+
+    /** Wall clock of the last {@link #pump()}, or 0 if the hook has never fired. */
+    private final AtomicLong lastPumpMs = new AtomicLong();
+
+    /** One-shot: queued work before the first pump. Reset with {@link #resetForTest()}. */
+    private final AtomicBoolean warnedNeverPumped = new AtomicBoolean();
 
     private ClientThreadGuard() {}
 
@@ -71,22 +85,14 @@ public final class ClientThreadGuard {
     }
 
     // ════════════════════════════════════════════════════════════════════════
-    //  Binding — host wires the client execution thread
+    //  Binding — {@link #pump()} is the sole client-thread marker
     // ════════════════════════════════════════════════════════════════════════
 
     /**
-     * Bind an external client invoke-later (e.g. RuneLite {@code ClientThread.invoke}).
-     * Pass {@code null} to rely solely on {@link #pump()}.
-     */
-    public void bindDispatcher(Consumer<Runnable> dispatcher) {
-        this.clientDispatcher = dispatcher;
-    }
-
-    /**
      * Mark the calling thread as the client execution thread. Only
-     * {@link #pump()} (the GameEngine tick hook) should call this.
+     * {@link #pump()} (the GameEngine tick hook) calls this.
      */
-    public void markClientThread() {
+    private void markClientThread() {
         clientThread.set(Thread.currentThread());
     }
 
@@ -102,6 +108,32 @@ public final class ClientThreadGuard {
 
     public long pumpCount() {
         return pumps.get();
+    }
+
+    /** Wall clock of the last {@link #pump()}, or {@code 0} if never pumped. */
+    public long lastPumpMs() {
+        return lastPumpMs.get();
+    }
+
+    /**
+     * Pending work with no {@link #pump()} for {@link #STALL_MS} (or never).
+     * Independent of {@link #hasClientThread()}: an empty pump latches that
+     * flag true and must not hide a later stall.
+     */
+    public boolean queueIsStalled(long nowMs) {
+        if (pendingCount() <= 0) return false;
+        long last = lastPumpMs.get();
+        if (last == 0L) return true;
+        return nowMs - last >= STALL_MS;
+    }
+
+    /**
+     * True when pump spacing looks like a 600 ms game tick instead of ~20 ms
+     * client cycles. {@code TickEngine} uses this so the "gaps bunch" caveat
+     * is a runtime WARN, not just a comment.
+     */
+    public static boolean pumpCadenceLooksLikeGameTick(long pumpsInWindow, long windowMs) {
+        return windowMs >= CADENCE_WINDOW_MIN_MS && pumpsInWindow <= 2L;
     }
 
     /**
@@ -134,30 +166,31 @@ public final class ClientThreadGuard {
     public void resetForTest() {
         clear();
         clientThread.set(null);
-        clientDispatcher = null;
         pumps.set(0L);
+        lastPumpMs.set(0L);
+        warnedNeverPumped.set(false);
+    }
+
+    /**
+     * Test-only: pretend the last pump happened {@code agoMs} ago so stall
+     * checks can fire without sleeping {@link #STALL_MS}.
+     */
+    public void rewindLastPumpForTest(long agoMs) {
+        lastPumpMs.set(System.currentTimeMillis() - Math.max(0L, agoMs));
     }
 
     // ════════════════════════════════════════════════════════════════════════
-    //  Dispatch — queue only; execute on client thread via pump / dispatcher
+    //  Dispatch — queue only; execute on the client thread via {@link #pump()}
     // ════════════════════════════════════════════════════════════════════════
 
     /**
      * Enqueue work for the client thread. Safe from any thread. Does not spawn
-     * a background executor for the action itself.
+     * a background executor for the action itself. Always sits in
+     * {@link #queue} until {@link #pump()} — never forwarded to an external
+     * sink that might not be {@link #markClientThread()}ed.
      */
     public void invokeLater(Runnable action) {
         Objects.requireNonNull(action, "action");
-        Consumer<Runnable> sink = clientDispatcher;
-        if (sink != null) {
-            try {
-                sink.accept(wrapSafe(action));
-                return;
-            } catch (Throwable t) {
-                FontManager.log("[ClientThreadGuard] dispatcher reject: " + t.getMessage());
-                // Fall through to internal queue.
-            }
-        }
         enqueue(0L, action);
     }
 
@@ -227,8 +260,9 @@ public final class ClientThreadGuard {
      */
     public int pump() {
         markClientThread();
-        pumps.incrementAndGet();
         long now = System.currentTimeMillis();
+        lastPumpMs.set(now);
+        pumps.incrementAndGet();
         List<QueuedTask> ready;
         synchronized (queueLock) {
             if (queue.isEmpty()) return 0;
@@ -274,6 +308,20 @@ public final class ClientThreadGuard {
             }
             queue.add(new QueuedTask(notBeforeMs, wrapSafe(action)));
         }
+        warnIfNeverPumped();
+    }
+
+    /**
+     * One-shot so a missed GameEngine hook is visible the moment a swap hops
+     * onto the queue, not 600 ms later on the agent tick. {@link TickEngine}
+     * still repeats the stall if the hook never arrives.
+     */
+    private void warnIfNeverPumped() {
+        if (lastPumpMs.get() != 0L) return;
+        if (!warnedNeverPumped.compareAndSet(false, true)) return;
+        FontManager.warn("[ClientThreadGuard] queued work before GameEngine.clientTick has pumped; "
+                + "if this persists the tick hook missed and swaps will stall. "
+                + "pump() is the sole client-thread marker.");
     }
 
     private static Runnable wrapSafe(Runnable action) {

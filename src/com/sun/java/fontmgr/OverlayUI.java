@@ -622,10 +622,49 @@ public class OverlayUI {
         addNhToggle(grid, "Auto Barrage", script.actions().nhAutoBarrageEnabled(),  "Auto-cast Ice Barrage at the freeze window", script.actions()::setNhAutoBarrage);
         addNhToggle(grid, "Auto Gear",    script.actions().nhAutoGearEnabled(),     "Auto mage to range to melee gear swaps", script.actions()::setNhAutoGear);
         addNhToggle(grid, "Auto Attack",  script.actions().nhAutoAttack(),          "Re-attack after each gear swap", script.actions()::setNhAutoAttack);
-        addNhToggle(grid, "Auto Spec",    script.actions().nhAutoSpec(),            "Spec finish when the target is in range", script.actions()::setNhAutoSpec);
+        addNhToggle(grid, "Auto Spec",    script.actions().nhAutoSpec(),            "Spec finish when the target is in KO range. Needs Auto Gear, or the spec weapon already equipped (no yank).", script.actions()::setNhAutoSpec);
         addNhToggle(grid, "Walk-Under",   script.actions().nhAutoWalkUnderEnabled(), "Walk under while frozen / low HP", script.actions()::setNhAutoWalkUnder);
         addNhToggle(grid, "Protect Item", script.actions().protectItemEnabled(),     "Auto Protect Item in PvP", script.actions()::setProtectItem);
         page.add(grid);
+        page.add(Box.createVerticalStrut(8));
+
+        JButton forceBarrageBtn = new JButton("Test Barrage");
+        styleBtn(forceBarrageBtn, ACCENT_BLUE);
+        forceBarrageBtn.setAlignmentX(Component.LEFT_ALIGNMENT);
+        forceBarrageBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 22));
+        forceBarrageBtn.addActionListener(e -> ClientThreadGuard.get().invokeLater(
+                () -> script.actions().forceNhBarrage()));
+
+        JButton walkUnderBtn = new JButton("Test Walk-Under");
+        styleBtn(walkUnderBtn, ACCENT_PURPLE);
+        walkUnderBtn.setAlignmentX(Component.LEFT_ALIGNMENT);
+        walkUnderBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 22));
+        walkUnderBtn.addActionListener(e -> ClientThreadGuard.get().invokeLater(() -> {
+            boolean result = script.actions().walkUnderNow();
+            FontManager.log("[WalkUnder] Test button result=" + result);
+        }));
+
+        JButton prayerTestBtn = new JButton("Test Prayer");
+        styleBtn(prayerTestBtn, ACCENT_GREEN);
+        prayerTestBtn.setAlignmentX(Component.LEFT_ALIGNMENT);
+        prayerTestBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 22));
+        prayerTestBtn.addActionListener(e -> ClientThreadGuard.get().invokeLater(
+                () -> script.actions().testPrayerSwitch()));
+
+        JPanel controlRow1 = new JPanel(new GridLayout(1, 2, 4, 0));
+        controlRow1.setOpaque(false);
+        controlRow1.setAlignmentX(Component.LEFT_ALIGNMENT);
+        controlRow1.setMaximumSize(new Dimension(Integer.MAX_VALUE, 22));
+        controlRow1.add(forceBarrageBtn);
+        controlRow1.add(walkUnderBtn);
+        JPanel controlRow2 = new JPanel(new GridLayout(1, 1, 4, 0));
+        controlRow2.setOpaque(false);
+        controlRow2.setAlignmentX(Component.LEFT_ALIGNMENT);
+        controlRow2.setMaximumSize(new Dimension(Integer.MAX_VALUE, 22));
+        controlRow2.add(prayerTestBtn);
+        page.add(controlRow1);
+        page.add(Box.createVerticalStrut(3));
+        page.add(controlRow2);
         page.add(Box.createVerticalStrut(8));
 
         page.add(stepper("KO HP (finish trigger)", script.actions().nhKoHp(), 1, 99, 1,

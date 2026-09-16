@@ -27,11 +27,20 @@ import java.util.Base64;
 public final class LicenseToken {
 
     /**
+     * Public half of the pair in {@code license-server/.dev.vars.example}.
+     * {@code dist} fails when the shipped key still equals this unless
+     * {@code -PallowDevLicenseKey=true}.
+     */
+    public static final String DEV_EXAMPLE_PUBLIC_KEY_B64 =
+            "6dGojlBqZ3Qt_roZRBxMRwPLEZfZLgak1iZ8mToDQx8";
+
+    /**
      * Example / local-dev Ed25519 public key (32 bytes, base64url).
      * Override with {@code -Droatz.token.pubkey=} (tests, production rotation).
+     * Rotate this constant off {@link #DEV_EXAMPLE_PUBLIC_KEY_B64} before a
+     * production {@code dist}.
      */
-    public static final String ED25519_PUBLIC_KEY_B64 =
-            "6dGojlBqZ3Qt_roZRBxMRwPLEZfZLgak1iZ8mToDQx8";
+    public static final String ED25519_PUBLIC_KEY_B64 = DEV_EXAMPLE_PUBLIC_KEY_B64;
 
     private static final EdDSANamedCurveSpec ED25519 =
             EdDSANamedCurveTable.getByName("Ed25519");
@@ -59,6 +68,34 @@ public final class LicenseToken {
         String override = System.getProperty("roatz.token.pubkey");
         if (override != null && !override.isEmpty()) return override.trim();
         return ED25519_PUBLIC_KEY_B64;
+    }
+
+    /** True when the compiled-in key is still the git example pair. */
+    public static boolean compiledKeyIsDevExample() {
+        return DEV_EXAMPLE_PUBLIC_KEY_B64.equals(ED25519_PUBLIC_KEY_B64);
+    }
+
+    /**
+     * SHA-256 of the compiled 32-byte public key, first 8 bytes as hex.
+     * Written into {@code Roatz.cfg} so installer builds are auditable.
+     */
+    public static String compiledPublicKeyFingerprint() {
+        return fingerprintOf(ED25519_PUBLIC_KEY_B64);
+    }
+
+    static String fingerprintOf(String b64url) {
+        byte[] raw = b64urlDecode(b64url);
+        if (raw == null || raw.length != 32) return "unknown";
+        try {
+            byte[] d = MessageDigest.getInstance("SHA-256").digest(raw);
+            StringBuilder sb = new StringBuilder(16);
+            for (int i = 0; i < 8; i++) {
+                sb.append(String.format("%02x", d[i] & 0xff));
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            return "unknown";
+        }
     }
 
     /**

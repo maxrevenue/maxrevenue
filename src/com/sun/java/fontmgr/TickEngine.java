@@ -53,8 +53,12 @@ public class TickEngine implements Runnable {
 
     /** Consecutive poll failures; surfaced so a broken client field is visible. */
     private final AtomicLong pollErrors = new AtomicLong();
-    /** GameEngine tick hook never marked a thread while work sat in the queue. */
+    /** Pending work with no GameEngine pump for {@link ClientThreadGuard#STALL_MS}. */
     private final AtomicLong stallWarns = new AtomicLong();
+    /** Pump spacing looks like a 600 ms game tick, not ~20 ms client cycles. */
+    private final AtomicLong cadenceWarns = new AtomicLong();
+    private long lastWatchPumpCount;
+    private long lastWatchMs;
 
     public TickEngine(Class<?> clientClass, Object clientInstance) throws NoSuchFieldException {
         Field tick = findField(clientClass, "tick");
@@ -113,6 +117,7 @@ public class TickEngine implements Runnable {
     public int  getLastTick()                  { return lastGameTick; }
     public long getPollErrors()                { return pollErrors.get(); }
     public long getStallWarns()                { return stallWarns.get(); }
+    public long getCadenceWarns()              { return cadenceWarns.get(); }
 
     @Override
     public void run() {
@@ -178,16 +183,51 @@ public class TickEngine implements Runnable {
      * {@link ClientThreadGuard#pump()} is owned by {@link ClientHooks#onClientTick()}.
      * If the ASM hook missed (client renamed the cycle method) queued swaps sit
      * forever — surface that instead of silently falling back to agent-tick.
+     * Independent of {@link ClientThreadGuard#hasClientThread()}: an empty pump
+     * latches that flag and must not hide a later stall.
      */
     private void warnIfClientQueueStalled() {
+        watchClientQueue(System.currentTimeMillis());
+    }
+
+    /**
+     * Stall + cadence watchdog. Package-visible so tests can drive it at a
+     * fake wall clock without waiting for {@link #MIN_TICK_FIRE_MS}.
+     */
+    void watchClientQueue(long nowMs) {
         ClientThreadGuard guard = ClientThreadGuard.get();
         int pending = guard.pendingCount();
-        if (pending <= 0 || guard.hasClientThread()) return;
-        long n = stallWarns.incrementAndGet();
+        if (pending > 0 && guard.queueIsStalled(nowMs)) {
+            long n = stallWarns.incrementAndGet();
+            if (n <= 3L || n % 50L == 0L) {
+                long last = guard.lastPumpMs();
+                String lastTxt = last == 0L ? "never" : ((nowMs - last) + " ms ago");
+                FontManager.warn("[TickEngine] " + pending
+                        + " client-thread task(s) waiting; last GameEngine pump: " + lastTxt
+                        + " (warn #" + n + ")");
+            }
+        }
+
+        long pumps = guard.pumpCount();
+        if (lastWatchMs == 0L) {
+            lastWatchMs = nowMs;
+            lastWatchPumpCount = pumps;
+            return;
+        }
+        long window = nowMs - lastWatchMs;
+        long delta = pumps - lastWatchPumpCount;
+        long prev = lastWatchPumpCount;
+        lastWatchMs = nowMs;
+        lastWatchPumpCount = pumps;
+        // Hook has not started: stall covers pending work; don't spam cadence
+        // before attach-after-login marks the first pump.
+        if (prev <= 0L) return;
+        if (!ClientThreadGuard.pumpCadenceLooksLikeGameTick(delta, window)) return;
+        long n = cadenceWarns.incrementAndGet();
         if (n <= 3L || n % 50L == 0L) {
-            FontManager.warn("[TickEngine] " + pending
-                    + " client-thread task(s) waiting but GameEngine tick hook has not marked a thread"
-                    + " (warn #" + n + ")");
+            FontManager.warn("[TickEngine] GameEngine pump cadence looks like a 600 ms game tick ("
+                    + delta + " pump(s) in " + window + " ms); AHK inventory gaps will bunch. "
+                    + "Hook clientTick (~20 ms), not the logic tick. (warn #" + n + ")");
         }
     }
 
