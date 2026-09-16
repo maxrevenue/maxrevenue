@@ -676,6 +676,8 @@ public class CombatScript implements TickListener {
      */
     private volatile CombatState stateSnapshot = CombatState.empty();
     private long stateSeq = 0L;
+    /** Cross-tick cooldown / eaten-spec anim for {@link TickDecision}. */
+    final TickDecision.Session tickSession = new TickDecision.Session();
 
     /** Write-side facade for UI/command consumers; see CombatActions. */
     private final CombatActions actions = new CombatActions(this);
@@ -1108,7 +1110,6 @@ public class CombatScript implements TickListener {
 
             boolean inCombat = hasCombatContext();
             boolean justHit = isFreshIncomingHit();
-            boolean oppSpec = counterSpecEnabled && isFreshOpponentSpec();
             if (justHit || dealtDamageRecently()) lastCombatActivityTick = tick;
 
             if (dharokEnabled) {
@@ -1127,28 +1128,27 @@ public class CombatScript implements TickListener {
             }
             
             // NH V2 engine (UI-driven): prayers + freeze/range/melee loop.
+            // Spec finish is TickDecision, not nhFireSpecFinish.
             if (nhV2Enabled) {
                 runNhV2System(tick);
             }
 
             // Mage staff: keep Ice armed only while staffForIce (handled above).
 
-            // NH spec-survive eat: react to a fresh opponent spec animation by
-            // eating out of the one-shot bracket. NH-only — regular PK stays
-            // fully manual (keys 1-4 / Q).
-            if (!dharokEnabled && nhV2Enabled
-                    && isFreshOpponentSpec()
-                    && tryEatOffOpponentSpec(tick)) {
-                return;
-            }
-
-            // NH one-shot protection vs Dharok greataxe (normal swing, not a
-            // spec). When we're inside their stacked max-hit bracket and a DH
-            // swing anim is live, eat out of the danger band.
-            if (!dharokEnabled && nhV2Enabled && inDhDanger
-                    && AnimationDb.isDharokAnimation(lastTargetAnim)) {
-                eatOffDhStackForced();
-                return;
+            // Survive + spec: TickDecision is the only arbiter. EAT runs the
+            // existing survive-eat path, SPEC runs executeSpec, HOLD is a no-op.
+            if (!dharokEnabled) {
+                syncDecisionSessionFromLive();
+                CombatState captured = captureCombatState();
+                TickDecision decision = TickDecision.decide(captured, liveDecisionConfig(), tickSession);
+                applyTickDecision(tick, decision);
+                if (decision.intent != TickDecision.Intent.HOLD) {
+                    if (autoVengEnabled && decision.intent == TickDecision.Intent.SPEC) {
+                        tryCastVengeanceEngage();
+                    }
+                    drainActionQueue();
+                    return;
+                }
             }
 
             if (!enabled && !autoSpecEnabled) {
@@ -1162,62 +1162,6 @@ public class CombatScript implements TickListener {
             }
 
             if (enabled && !nhV2Enabled) ensurePiety();
-
-            // Eats are keybind-only (1-4). No auto combo-eat in regular PK.
-            if (autoSpecEnabled && tryAutoSpecDump(tick)) {
-                drainActionQueue();
-                return;
-            }
-
-            if (autoSpecEnabled && tryEnqueueKillTickIfReady()) {
-                drainActionQueue();
-                return;
-            }
-
-            boolean canDump = autoSpecEnabled && !isSpecSequenceBusy() && specEnergy >= primaryMinSpecPct()
-                    && (tick - lastHeadlessSpecTick > SPEC_COOLDOWN);
-            if (canDump && oppSpec) {
-                lastConsumedSpecAnim = lastTargetAnim;
-                lastHeadlessSpecTick = tick;
-                selectedSpec = comboSpec();
-                forceGmaulFollow = true;
-                executeSpec();
-                if (autoVengEnabled) tryCastVengeanceEngage();
-                if (autoVengEnabled && !vengWithSpecOnly) tryCastVengeance();
-                drainActionQueue();
-                return;
-            }
-
-            boolean ko = inKillRange && targetHp > 0 && specEnergy >= primaryMinSpecPct();
-            boolean hardHit = justHit && lastIncomingDmg >= Math.max(1, damageTriggerMin);
-            if (canDump && isInActivePvpFight() && (ko || hardHit) && !Humanizer.delayPassiveSpec()) {
-                lastHeadlessSpecTick = tick;
-                selectedSpec = comboSpec();
-                forceGmaulFollow = true;
-                executeSpec();
-            }
-
-            // (A) Ganom-style "Damage Threshold": auto-spec when a hit WE LAND
-            // this tick is >= damageTriggerMin (default 40). The gmaul follow-up
-            // is still gated on the primary spec hitting 50+.
-            boolean outBigHit = autoSpecEnabled && hasCombatTarget() && isInActivePvpFight()
-                    && hitsplatChangeTick == tick
-                    && lastHitsplatDmg >= Math.max(1, damageTriggerMin)
-                    && !isSpecSequenceBusy()
-                    && specEnergy >= primaryMinSpecPct()
-                    && (tick - lastHeadlessSpecTick > SPEC_COOLDOWN)
-                    && (tick - agsSpecTick > 6)
-                    && !AnimationDb.isSpecAnimation(lastAnimSeen);
-            if (outBigHit) {
-                lastHeadlessSpecTick = tick;
-                lastAction = "BIGHIT_SPEC@" + tick + " hit=" + lastHitsplatDmg;
-                selectedSpec = comboSpec();
-                forceGmaulFollow = false;   // only follow if the spec splat >= 50
-                executeSpec();
-                if (autoVengEnabled) tryCastVengeanceEngage();
-                drainActionQueue();
-                return;
-            }
 
             if (autoVengEnabled) tryCastVengeanceEngage();
             if (autoVengEnabled && !vengWithSpecOnly) tryCastVengeance();
@@ -1247,13 +1191,28 @@ public class CombatScript implements TickListener {
     }
 
     /**
+     * Builds the immutable per-tick read-model. Called from {@link #onTick}
+     * before {@link TickDecision#decide} so the arbiter sees the same values
+     * the HUD later reads, then again from {@link #publishState()} after
+     * acting so {@code lastAction} is current.
+     */
+    CombatState captureCombatState() {
+        return fillStateBuilder(stateSeq + 1).build();
+    }
+
+    /**
      * Builds and publishes the immutable per-tick read-model. Called exactly
      * once per tick, including on the logged-out early return, so every reader
      * sees a consistent snapshot. Pure bookkeeping: it observes, it never
      * decides, and it runs after all combat sequencing for the tick is done.
      */
     private void publishState() {
-        stateSnapshot = new CombatState.Builder(++stateSeq, currentTick)
+        stateSnapshot = fillStateBuilder(++stateSeq).build();
+        recorder.record(stateSnapshot);
+    }
+
+    private CombatState.Builder fillStateBuilder(long seq) {
+        return new CombatState.Builder(seq, currentTick)
                 .lastAction(lastAction)
                 .targetName(targetName)
                 .targetHp(targetHp)
@@ -1269,6 +1228,12 @@ public class CombatScript implements TickListener {
                 .lastIncomingDmg(lastIncomingDmg)
                 .localAnim(localAnim)
                 .lastAnimSeen(lastAnimSeen)
+                .hitsplatChangeTick(hitsplatChangeTick)
+                .incomingChangeTick(incomingChangeTick)
+                .agsSpecTick(agsSpecTick)
+                .specSequenceBusy(isSpecSequenceBusy())
+                .mageStaffEquipped(isMageStaffEquipped())
+                .hasSpecWeapon(nhSpecWeapon() != null)
                 .specEnergy(specEnergy)
                 .ourHp(readLocalHp())
                 .ourMaxHp(stateReader != null ? stateReader.getMaxHp() : -1)
@@ -1288,9 +1253,88 @@ public class CombatScript implements TickListener {
                 .nhV2Enabled(nhV2Enabled)
                 .defPrayTrace(defPrayTrace)
                 .ourOverhead(protectStyleToken())
-                .debugState(debugState)
-                .build();
-        recorder.record(stateSnapshot);
+                .debugState(debugState);
+    }
+
+    /**
+     * HUD / replay flags for {@link TickDecision}. Built fresh each tick from
+     * the live toggles — never from the published snapshot.
+     */
+    TickDecision.Config liveDecisionConfig() {
+        TickDecision.Config c = new TickDecision.Config();
+        c.combo = selectedSpec;
+        c.minSpecPct = primaryMinSpecPct();
+        c.nhKoHp = nhKoHp;
+        c.ourStr = stateReader != null ? stateReader.getStrength() : 99;
+        if (c.ourStr <= 0) c.ourStr = 99;
+        c.damageTriggerMin = damageTriggerMin;
+        c.nhV2 = nhV2Enabled;
+        c.nhAutoSpec = nhAutoSpec;
+        c.autoSpec = autoSpecEnabled;
+        c.autoEat = autoEatEnabled;
+        c.counterSpec = counterSpecEnabled;
+        return c;
+    }
+
+    private void syncDecisionSessionFromLive() {
+        tickSession.lastSpecTick = lastHeadlessSpecTick;
+        tickSession.lastEatAnim = lastDhSpecEatAnim;
+        tickSession.lastConsumedSpecAnim = lastConsumedSpecAnim;
+    }
+
+    /**
+     * Act on a {@link TickDecision}. Package-visible so the parity test can
+     * drive the same path {@link #onTick} uses, under {@code -Droatz.dryrun}.
+     */
+    void applyTickDecision(int tick, TickDecision d) {
+        if (d == null) return;
+        if (DryRun.enabled()) {
+            DryRun.record("intent", d.intent + ":" + d.reason);
+        }
+        switch (d.intent) {
+            case EAT:
+                if ("dh-axe".equals(d.reason)) {
+                    eatOffDhStackForced();
+                } else if ("opp-spec".equals(d.reason)) {
+                    tryEatOffOpponentSpec(tick);
+                }
+                lastAction = "ARB_EAT_" + d.reason + "@" + tick;
+                break;
+            case SPEC:
+                lastHeadlessSpecTick = tick;
+                selectedSpec = comboSpec();
+                if ("bighit".equals(d.reason)) {
+                    forceGmaulFollow = false;
+                    lastAction = "BIGHIT_SPEC@" + tick + " hit=" + lastHitsplatDmg;
+                } else if ("opp-spec".equals(d.reason)) {
+                    lastConsumedSpecAnim = lastTargetAnim;
+                    forceGmaulFollow = true;
+                    lastAction = "COUNTER_SPEC@" + tick;
+                } else if ("hardHit".equals(d.reason)) {
+                    forceGmaulFollow = true;
+                    lastAction = "HARDHIT_SPEC@" + tick;
+                } else {
+                    forceGmaulFollow = true;
+                    lastAction = (nhV2Enabled ? "NH_SPEC@" : "KO_SPEC@") + tick
+                            + (nhV2Enabled ? " hp=" + targetHp : "");
+                }
+                executeSpec();
+                break;
+            default:
+                break;
+        }
+    }
+
+    /**
+     * Same arbiter {@link #onTick} runs after vitals, for synthetic
+     * {@link CombatState}s under dry-run (no client).
+     */
+    TickDecision runOnTickArbiter(CombatState captured) {
+        if (captured != null) currentTick = captured.tick;
+        syncDecisionSessionFromLive();
+        TickDecision d = TickDecision.decide(captured, liveDecisionConfig(), tickSession);
+        applyTickDecision(currentTick, d);
+        return d;
     }
 
     /**
@@ -6637,8 +6681,9 @@ public class CombatScript implements TickListener {
         // needFreeze so a low target that drops in the last ticks still commits.
         if (nhAutoGearEnabled && targetLow && !nhMeleedThisFreeze && nhRangedThisFreeze) {
             nhMeleedThisFreeze = true;
-            if (nhFireSpecFinish(tick)) {
+            if (nhSpecFinishReady(tick)) {
                 nhPhaseName = "KO_SPEC";
+                nhCurrentPhase = "KO_SPEC";
                 return;
             }
             nhSwitchMelee();
@@ -6691,34 +6736,26 @@ public class CombatScript implements TickListener {
     }
 
     /**
-     * Funded spec finish for the NH melee phase. Fires the selected spec combo
-     * (AGS / claws / gmaul / …) when the target is inside its kill range and spec
-     * energy is up, then lets the existing combo state machine run. Returns true
-     * when a spec sequence was started.
+     * True when NH would spec-finish this tick. The spec itself is fired by
+     * {@link TickDecision} later in {@link #onTick}; this only keeps the melee
+     * switch from running on a funded window.
      */
-    private boolean nhFireSpecFinish(int tick) {
+    private boolean nhSpecFinishReady(int tick) {
         if (!nhAutoSpec) return false;
         if (isSpecSequenceBusy()) return false;
         if (isMageStaffEquipped()) return false;
         if (specEnergy < primaryMinSpecPct()) return false;
         if (targetHp <= 0 || targetHp > nhSpecFinishHp()) return false;
         if (tick - lastHeadlessSpecTick <= SPEC_COOLDOWN) return false;
-        if (nhSpecWeapon() == null) return false;
-        selectedSpec = comboSpec();
-        forceGmaulFollow = true;
-        lastHeadlessSpecTick = tick;
-        lastAction = "NH_SPEC@" + tick + " hp=" + targetHp;
-        FontManager.log("[NH] spec finish hp=" + targetHp + " energy=" + specEnergy
-                + " setup=" + comboSetupName());
-        executeSpec();
-        if (autoVengEnabled) tryCastVengeanceEngage();
-        return true;
+        return nhSpecWeapon() != null;
     }
 
     /** Target HP at or below which the NH finish commits to the funded spec. */
     private int nhSpecFinishHp() {
         int spec = estimateOurSpecDamage();
-        return Math.min(99, Math.max(nhKoHp, spec > 0 ? spec : nhKoHp));
+        int cap = stateReader != null ? stateReader.getMaxHp() : 99;
+        if (cap <= 0) cap = 99;
+        return Math.min(cap, Math.max(nhKoHp, spec > 0 ? spec : nhKoHp));
     }
 
     /**
@@ -6933,7 +6970,7 @@ public class CombatScript implements TickListener {
     /**
      * Advanced NH features (NH V2): opponent animation tracking for cast / low-HP
      * detection, predictive eating, and walk-under while the target is frozen.
-     * Spec finishing lives in {@link #runNhTick} via {@link #nhFireSpecFinish}.
+     * Spec finishing lives in {@link TickDecision} via {@link #onTick}.
      */
     private void runAdvancedNhFeatures(int tick) {
         Object target = cachedTarget;
