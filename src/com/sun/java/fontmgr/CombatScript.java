@@ -1262,7 +1262,7 @@ public class CombatScript implements TickListener {
      */
     TickDecision.Config liveDecisionConfig() {
         TickDecision.Config c = new TickDecision.Config();
-        c.combo = selectedSpec;
+        c.combo = comboSpec();
         c.minSpecPct = primaryMinSpecPct();
         c.nhKoHp = nhKoHp;
         c.ourStr = stateReader != null ? stateReader.getStrength() : 99;
@@ -1284,8 +1284,9 @@ public class CombatScript implements TickListener {
     }
 
     /**
-     * Act on a {@link TickDecision}. Package-visible so the parity test can
-     * drive the same path {@link #onTick} uses, under {@code -Droatz.dryrun}.
+     * Act on a {@link TickDecision}. Package-visible so the dry-run round-trip
+     * test can drive the same path {@link #onTick} uses. SPEC executes
+     * {@code d.combo} rather than calling {@code comboSpec()} again.
      */
     void applyTickDecision(int tick, TickDecision d) {
         if (d == null) return;
@@ -1303,7 +1304,7 @@ public class CombatScript implements TickListener {
                 break;
             case SPEC:
                 lastHeadlessSpecTick = tick;
-                selectedSpec = comboSpec();
+                if (d.combo != null) selectedSpec = d.combo;
                 if ("bighit".equals(d.reason)) {
                     forceGmaulFollow = false;
                     lastAction = "BIGHIT_SPEC@" + tick + " hit=" + lastHitsplatDmg;
@@ -1327,10 +1328,15 @@ public class CombatScript implements TickListener {
     }
 
     /**
-     * Same arbiter {@link #onTick} runs after vitals, for synthetic
-     * {@link CombatState}s under dry-run (no client).
+     * Dry-run test seam: hydrates {@link #liveDecisionConfig()} and
+     * {@link #applyTickDecision} for a synthetic {@link CombatState}.
+     * Not a full {@link #onTick}. Throws unless {@code -Droatz.dryrun=true}
+     * so a missed call cannot {@link #executeSpec()} on a live client.
      */
     TickDecision runOnTickArbiter(CombatState captured) {
+        if (!DryRun.enabled()) {
+            throw new IllegalStateException("runOnTickArbiter requires -Droatz.dryrun=true");
+        }
         if (captured != null) currentTick = captured.tick;
         syncDecisionSessionFromLive();
         TickDecision d = TickDecision.decide(captured, liveDecisionConfig(), tickSession);

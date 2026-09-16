@@ -51,14 +51,22 @@ public final class TickDecision {
     public final boolean killWindowOpen;
     public final boolean overheadWrong;
     public final boolean oneShotBracket;
+    /**
+     * Combo the window was estimated with. {@link CombatScript} executes
+     * this rather than calling {@code comboSpec()} again, so estimate and
+     * dump cannot diverge.
+     */
+    public final CombatScript.SpecWeapon combo;
 
     TickDecision(Intent intent, String reason, boolean killWindowOpen,
-                 boolean overheadWrong, boolean oneShotBracket) {
+                 boolean overheadWrong, boolean oneShotBracket,
+                 CombatScript.SpecWeapon combo) {
         this.intent = intent;
         this.reason = reason;
         this.killWindowOpen = killWindowOpen;
         this.overheadWrong = overheadWrong;
         this.oneShotBracket = oneShotBracket;
+        this.combo = combo;
     }
 
     /**
@@ -78,21 +86,22 @@ public final class TickDecision {
 
     static TickDecision decide(CombatState s, Config cfg, Session session) {
         if (s == null) {
-            return new TickDecision(Intent.HOLD, "null", false, false, false);
+            return new TickDecision(Intent.HOLD, "null", false, false, false, null);
         }
         if (cfg == null) cfg = new Config();
         if (session == null) session = new Session();
         boolean window = killWindowOpen(s, cfg);
         boolean wrongOh = overheadWrong(s);
         boolean oneShot = s.inDhDanger;
+        CombatScript.SpecWeapon combo = cfg.combo;
 
         // Survive first — CombatScript.onTick returns after these eats.
         if (cfg.nhV2 && s.inDhDanger && AnimationDb.isDharokAnimation(s.lastTargetAnim)) {
-            return new TickDecision(Intent.EAT, "dh-axe", window, wrongOh, oneShot);
+            return new TickDecision(Intent.EAT, "dh-axe", window, wrongOh, oneShot, combo);
         }
         if (cfg.nhV2 && cfg.autoEat && shouldEatOffOpponentSpec(s, session)) {
             session.lastEatAnim = s.lastTargetAnim;
-            return new TickDecision(Intent.EAT, "opp-spec", window, wrongOh, oneShot);
+            return new TickDecision(Intent.EAT, "opp-spec", window, wrongOh, oneShot, combo);
         }
 
         boolean funded = s.specEnergy >= cfg.minSpecPct;
@@ -107,19 +116,19 @@ public final class TickDecision {
                 && s.lastTargetAnim != session.lastConsumedSpecAnim) {
             session.lastSpecTick = s.tick;
             session.lastConsumedSpecAnim = s.lastTargetAnim;
-            return new TickDecision(Intent.SPEC, "opp-spec", window, wrongOh, oneShot);
+            return new TickDecision(Intent.SPEC, "opp-spec", window, wrongOh, oneShot, combo);
         }
 
         if (specEnabled && window && funded && !cooling && !busy) {
             session.lastSpecTick = s.tick;
-            return new TickDecision(Intent.SPEC, "kill-window", window, wrongOh, oneShot);
+            return new TickDecision(Intent.SPEC, "kill-window", window, wrongOh, oneShot, combo);
         }
 
         // Incoming splat ≥ damageTriggerMin this tick (live hardHit).
         boolean hardHit = s.incomingChangeTick == s.tick && s.lastIncomingDmg >= trigger;
         if (cfg.autoSpec && s.inActiveFight && hardHit && funded && !cooling && !busy) {
             session.lastSpecTick = s.tick;
-            return new TickDecision(Intent.SPEC, "hardHit", window, wrongOh, oneShot);
+            return new TickDecision(Intent.SPEC, "hardHit", window, wrongOh, oneShot, combo);
         }
 
         // Outgoing splat ≥ trigger THIS tick, not a held reading. Matches
@@ -136,10 +145,10 @@ public final class TickDecision {
                 && !AnimationDb.isSpecAnimation(s.lastAnimSeen);
         if (bighit) {
             session.lastSpecTick = s.tick;
-            return new TickDecision(Intent.SPEC, "bighit", window, wrongOh, oneShot);
+            return new TickDecision(Intent.SPEC, "bighit", window, wrongOh, oneShot, combo);
         }
 
-        return new TickDecision(Intent.HOLD, "hold", window, wrongOh, oneShot);
+        return new TickDecision(Intent.HOLD, "hold", window, wrongOh, oneShot, combo);
     }
 
     /**

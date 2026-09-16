@@ -11,13 +11,17 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
- * The replay goldens are the bot: the real onTick arbiter, under
- * {@code -Droatz.dryrun=true}, must emit the same intent sequence
- * {@link TickDecision} produces for the same {@link CombatState}s.
+ * {@link CombatScript#runOnTickArbiter} is {@link TickDecision#decide} plus
+ * {@link CombatScript#applyTickDecision} using {@link CombatScript#liveDecisionConfig()}.
+ * That is true by construction — it does <em>not</em> drive full {@code onTick}
+ * (early returns, {@code myPlayer == null}, NH ordering). What it does cover:
+ * {@code applyCfg} → {@code liveDecisionConfig()} flag round-trip, and that
+ * {@code applyTickDecision} emits the {@code [DryRun] intent} line.
  */
-public class TickDecisionParityTest {
+public class LiveDecisionConfigRoundTripTest {
 
     @BeforeEach
     public void dryRun() {
@@ -34,37 +38,37 @@ public class TickDecisionParityTest {
     }
 
     @Test
-    public void dryRunOnTickArbiterMatchesTickDecisionForPkWindow() throws Exception {
-        assertParity(Arrays.asList(agsWindow()), pkCfg());
+    public void applyCfgRoundTripsPkWindow() throws Exception {
+        assertRoundTrip(Arrays.asList(agsWindow()), pkCfg());
     }
 
     @Test
-    public void dryRunOnTickArbiterMatchesTickDecisionForBighitWaste() throws Exception {
-        assertParity(Arrays.asList(bighit()), pkCfg());
+    public void applyCfgRoundTripsBighitWaste() throws Exception {
+        assertRoundTrip(Arrays.asList(bighit()), pkCfg());
     }
 
     @Test
-    public void dryRunOnTickArbiterMatchesTickDecisionForStaleSplat() throws Exception {
+    public void applyCfgRoundTripsStaleSplat() throws Exception {
         CombatState stale = pk(12)
                 .targetHp(90).inKillRange(false).specEnergy(100)
                 .lastHitsplatDmg(50).inActiveFight(true)
                 .hitsplatChangeTick(5)
                 .build();
-        assertParity(Arrays.asList(stale), pkCfg());
+        assertRoundTrip(Arrays.asList(stale), pkCfg());
     }
 
     @Test
-    public void dryRunOnTickArbiterMatchesTickDecisionForHardHit() throws Exception {
+    public void applyCfgRoundTripsHardHit() throws Exception {
         CombatState s = pk(12)
                 .targetHp(90).inKillRange(false).specEnergy(100)
                 .lastIncomingDmg(50).incomingChangeTick(12)
                 .inActiveFight(true)
                 .build();
-        assertParity(Arrays.asList(s), pkCfg());
+        assertRoundTrip(Arrays.asList(s), pkCfg());
     }
 
     @Test
-    public void dryRunOnTickArbiterMatchesTickDecisionForNhSurviveThenFinish() throws Exception {
+    public void applyCfgRoundTripsNhSurviveThenFinish() throws Exception {
         ReplayHarness.Config cfg = nh();
         int finish = TickDecision.nhSpecFinishHp(cfg);
         CombatState eat = pk(5)
@@ -82,11 +86,11 @@ public class TickDecisionParityTest {
                 .nhV2Enabled(true).inActiveFight(true)
                 .hasSpecWeapon(true)
                 .build();
-        assertParity(Arrays.asList(eat, frozen, ko), cfg);
+        assertRoundTrip(Arrays.asList(eat, frozen, ko), cfg);
     }
 
     @Test
-    public void dryRunOnTickArbiterMatchesTickDecisionForDhEat() throws Exception {
+    public void applyCfgRoundTripsDhEat() throws Exception {
         CombatState swing = pk(1)
                 .ourHp(15).ourMaxHp(99)
                 .inDhDanger(true).estimatedOppDhHit(80)
@@ -96,20 +100,20 @@ public class TickDecisionParityTest {
                 .targetHp(70).inKillRange(true).specEnergy(100)
                 .inActiveFight(true)
                 .build();
-        assertParity(Arrays.asList(swing), nh());
+        assertRoundTrip(Arrays.asList(swing), nh());
     }
 
     @Test
-    public void dryRunOnTickArbiterMatchesTickDecisionForUnfundedWindow() throws Exception {
+    public void applyCfgRoundTripsUnfundedWindow() throws Exception {
         CombatState s = pk(3)
                 .targetHp(40).inKillRange(true).specEnergy(0)
                 .inActiveFight(true)
                 .build();
-        assertParity(Arrays.asList(s), pkCfg());
+        assertRoundTrip(Arrays.asList(s), pkCfg());
     }
 
     @Test
-    public void dryRunOnTickArbiterMatchesTickDecisionForDrainedStr() throws Exception {
+    public void applyCfgRoundTripsDrainedStr() throws Exception {
         ReplayHarness.Config cfg = nh();
         int drainedHp = TickDecision.nhSpecFinishHp(
                 pk(10).ourStr(1).ourMaxHp(99).targetHp(1).build(), cfg);
@@ -118,13 +122,55 @@ public class TickDecisionParityTest {
                 .specEnergy(100).nhV2Enabled(true)
                 .inActiveFight(true).hasSpecWeapon(true)
                 .build();
-        assertParity(Arrays.asList(s), cfg);
+        assertRoundTrip(Arrays.asList(s), cfg);
     }
 
-    private static void assertParity(List<CombatState> ticks, TickDecision.Config cfg) throws Exception {
+    @Test
+    public void applyCfgRoundTripsNhAutoGearOff() throws Exception {
+        ReplayHarness.Config cfg = nh();
+        cfg.nhAutoGear = false;
+        int finish = TickDecision.nhSpecFinishHp(cfg);
+        CombatState range = pk(32)
+                .targetHp(finish).specEnergy(100)
+                .nhV2Enabled(true).nhPhase("RANGE")
+                .inActiveFight(true).hasSpecWeapon(true)
+                .build();
+        assertRoundTrip(Arrays.asList(range), cfg);
+    }
+
+    @Test
+    public void runOnTickArbiterThrowsUnlessDryRun() throws Exception {
+        System.clearProperty("roatz.dryrun");
+        CombatScript script = new CombatScript(null, Object.class, null);
+        assertThrows(IllegalStateException.class, () -> script.runOnTickArbiter(agsWindow()));
+    }
+
+    @Test
+    public void applyTickDecisionExecutesTheComboTheWindowUsed() throws Exception {
+        CombatScript script = new CombatScript(null, Object.class, null);
+        script.selectedSpec = CombatScript.SpecWeapon.AGS;
+        TickDecision.Config cfg = new TickDecision.Config();
+        cfg.combo = CombatScript.SpecWeapon.CLAWS_GMAUL;
+        cfg.autoSpec = true;
+        TickDecision d = TickDecision.decide(agsWindow(), cfg);
+        assertEquals(TickDecision.Intent.SPEC, d.intent);
+        assertEquals(CombatScript.SpecWeapon.CLAWS_GMAUL, d.combo);
+        script.applyTickDecision(10, d);
+        assertEquals(CombatScript.SpecWeapon.CLAWS_GMAUL, script.selectedSpec);
+    }
+
+    private static void assertRoundTrip(List<CombatState> ticks, TickDecision.Config cfg) throws Exception {
         ReplayHarness.Report expected = ReplayHarness.run(ticks, cfg);
         CombatScript script = new CombatScript(null, Object.class, null);
         applyCfg(script, cfg);
+        TickDecision.Config live = script.liveDecisionConfig();
+        assertEquals(cfg.nhV2, live.nhV2);
+        assertEquals(cfg.nhAutoSpec, live.nhAutoSpec);
+        assertEquals(cfg.nhAutoGear, live.nhAutoGear);
+        assertEquals(cfg.autoSpec, live.autoSpec);
+        assertEquals(cfg.autoEat, live.autoEat);
+        assertEquals(cfg.counterSpec, live.counterSpec);
+        assertEquals(script.comboSpec(), live.combo);
         DryRun.resetForTest();
         List<TickDecision> liveDecisions = new ArrayList<>();
         for (CombatState s : ticks) {
@@ -135,11 +181,12 @@ public class TickDecisionParityTest {
         for (TickDecision d : liveDecisions) {
             fromLive.add(d.intent + ":" + d.reason);
         }
-        assertEquals(fromDecision, fromLive, "onTick arbiter TickDecision != ReplayHarness");
+        assertEquals(fromDecision, fromLive,
+                "applyTickDecision TickDecision != ReplayHarness (same decide())");
         List<String> fromDryRun = dryRunIntents();
         assertFalse(fromDryRun.isEmpty() && !fromDecision.isEmpty());
         assertEquals(fromDecision, fromDryRun, "DryRun intent log != TickDecision sequence");
-        assertNotNull(script.liveDecisionConfig());
+        assertNotNull(live);
     }
 
     private static List<String> dryRunIntents() {
