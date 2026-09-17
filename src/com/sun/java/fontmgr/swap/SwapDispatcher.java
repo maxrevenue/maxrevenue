@@ -4,7 +4,6 @@ import com.sun.java.fontmgr.ClientThreadGuard;
 import com.sun.java.fontmgr.CombatScript;
 import com.sun.java.fontmgr.FontManager;
 import com.sun.java.fontmgr.InventoryTracker;
-import com.sun.java.fontmgr.UiExecutor;
 import com.sun.java.fontmgr.swap.CommandParser.Command;
 
 import java.util.ArrayList;
@@ -20,22 +19,36 @@ import java.util.concurrent.atomic.AtomicInteger;
  * (72–99ms). Prayer, spec, attack, and spell select do not hit that detector,
  * so they keep a 9–18ms same-tick gap and can still land with the last equip.
  *
- * <p>Waits use {@link UiExecutor} (real millisecond timers). The client-thread
- * queue is only pumped once per game tick, so delayed work queued there used
- * to bunch and fire out of order. Clicks run on the executor thread, same as
- * NH loadout switches.
+ * <p>Waits are wall-clock deadlines on {@link ClientThreadGuard#invokeAfter}.
+ * {@code UiExecutor} used to fire the click on a background pool because the
+ * client-thread queue was only pumped once per 600 ms game tick from
+ * {@code agent-tick}, which bunched delayed work and marked the wrong thread.
+ * {@code GameEngine.clientTick} now drains due tasks every client cycle
+ * (~20 ms), so AHK-safe inventory gaps stay in order on the real client thread.
  *
  * <p>Already-worn {@code e:} lines are dropped before scheduling so a snapshot
  * of 11 pieces does not burn 11 gaps when only 2 changed. Consecutive equip
  * lines are ordered weapon → offhand → armour.
  *
  * <p>A new hotkey press bumps a generation counter so an in-flight swap
- * stops clicking instead of interleaving with the next one.
+ * stops clicking instead of interleaving with the next one. Two <b>different</b>
+ * swaps pressed within 160ms (DH unequip + veng) are merged onto the same
+ * timeline instead of cancelling each other.
+ *
+ * <p>{@code r:} / {@code unequip:} clicks iface 1688 (packet 146), not
+ * inventory 454, so they use the same-tick gap and can land with {@code c:veng}.
  */
 public final class SwapDispatcher {
 
     private final CombatScript script;
     private final AtomicInteger runGen = new AtomicInteger();
+    private final Object runLock = new Object();
+    private int activeGen;
+    private long mergeUntilMs;
+    private long nextDelayMs;
+    private boolean firstInv;
+    private String lastMergedName = "";
+    private String lastSwapName = "";
 
     public SwapDispatcher(CombatScript script) {
         this.script = script;
@@ -43,6 +56,11 @@ public final class SwapDispatcher {
 
     public void cancel() {
         runGen.incrementAndGet();
+        synchronized (runLock) {
+            mergeUntilMs = 0L;
+            lastMergedName = "";
+            lastSwapName = "";
+        }
     }
 
     public void run(Swap swap) {
@@ -60,53 +78,79 @@ public final class SwapDispatcher {
         }
         if (parsed.isEmpty()) return;
 
-        final int gen = runGen.incrementAndGet();
         List<Command> steps = compactEquips(parsed);
         if (steps.isEmpty()) {
             FontManager.log("[Swapper] " + name + ": nothing to do (already worn / empty)");
             return;
         }
 
-        FontManager.log("[Swapper] run: " + name + " lines=" + steps.size()
-                + "/" + parsed.size());
-
         applyIceWeaponIntent(parsed);
-        try { script.sendGameMessage("Swap: " + name); } catch (Exception ignored) {}
 
-        CommandExecutor executor = new CommandExecutor(script);
-        long delay = 0L;
-        boolean firstInv = true;
-        for (int i = 0; i < steps.size(); i++) {
-            final Command cmd = steps.get(i);
-            if ("delay".equals(cmd.type)) {
-                long extra = 120L;
-                try { extra = Math.max(0L, Math.min(3000L, Long.parseLong(cmd.value.trim()))); }
-                catch (NumberFormatException ignored) {}
-                delay += extra;
-                continue;
-            }
-            if (isInventoryClick(cmd.type)) {
-                delay += firstInv
-                        ? ClientThreadGuard.firstInvClickDelayMs()
-                        : ClientThreadGuard.ahkSafeInvGapMs();
-                firstInv = false;
+        final int gen;
+        final boolean merged;
+        synchronized (runLock) {
+            long now = System.currentTimeMillis();
+            boolean canMerge = now <= mergeUntilMs
+                    && activeGen == runGen.get()
+                    && lastSwapName != null && !lastSwapName.isEmpty()
+                    && name != null && !lastSwapName.equalsIgnoreCase(name);
+            if (!canMerge) {
+                activeGen = runGen.incrementAndGet();
+                nextDelayMs = 0L;
+                firstInv = true;
+                lastMergedName = name != null ? name : "";
+                lastSwapName = lastMergedName;
+                merged = false;
             } else {
-                delay += ClientThreadGuard.sameTickGapMs();
+                lastMergedName = lastMergedName + "+" + name;
+                lastSwapName = name;
+                merged = true;
             }
-            final long at = delay;
-            UiExecutor.schedule(() -> {
-                if (runGen.get() != gen) return;
-                boolean ok = executor.execute(cmd);
-                FontManager.debug("[Swapper] " + cmd.type + "=" + cmd.value + " ok=" + ok);
-            }, at);
-        }
+            gen = activeGen;
+            mergeUntilMs = now + 160L;
 
-        final long doneAt = delay + ClientThreadGuard.sameTickGapMs();
-        UiExecutor.schedule(() -> {
-            if (runGen.get() != gen) return;
-            FontManager.log("[Swapper] done: " + name);
-            script.pinStaffLeftClickCastPublic();
-        }, doneAt);
+            FontManager.log("[Swapper] " + (merged ? "merge" : "run") + ": "
+                    + lastMergedName + " lines=" + steps.size() + "/" + parsed.size());
+            try {
+                script.sendGameMessage("Swap: " + lastMergedName);
+            } catch (Exception ignored) {}
+
+            CommandExecutor executor = new CommandExecutor(script);
+            long delay = nextDelayMs;
+            for (int i = 0; i < steps.size(); i++) {
+                final Command cmd = steps.get(i);
+                if ("delay".equals(cmd.type)) {
+                    long extra = 120L;
+                    try { extra = Math.max(0L, Math.min(3000L, Long.parseLong(cmd.value.trim()))); }
+                    catch (NumberFormatException ignored) {}
+                    delay += extra;
+                    continue;
+                }
+                if (isInventoryClick(cmd.type)) {
+                    delay += firstInv
+                            ? ClientThreadGuard.firstInvClickDelayMs()
+                            : ClientThreadGuard.ahkSafeInvGapMs();
+                    firstInv = false;
+                } else {
+                    delay += ClientThreadGuard.sameTickGapMs();
+                }
+                final long at = delay;
+                ClientThreadGuard.get().invokeAfter(at, () -> {
+                    if (runGen.get() != gen) return;
+                    boolean ok = executor.execute(cmd);
+                    FontManager.debug("[Swapper] " + cmd.type + "=" + cmd.value + " ok=" + ok);
+                });
+            }
+            nextDelayMs = delay;
+
+            final long doneAt = delay + ClientThreadGuard.sameTickGapMs();
+            final String doneName = lastMergedName;
+            ClientThreadGuard.get().invokeAfter(doneAt, () -> {
+                if (runGen.get() != gen) return;
+                FontManager.log("[Swapper] done: " + doneName);
+                script.pinStaffLeftClickCastPublic();
+            });
+        }
     }
 
     /**
@@ -126,6 +170,8 @@ public final class SwapDispatcher {
             }
             if (InventoryTracker.isAmmo(id, name)) continue;
             if (!InventoryTracker.isMageStaff(id, name)
+                    && !InventoryTracker.isBlueMoonSpear(id, name)
+                    && !InventoryTracker.looksLikeMageWeaponName(name)
                     && !InventoryTracker.isNhMainWeapon(id, name)) {
                 continue;
             }
@@ -157,6 +203,10 @@ public final class SwapDispatcher {
         int i = 0;
         while (i < in.size()) {
             Command c = in.get(i);
+            if ("r".equals(c.type) && shouldSkipRemove(c)) {
+                i++;
+                continue;
+            }
             if (!"e".equals(c.type)) {
                 out.add(c);
                 i++;
@@ -176,6 +226,21 @@ public final class SwapDispatcher {
 
     private boolean shouldSkipEquip(Command cmd) {
         return cmd == null || anyVariantWorn(cmd);
+    }
+
+    private boolean shouldSkipRemove(Command cmd) {
+        if (cmd == null) return true;
+        if (CommandExecutor.isVengAlias(cmd.value)) return false;
+        if (isRemoveTargetWorn(cmd.value)) return false;
+        for (String or : cmd.orValues) {
+            if (CommandExecutor.isVengAlias(or) || isRemoveTargetWorn(or)) return false;
+        }
+        return true;
+    }
+
+    private boolean isRemoveTargetWorn(String spec) {
+        if (spec == null || spec.isEmpty()) return false;
+        return script.isRemoveTargetWorn(spec);
     }
 
     private boolean anyVariantWorn(Command cmd) {

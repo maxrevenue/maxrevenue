@@ -94,7 +94,7 @@ final class GameLauncher {
     static List<Long> findRoatPids() {
         List<Long> out = new ArrayList<>();
         String ps = "Get-CimInstance Win32_Process -Filter \"Name='java.exe' OR Name='javaw.exe'\" | "
-                + "Where-Object { $_.CommandLine -match 'roat-rl|roat-rl-saved|fontconfig-ext' } | "
+                + "Where-Object { $_.CommandLine -match 'roat-rl|roat-rl-saved|rpkzclient|roatpkz|fontconfig-ext' } | "
                 + "ForEach-Object { $_.ProcessId }";
         Process p = null;
         try {

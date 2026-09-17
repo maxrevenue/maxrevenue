@@ -85,7 +85,9 @@ public final class Presets {
             /* dharok */ false,
             /* nhV2 */ true, /* nhPray */ true, /* nhBarrage */ true, /* nhWalkUnder */ true,
             /* staffLc */ true,
-            /* autoSpec */ true, /* spec */ CombatScript.SpecWeapon.AGS_GMAUL,
+            // Off by default — auto-spec was yanking AGS while you were on Blue moon / Ice.
+            // Dump with the Spec hotkey (default R) when you want it.
+            /* autoSpec */ false, /* spec */ CombatScript.SpecWeapon.AGS_GMAUL,
             /* defPray */ true, /* protectItem */ true, /* veng */ true,
             /* comboEat */ true, /* autoEat */ true, /* eatPunish */ false);
 
@@ -143,6 +145,9 @@ public final class Presets {
         a.setNhAutoPrayer(s.nhPray);
         a.setNhAutoBarrage(s.nhBarrage);
         a.setNhAutoWalkUnder(s.nhWalkUnder);
+        // Presets never turn on Auto Gear — that was yanking range/melee mid-fight
+        // whenever Edge NH enabled NH V2. Opt in from Fight → Auto Gear.
+        a.setNhAutoGear(false);
         a.setStaffLeftClickCast(s.staffLc);
         a.setAutoSpec(s.autoSpec);
         a.setComboSetup(s.spec);

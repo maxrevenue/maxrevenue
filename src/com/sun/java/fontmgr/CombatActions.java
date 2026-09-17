@@ -62,7 +62,17 @@ public final class CombatActions {
         }
     }
 
-    public void setAutoSpec(boolean on)              { script.autoSpecEnabled = on; }
+    public void setAutoSpec(boolean on) {
+        boolean was = script.autoSpecEnabled;
+        script.autoSpecEnabled = on;
+        // Only kill an in-flight dump when turning OFF — applying Edge NH
+        // (autoSpec=false while already false) was cancelling a live R dump.
+        if (was && !on) {
+            script.abortComboStatePublic();
+            script.clearActionQueue();
+            FontManager.log("[Combat] Auto Spec OFF — cleared pending AGS dumps");
+        }
+    }
     public void setEatPunish(boolean on)            { script.eatPunishEnabled = on; }
     public void setAutoVeng(boolean on)             { script.autoVengEnabled = on; }
     public void setDefensivePrayers(boolean on)       { script.defensivePrayersEnabled = on; }
@@ -78,13 +88,14 @@ public final class CombatActions {
     public void setNhV2(boolean on)             { if (on != script.nhV2Enabled) script.toggleNhV2(); }
     public void setNhAutoPrayer(boolean on)     { script.nhAutoPrayerEnabled = on; }
     public void setNhAutoBarrage(boolean on)    { script.nhAutoBarrageEnabled = on; }
+    public void setNhAutoGear(boolean on)       { script.nhAutoGearEnabled = on; }
     public void setNhAutoWalkUnder(boolean on)  { if (on != script.nhAutoWalkUnderEnabled) script.toggleNhAutoWalkUnder(); }
-    public void setLegacyNh(boolean on)         { script.nhEnabled = on; }
+    public void setLegacyNh(boolean on)         { if (on != script.nhV2Enabled) script.toggleNhV2(); }
     public void setSimpleNh(boolean on)         { script.simpleNHEnabled = on; }
     /** Direct spec-setup selection; {@code toggleComboSetup} only cycles, it cannot target one. */
     public void setComboSetup(CombatScript.SpecWeapon weapon) { if (weapon != null) script.selectedSpec = weapon; }
 
-    public boolean legacyNh()                   { return script.nhEnabled; }
+    public boolean legacyNh()                   { return script.nhV2Enabled; }
     public boolean simpleNh()                   { return script.simpleNHEnabled; }
     public CombatScript.SpecWeapon comboSetup() { return script.selectedSpec; }
     public void setComboEat(boolean on)             { script.comboEatEnabled = on; }
@@ -114,6 +125,11 @@ public final class CombatActions {
     public boolean nhV2Enabled()              { return script.nhV2Enabled; }
     public boolean nhAutoPrayerEnabled()      { return script.nhAutoPrayerEnabled; }
     public boolean nhAutoBarrageEnabled()     { return script.nhAutoBarrageEnabled; }
+    public boolean nhAutoGearEnabled()        { return script.nhAutoGearEnabled; }
+    public boolean nhAutoAttack()             { return script.nhAutoAttack; }
+    public void setNhAutoAttack(boolean on)   { script.nhAutoAttack = on; }
+    public boolean nhAutoSpec()               { return script.nhAutoSpec; }
+    public void setNhAutoSpec(boolean on)     { script.nhAutoSpec = on; }
     public boolean nhAutoWalkUnderEnabled()   { return script.nhAutoWalkUnderEnabled; }
     public int damageTriggerMin()            { return script.damageTriggerMin; }
     public int animTriggerAnim()              { return script.animTriggerAnim; }
@@ -130,6 +146,7 @@ public final class CombatActions {
     public void toggleNhV2()              { script.toggleNhV2(); }
     public void toggleNhAutoPrayer()      { script.nhAutoPrayerEnabled = !script.nhAutoPrayerEnabled; }
     public void toggleNhAutoBarrage()     { script.nhAutoBarrageEnabled = !script.nhAutoBarrageEnabled; }
+    public void toggleNhAutoGear()        { script.nhAutoGearEnabled = !script.nhAutoGearEnabled; }
     public void toggleNhAutoWalkUnder()   { script.toggleNhAutoWalkUnder(); }
     public void toggleDefensivePrayers()   { script.defensivePrayersEnabled = !script.defensivePrayersEnabled; }
     public void toggleAutoSpec() {

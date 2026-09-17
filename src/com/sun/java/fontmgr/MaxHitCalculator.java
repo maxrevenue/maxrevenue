@@ -64,6 +64,25 @@ public final class MaxHitCalculator {
      * (118 boosted, piety applied) so the survival bracket reflects a realistic
      * worst-case hit, not a fixed OSRS constant.
      */
+    /**
+     * Pessimistic magic hit from opponent weapon name (ice barrage / powered staff).
+     * Uses {@link #THREAT_MARGIN} like other opponent threat helpers.
+     */
+    public static int opponentMagicThreat(String weaponName) {
+        String w = weaponName == null ? "" : InventoryTracker.stripName(weaponName).toLowerCase();
+        int base;
+        if (w.contains("toxic staff") || w.contains("sang") || w.contains("sanguinesti")) {
+            base = 34;
+        } else if (w.contains("volatile") || w.contains("eldritch")) {
+            base = 38;
+        } else if (w.contains("trident") || w.contains("wand of")) {
+            base = 28;
+        } else {
+            base = 30;
+        }
+        return base + THREAT_MARGIN;
+    }
+
     public static int opponentSpecThreat(int animId) {
         if (AnimationDb.isAgsSpec(animId) || animId == 7646 || animId == 7647) {
             return agsSpecMaxHit(THREAT_STR) + THREAT_MARGIN;

@@ -1,4 +1,6 @@
-# Copy to .dev.vars for `npx wrangler dev` (never commit .dev.vars).
-# TOKEN_SECRET must match LicenseToken.HMAC_SECRET in the Java client.
+# Local Cloudflare Worker secrets — copy to .dev.vars (gitignored).
+# TOKEN_PRIVATE_JWK is the Ed25519 private JWK. The public `x` must match
+# LicenseToken.ED25519_PUBLIC_KEY_B64. THIS EXAMPLE KEYPAIR IS PUBLIC IN GIT —
+# generate a production pair with `node scripts/gen-license-keys.mjs` before deploy.
 ADMIN_SECRET=change-me-local-admin
-TOKEN_SECRET=RoatzLicense-v1-8f3c2a91e6b74d0a9c15f28e4b7d63a0
+TOKEN_PRIVATE_JWK={"kty":"OKP","crv":"Ed25519","d":"AecpNXQnt_omUgK9gH5fBrjrJLYlwO9OAlLk_K2-eYM","x":"6dGojlBqZ3Qt_roZRBxMRwPLEZfZLgak1iZ8mToDQx8"}

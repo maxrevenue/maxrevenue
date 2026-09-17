@@ -127,6 +127,50 @@ final class ClassFilePatcher {
     }
 
     /**
+     * True when a non-abstract, non-native method with this name and descriptor
+     * exists. Used so tick-hook fallbacks do not warn on every missing alias.
+     */
+    static boolean hasMethod(byte[] classFile, String name, String descriptor) {
+        if (classFile == null || name == null || descriptor == null) return false;
+        ClassReader cr = new ClassReader(classFile);
+        final boolean[] found = {false};
+        cr.accept(new ClassVisitor(API) {
+            @Override
+            public MethodVisitor visitMethod(int access, String n, String d,
+                                             String signature, String[] exceptions) {
+                if (name.equals(n) && descriptor.equals(d)
+                        && (access & (Opcodes.ACC_ABSTRACT | Opcodes.ACC_NATIVE)) == 0) {
+                    found[0] = true;
+                }
+                return null;
+            }
+        }, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+        return found[0];
+    }
+
+    /** Concrete {@code ()V} method names, for hook-miss diagnostics. */
+    static String voidMethodNames(byte[] classFile) {
+        if (classFile == null) return "[]";
+        final StringBuilder b = new StringBuilder("[");
+        final boolean[] first = {true};
+        new ClassReader(classFile).accept(new ClassVisitor(API) {
+            @Override
+            public MethodVisitor visitMethod(int access, String n, String d,
+                                             String signature, String[] exceptions) {
+                if ("()V".equals(d)
+                        && (access & (Opcodes.ACC_ABSTRACT | Opcodes.ACC_NATIVE)) == 0) {
+                    if (!first[0]) b.append(", ");
+                    first[0] = false;
+                    b.append(n);
+                }
+                return null;
+            }
+        }, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+        b.append(']');
+        return b.toString();
+    }
+
+    /**
      * True when {@code needle} appears anywhere in the classfile's bytes. Used
      * for idempotency checks ("is this class already patched?"). The needles
      * used for that are ASCII method names, which are stored verbatim in the

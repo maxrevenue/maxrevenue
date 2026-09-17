@@ -20,6 +20,11 @@ repositories {
 // anywhere on the client's classpath, so these classes cannot be shadowed.
 dependencies {
     implementation("org.ow2.asm:asm:9.4")
+    // Ed25519 verify for LicenseToken (Java 11 — JDK EdDSA is 15+).
+    implementation("net.i2p.crypto:eddsa:0.3.0")
+    testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")
+    // Agent bridge (ReflectionStateSensor / ReflectionActionDispatcher) calls into
+    // the headless engine; core bytecode is bundled for -Droatz.v2engine=true (JVM 17+).
 }
 
 java {
@@ -27,7 +32,10 @@ java {
     // so compile to release 11 even though we build with a newer toolchain.
     sourceCompatibility = JavaVersion.VERSION_11
     targetCompatibility = JavaVersion.VERSION_11
+}
 
+tasks.test {
+    useJUnitPlatform()
 }
 
 // Agent source lives directly under src/ (not the default src/main/java).
@@ -37,6 +45,11 @@ sourceSets {
     main {
         java.setSrcDirs(listOf("src"))
     }
+    test {
+        // Must stay outside src/ — main's srcDir is `src`, which would otherwise
+        // compile tests into the agent JAR.
+        java.setSrcDirs(listOf("test"))
+    }
     create("launcher") {
         java.setSrcDirs(listOf("launcher/src"))
         compileClasspath += sourceSets["main"].output
@@ -44,6 +57,51 @@ sourceSets {
         runtimeClasspath += output
         runtimeClasspath += compileClasspath
     }
+    // ── Modern Sense-Think-Act engine (com.automation.core) ──────────────────
+    // Isolated from the agent's release-11 `src/` so it can use Java 17 records
+    // and sealed interfaces. It is a standalone, client-decoupled module and is
+    // Bundled into fontmanager-windows.jar when the v2 reflection bridge is enabled.
+    create("core") {
+        java.setSrcDirs(listOf("core/src/main/java"))
+    }
+    create("coreTest") {
+        java.setSrcDirs(listOf("core/src/test/java"))
+        resources.setSrcDirs(listOf("core/src/test/resources"))
+        compileClasspath += sourceSets["core"].output
+        runtimeClasspath += sourceSets["core"].output
+    }
+}
+
+// JUnit 5 for the core engine's headless tests (config auto-created by the
+// `coreTest` source set above).
+dependencies {
+    "coreTestImplementation"("org.junit.jupiter:junit-jupiter:5.10.2")
+}
+
+// The core module targets Java 17 (records, sealed interfaces); the agent stays
+// on release 11. Same JDK 21 toolchain compiles both.
+tasks.named<JavaCompile>("compileCoreJava") {
+    options.release.set(17)
+}
+tasks.named<JavaCompile>("compileCoreTestJava") {
+    options.release.set(17)
+}
+
+tasks.named<JavaCompile>("compileJava") {
+    dependsOn(tasks.named("compileCoreJava"))
+    classpath += sourceSets["core"].output.classesDirs
+}
+
+val coreTest by tasks.registering(Test::class) {
+    group = "verification"
+    description = "Headless JUnit 5 tests for the com.automation.core Sense-Think-Act engine"
+    testClassesDirs = sourceSets["coreTest"].output.classesDirs
+    classpath = sourceSets["coreTest"].runtimeClasspath
+    useJUnitPlatform()
+}
+
+tasks.named("check") {
+    dependsOn(coreTest)
 }
 
 // ── Agent JAR (load-time + dynamic-attach) ───────────────────────────────
@@ -54,6 +112,7 @@ val agentJar by tasks.registering(Jar::class) {
     // Self-contained agent: main classes plus the bundled ASM used by
     // ClassFilePatcher (the client ships no ASM of its own).
     from(sourceSets.main.get().output)
+    from(sourceSets["core"].output)
     from(configurations.runtimeClasspath.map { cfg ->
         cfg.map { dep -> if (dep.isDirectory) dep else zipTree(dep) }
     })
@@ -124,10 +183,11 @@ val verifyHarness by tasks.registering(JavaCompile::class) {
     destinationDirectory.set(layout.buildDirectory.dir("verify/harness"))
 }
 
-// Patches the four real client classes out of game.jar, defines them in a fresh
-// class loader, force-links them with resolveClass (a VerifyError fails the
-// link), then re-runs the agent via -javaagent and via Dynamic Attach against
-// stubs that carry branches/switch/try-catch.
+// Patches the four telemetry classes out of game.jar (plus GameEngine when
+// present), defines them in a fresh class loader, force-links them with
+// resolveClass (a VerifyError fails the link), then re-runs the agent via
+// -javaagent and via Dynamic Attach against stubs that carry
+// branches/switch/try-catch (including GameEngine.clientTick).
 tasks.register<JavaExec>("verify") {
     group = "verification"
     description = "Patch/link/verify the real client classes and both agent entry points"
@@ -166,6 +226,11 @@ val launcherJar by tasks.registering(Jar::class) {
         // Shared palette: roatz.launcher.Theme delegates to it, so the launcher
         // must not depend on agent.jar being on the classpath after it.
         include("com/sun/java/fontmgr/Theme.class")
+    }
+    from(configurations.runtimeClasspath.map { cfg ->
+        cfg.map { dep -> if (dep.isDirectory) dep else zipTree(dep) }
+    }) {
+        include("net/i2p/**")
     }
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
     manifest {
@@ -249,7 +314,7 @@ val jpackageImage by tasks.registering(Exec::class) {
     args(
         "--type", "app-image",
         "--name", "Roatz",
-        "--app-version", "1.0.0",
+        "--app-version", "1.0.8",
         "--vendor", "Roatz",
         "--description", "Roatz launcher",
         "--input", inputDir.get().asFile.absolutePath,

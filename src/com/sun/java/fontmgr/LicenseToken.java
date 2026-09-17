@@ -1,23 +1,40 @@
 package com.sun.java.fontmgr;
 
-import javax.crypto.Mac;
-import javax.crypto.spec.SecretKeySpec;
+import net.i2p.crypto.eddsa.EdDSAEngine;
+import net.i2p.crypto.eddsa.EdDSAPublicKey;
+import net.i2p.crypto.eddsa.spec.EdDSANamedCurveSpec;
+import net.i2p.crypto.eddsa.spec.EdDSANamedCurveTable;
+import net.i2p.crypto.eddsa.spec.EdDSAPublicKeySpec;
+
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.PublicKey;
+import java.security.Signature;
 import java.util.Base64;
 
 /**
- * Compact HMAC token: {@code v1.<base64url(key|hwid|exp)>.<base64url(sig)>}.
+ * Compact Ed25519 token: {@code v2.<base64url(key|hwid|exp)>.<base64url(sig)>}.
  *
- * <p>The Worker ({@code license-server}) signs with the same secret
- * ({@code TOKEN_SECRET} / {@link #HMAC_SECRET}). This is a sharing speed-bump,
- * not unbreakable DRM — the secret ships in the client.
+ * <p>The Worker ({@code license-server}) signs with {@code TOKEN_PRIVATE_JWK}.
+ * This class holds only the matching public key. HMAC {@code v1} tokens are
+ * rejected — the old shared secret is gone from the client.
+ *
+ * <p>The default public key is the <em>local example</em> pair in
+ * {@code license-server/.dev.vars.example}. Generate a production pair with
+ * {@code node scripts/gen-license-keys.mjs} before deploy; see
+ * {@code docs/license-ed25519.md}.
  */
 public final class LicenseToken {
 
     /**
-     * Must match the Worker's {@code TOKEN_SECRET} (wrangler secret / {@code .dev.vars}).
+     * Example / local-dev Ed25519 public key (32 bytes, base64url).
+     * Override with {@code -Droatz.token.pubkey=} (tests, production rotation).
      */
-    public static final String HMAC_SECRET = "RoatzLicense-v1-8f3c2a91e6b74d0a9c15f28e4b7d63a0";
+    public static final String ED25519_PUBLIC_KEY_B64 =
+            "6dGojlBqZ3Qt_roZRBxMRwPLEZfZLgak1iZ8mToDQx8";
+
+    private static final EdDSANamedCurveSpec ED25519 =
+            EdDSANamedCurveTable.getByName("Ed25519");
 
     private LicenseToken() {}
 
@@ -37,10 +54,11 @@ public final class LicenseToken {
         }
     }
 
-    public static String hmacSecret() {
-        String override = System.getProperty("roatz.token.secret");
-        if (override != null && !override.isEmpty()) return override;
-        return HMAC_SECRET;
+    /** Base64url public key used for verify. Never a private key. */
+    public static String publicKeyB64() {
+        String override = System.getProperty("roatz.token.pubkey");
+        if (override != null && !override.isEmpty()) return override.trim();
+        return ED25519_PUBLIC_KEY_B64;
     }
 
     /**
@@ -58,14 +76,13 @@ public final class LicenseToken {
     static Claims parseAndCheckSig(String token) {
         String[] parts = token.split("\\.", 3);
         if (parts.length != 3) return null;
-        if (!"v1".equals(parts[0])) return null;
+        if (!"v2".equals(parts[0])) return null;
         if (parts[1].isEmpty() || parts[2].isEmpty()) return null;
         try {
-            byte[] expected = hmac(("v1." + parts[1]).getBytes(StandardCharsets.UTF_8));
             byte[] actual = b64urlDecode(parts[2]);
-            if (expected == null || actual == null || !constantEquals(expected, actual)) {
-                return null;
-            }
+            if (actual == null || actual.length != 64) return null;
+            byte[] msg = ("v2." + parts[1]).getBytes(StandardCharsets.UTF_8);
+            if (!ed25519Verify(publicKeyBytes(), msg, actual)) return null;
             String payload = new String(b64urlDecode(parts[1]), StandardCharsets.UTF_8);
             int a = payload.indexOf('|');
             int b = payload.lastIndexOf('|');
@@ -80,13 +97,24 @@ public final class LicenseToken {
         }
     }
 
-    static byte[] hmac(byte[] data) {
+    static byte[] publicKeyBytes() {
+        byte[] raw = b64urlDecode(publicKeyB64());
+        if (raw == null || raw.length != 32) {
+            throw new IllegalStateException("Ed25519 public key must be 32 bytes base64url");
+        }
+        return raw;
+    }
+
+    static boolean ed25519Verify(byte[] pub32, byte[] message, byte[] sig64) {
         try {
-            Mac mac = Mac.getInstance("HmacSHA256");
-            mac.init(new SecretKeySpec(hmacSecret().getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
-            return mac.doFinal(data);
+            EdDSAPublicKeySpec spec = new EdDSAPublicKeySpec(pub32, ED25519);
+            PublicKey pub = new EdDSAPublicKey(spec);
+            Signature engine = new EdDSAEngine(MessageDigest.getInstance("SHA-512"));
+            engine.initVerify(pub);
+            engine.update(message);
+            return engine.verify(sig64);
         } catch (Exception e) {
-            return null;
+            return false;
         }
     }
 
@@ -96,13 +124,6 @@ public final class LicenseToken {
         } catch (IllegalArgumentException e) {
             return null;
         }
-    }
-
-    static boolean constantEquals(byte[] a, byte[] b) {
-        if (a == null || b == null || a.length != b.length) return false;
-        int r = 0;
-        for (int i = 0; i < a.length; i++) r |= a[i] ^ b[i];
-        return r == 0;
     }
 
     static long nowUnix() {

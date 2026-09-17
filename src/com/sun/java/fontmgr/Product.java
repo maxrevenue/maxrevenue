@@ -6,7 +6,8 @@ package com.sun.java.fontmgr;
 public final class Product {
 
     public static final String NAME = "Roatz";
-    public static final String VERSION = "1.0.0";
+    /** Bump when shipping HUD changes so Play/Attach builds are easy to verify. */
+    public static final String VERSION = "1.0.8";
 
     /**
      * Default license API. Override with {@code -Droatz.license.api=},

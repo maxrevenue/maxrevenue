@@ -396,6 +396,8 @@ public final class PrayerController {
 
     void fireProtectNow(int prayerId) {
         script.lastAction("PROT_NOW_" + prayerId + "@" + script.currentTick());
+        // Hotkey path: hop to the GameEngine tick drain. Auto-pray from
+        // CombatScript.onTick still runs on agent-tick (decision pipeline).
         ClientThreadGuard.get().invokeLater(() ->
                 activateProtectPrayer(prayerId, AnimationDb.protectPrayerName(prayerId), true));
     }
@@ -554,6 +556,8 @@ public final class PrayerController {
     }
 
     void markProtectActivatedPublic(int prayerId, String label, long now) {
+        String enumName = AnimationDb.protectPrayerEnumName(prayerId);
+        deactivateOtherProtectOverheads(enumName);
         script.activeProtectPrayer(prayerId);
         script.lastPrayerSwitchMs(now);
         script.lastAction(label.replace(' ', '_').toUpperCase() + "@" + script.currentTick());
@@ -698,7 +702,8 @@ public final class PrayerController {
         // (#2) Corroborated gear switches skip the stability wait, same as the
         // detector. False while the flag is off, so these two gates are unchanged.
         boolean weaponTrusted = weaponStableTicks >= WEAPON_STABLE_TICKS
-                || gearCorroboratedThisTick;
+                || gearCorroboratedThisTick
+                || inOpponentAttackWindow(tick, lastRawWeaponStyle);
 
         int anim = script.lastTargetAnim();
         AnimationDb.AttackStyle animStyle = animToStyle(anim);
@@ -811,7 +816,8 @@ public final class PrayerController {
         // read that was stable, and gearCorroboratedThisTick is false while the flag
         // is off — so the animation paths below behave exactly as before.
         boolean weaponTrusted = weaponStableTicks >= WEAPON_STABLE_TICKS
-                || gearCorroboratedThisTick;
+                || gearCorroboratedThisTick
+                || inOpponentAttackWindow(tick, rawWeapon);
 
         if (script.isFreshIncomingHit() && animStyle != AnimationDb.AttackStyle.UNKNOWN) {
             noteConfirmedStyle(tick, animStyle);
@@ -819,6 +825,9 @@ public final class PrayerController {
         }
 
         // Mid-swing always beats equipment (real attack style this tick).
+        // isCombatAttackAnimation() only returns true for anims we already know a
+        // style for, so animStyle can't be UNKNOWN here — an "unknown attack" has
+        // no separate signal, so those fall through to the gear path below.
         if (combatAnim && animStyle != AnimationDb.AttackStyle.UNKNOWN) {
             return trace("anim", animStyle);
         }
@@ -837,6 +846,12 @@ public final class PrayerController {
                         + " (skipped " + WEAPON_STABLE_TICKS + "-tick wait, w="
                         + script.opponentLoadout().weaponId() + ")");
                 return trace("gear-corr", rawWeapon);
+            }
+            if (weaponStableTicks < WEAPON_STABLE_TICKS
+                    && inOpponentAttackWindow(tick, rawWeapon)) {
+                FontManager.prayLog("DEF_CYCLE@" + tick + " swing window -> " + rawWeapon
+                        + " sinceAtk=" + (tick - script.lastOppAttackTick));
+                return trace("cycle", rawWeapon);
             }
             return trace("gear-stable", rawWeapon);
         }
@@ -956,6 +971,24 @@ public final class PrayerController {
         prevRawWeaponStyle = style;
         lastRawWeaponStyle = style;
         weaponStableTicks = WEAPON_STABLE_TICKS;
+    }
+
+    /**
+     * True when the opponent is in the last two ticks of their swing cycle —
+     * weapon-only tribrid switches here are real, not 1-tick bait far from cycle.
+     *
+     * <p>Deliberately excludes the "just swung" tick (since &lt;= 1): right after
+     * a swing is exactly where a 1-tick bait flick lands, and
+     * {@link #noteConfirmedStyle} already trusts the weapon on a confirmed hit.
+     */
+    private boolean inOpponentAttackWindow(int tick, AnimationDb.AttackStyle style) {
+        if (style == null || style == AnimationDb.AttackStyle.UNKNOWN) return false;
+        int since = tick - script.lastOppAttackTick;
+        if (since < 0 || since > 10) return false;
+        int cycle = script.opponentLoadout().attackCycleTicks();
+        if (cycle <= 0) return false;
+        int phase = since % cycle;
+        return phase >= cycle - 2;
     }
 
     private static AnimationDb.AttackStyle animToStyle(int anim) {

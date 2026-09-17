@@ -29,8 +29,15 @@ public final class HardcodedCombatAgent implements ClassFileTransformer {
     private static final String HTTP_HELPER    = "com/roatpkz/client/game/net/HttpHelper";
     private static final String AHK            = "com/roatpkz/client/game/security/AhkDetection";
     private static final String MOUSE_HANDLER  = "com/roatpkz/client/game/engine/impl/MouseHandler";
+    private static final String GAME_ENGINE    = "com/roatpkz/client/game/engine/GameEngine";
+    private static final String ROAT_CLIENT    = "com/roatpkz/client/Client";
     private static final String CLIENT_HOOKS   = "com/sun/java/fontmgr/ClientHooks";
     private static final String MOUSE_EVENT    = "(Ljava/awt/event/MouseEvent;)V";
+    private static final String VOID_VOID      = "()V";
+    /** Cycle methods we prepend {@link ClientHooks#onClientTick()} onto. */
+    private static final String[] CLIENT_TICK_METHODS = {
+            "clientTick", "processGameLoop", "doCycle", "graphicsTick"
+    };
     private static volatile boolean defaultsApplied = false;
 
     private HardcodedCombatAgent() {}
@@ -47,7 +54,9 @@ public final class HardcodedCombatAgent implements ClassFileTransformer {
                         || "com.roatpkz.client.game.security.AhkDetection".equals(n)
                         || "com.roatpkz.common.DebugPrintStream".equals(n)
                         || "com.roatpkz.client.game.engine.impl.MouseHandler".equals(n)
-                        || "com.roatpkz.client.game.engine.GameEngine".equals(n)) {
+                        || "com.roatpkz.client.game.engine.GameEngine".equals(n)
+                        || "com.roatpkz.client.Client".equals(n)
+                        || n.endsWith(".GameEngine")) {
                     if (inst.isModifiableClass(c)) loaded.add(c);
                 }
             }
@@ -130,6 +139,13 @@ public final class HardcodedCombatAgent implements ClassFileTransformer {
                 }
                 return patched == classfileBuffer ? null : patched;
             }
+            if (isClientTickHost(className)) {
+                byte[] patched = patchClientTick(classfileBuffer, className);
+                if (patched != classfileBuffer) {
+                    FontManager.log("[Agent] " + className + " tick hook installed");
+                }
+                return patched == classfileBuffer ? null : patched;
+            }
         } catch (Throwable ignored) {}
         return null;
     }
@@ -143,6 +159,46 @@ public final class HardcodedCombatAgent implements ClassFileTransformer {
         patched = tryPrepend(patched, "mouseMoved", MOUSE_EVENT, CLIENT_HOOKS, "onMouseMoved", "()V");
         patched = tryPrepend(patched, "mouseDragged", MOUSE_EVENT, CLIENT_HOOKS, "onMouseMoved", "()V");
         return patched;
+    }
+
+    private static boolean isClientTickHost(String className) {
+        return GAME_ENGINE.equals(className)
+                || ROAT_CLIENT.equals(className)
+                || (className != null && className.endsWith("/GameEngine"));
+    }
+
+    /**
+     * Prepend {@link ClientHooks#onClientTick()} to the client's cycle method.
+     * Tries several well-known names so a rename does not silently disable
+     * dispatch. Idempotent via the {@code onClientTick} UTF-8 needle.
+     *
+     * <p><b>Exactly one method is hooked.</b> The loop stops at the first alias
+     * that exists. Hooking every matching alias (the previous behaviour) pumps
+     * {@link ClientThreadGuard#pump()} from more than one method per cycle and,
+     * when those methods run on different threads (logic vs render), makes
+     * {@code markClientThread()} flip-flop — which defeats
+     * {@code assertClientThread()} and can re-introduce off-thread mutation.
+     * {@code clientTick} is the game-logic cycle; {@code graphicsTick} is only a
+     * last-resort alias and is never used when a logic method is present.
+     */
+    private static byte[] patchClientTick(byte[] classFile, String className) {
+        if (ClassFilePatcher.containsUtf8(classFile, "onClientTick")) {
+            return classFile;
+        }
+        for (int i = 0; i < CLIENT_TICK_METHODS.length; i++) {
+            String method = CLIENT_TICK_METHODS[i];
+            if (!ClassFilePatcher.hasMethod(classFile, method, VOID_VOID)) continue;
+            byte[] next = tryPrepend(classFile, method, VOID_VOID, CLIENT_HOOKS, "onClientTick", VOID_VOID);
+            if (next != classFile) {
+                return next;
+            }
+        }
+        if (GAME_ENGINE.equals(className)) {
+            FontManager.warn("[Agent] GameEngine tick hook not installed: no "
+                    + "clientTick/processGameLoop/doCycle/graphicsTick on " + className
+                    + " void methods=" + ClassFilePatcher.voidMethodNames(classFile));
+        }
+        return classFile;
     }
 
     private static byte[] tryPrepend(byte[] classFile, String method, String descriptor,
@@ -243,5 +299,6 @@ public final class HardcodedCombatAgent implements ClassFileTransformer {
         // Do NOT force defensivePrayersEnabled / comboEat off — MiniOverlay + user toggles own those.
         script.animTriggerEnabled      = false;
         script.damageTriggerEnabled    = false;
+        script.gearCorroboratedDefPrayer = true;
     }
 }

@@ -14,6 +14,7 @@ build/
 # ── Temp / generated ──────────────────────────────────────────────────────
 _vidframes/
 *.log
+logs/replays/*.ndjson
 
 # ── OS / editor cruft ─────────────────────────────────────────────────────
 Thumbs.db
@@ -32,3 +33,10 @@ license-server/.wrangler/
 license-server/.dev.vars
 license-server/.prod.vars
 license-server/worker-configuration.d.ts
+
+# ── Ops / Discord / pricing (never publish) ───────────────────────────────
+docs/discord-setup.md
+tools/discord-setup.mjs
+**/discord-bot-token*
+**/.env
+**/.env.*

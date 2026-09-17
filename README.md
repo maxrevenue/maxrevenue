@@ -40,7 +40,7 @@ Currently deployed Worker (`license-server/`):
 | URL | `https://roatz-license.alec-5c7.workers.dev` |
 | Worker name | `roatz-license` |
 | KV binding | `LICENSES` → `roatz-license-licenses` (`c9073d13ebe4413a8fa832bd2ed31cf0`) |
-| Secrets | `TOKEN_SECRET`, `ADMIN_SECRET` |
+| Secrets | `TOKEN_PRIVATE_JWK`, `ADMIN_SECRET` |
 
 The `LICENSES` binding is pinned to the namespace id in `wrangler.jsonc`, so
 redeploys resolve the same KV store instead of provisioning a new one. (The id
@@ -53,10 +53,11 @@ cd license-server
 npm install
 npx wrangler login
 
-# TOKEN_SECRET must equal LicenseToken.HMAC_SECRET
-# (src\com\sun\java\fontmgr\LicenseToken.java). If they differ, activation
-# succeeds but every token fails verification in the client.
-'<paste HMAC_SECRET>' | npx wrangler secret put TOKEN_SECRET
+# TOKEN_PRIVATE_JWK is an Ed25519 JWK (private `d` + public `x`).
+# Generate with:  node scripts/gen-license-keys.mjs
+# Paste the JSON into wrangler; put the public `x` in LicenseToken.java.
+# Never put TOKEN_PRIVATE_JWK in the client. The old HMAC TOKEN_SECRET is retired.
+npx wrangler secret put TOKEN_PRIVATE_JWK
 
 # ADMIN_SECRET guards /v1/issue and /v1/revoke. Generate a strong one, keep it
 # in a password manager, and never ship it to buyers.
@@ -66,9 +67,9 @@ npx wrangler deploy      # prints https://roatz-license.<account>.workers.dev
 npx wrangler secret list
 ```
 
-Rotating `TOKEN_SECRET` is just another `secret put`. Tokens already cached by
-buyers stay valid until their 72h TTL expires, after which `/v1/check` re-issues
-from the new secret. No installer rebuild is needed for secret rotation.
+Rotating the signing key **requires a client rebuild** (the public key is compiled
+in). Cached tokens signed with the previous key fail until buyers Activate again.
+See `docs/license-ed25519.md`.
 
 ### 2. Verify the live Worker
 
@@ -144,7 +145,7 @@ rebuild means editing the `java-options=-Droatz.license.api=` line in
 
 ```powershell
 cd license-server
-copy .dev.vars.example .dev.vars    # edit ADMIN_SECRET + TOKEN_SECRET
+copy .dev.vars.example .dev.vars    # edit ADMIN_SECRET + TOKEN_PRIVATE_JWK
 npx wrangler dev --port 8787
 # other terminal:
 $env:ROATZ_LICENSE_API  = "http://127.0.0.1:8787"
@@ -166,7 +167,8 @@ RoatzBot/
 ├── launcher/src/roatz/launcher/    # branded Swing launcher
 ├── license-server/                 # Cloudflare Worker license API
 ├── installer/roatz.iss             # Inno Setup script
-├── scripts/                        # issue-key / revoke-key
+├── scripts/                        # issue-key / revoke-key / gen-license-keys
+├── docs/license-ed25519.md         # Ed25519 token rotation
 ├── tools/AttachLoader.java         # Dynamic Attach driver (PID -> loadAgent)
 ├── com/                            # decompiled client classes (gitignored)
 ├── config/*.gsoft                  # combo config templates
@@ -192,6 +194,8 @@ RoatzBot/
 .\build.bat
 # or directly:
 .\gradlew.bat buildAll
+.\gradlew.bat test
+cd license-server; node --test test/token.test.mjs
 ```
 
 Produces `build\fontmanager-windows.jar` and `build\attach\AttachLoader.class`.
@@ -250,9 +254,13 @@ SCRIPT|SPEC     -> SCRIPT|spec_fired
 SCRIPT|STATUS   -> SCRIPT_STATUS|enabled=..|tick=..|autoEat=..
 LOG             -> LOG|<last 30 log/warn lines, " ;; " separated>
 LOOTER|...      -> LOOTER|...
+OVERLAY|LIST    -> OVERLAY|tiles=on|...
+OVERLAY|ON|tiles / OVERLAY|OFF|tiles
+OVERLAY|MARK|x|y|plane / OVERLAY|UNMARK|x|y|plane / OVERLAY|CLEAR
 BYE             -> BYE
 ```
 
+See also [`docs/overlays.md`](docs/overlays.md) for the in-game tile overlay API.
 Optional hardening: set `-Dagent.cmd.token=<secret>` and every connection must
 send `AUTH|<secret>` first (the `READY` banner then advertises `auth=required`).
 Without that property the socket stays open to any local process, as before.
@@ -302,6 +310,17 @@ See `config/gsoft-ags-gmaul-combo.gsoft` for an example block.
   `-Dagent.filelog=true`. Unresolved client reflection handles and listener
   errors are reported as `WARN` entries so a client update cannot make the agent
   silently inert again.
+- **Client-thread dispatch.** `doAction` / prayer / spec / swap clicks are
+  queued on `ClientThreadGuard` and drained by an ASM prepend on
+  `GameEngine.clientTick` (fallbacks: `processGameLoop`, `doCycle`,
+  `graphicsTick`) — the same idiom as the `MouseHandler` hooks. `TickEngine`
+  (`agent-tick`, ~600 ms) still runs combat *decisions* but must not drain the
+  queue: that used to mark the poller as the client thread, so
+  `assertClientThread()` was a no-op and `UiExecutor` (a background pool) mutated
+  client state. Inventory gaps stay wall-clock deadlines (AHK-safe 72–99 ms);
+  `clientTick` runs every client cycle (~20 ms) so they do not bunch. If the
+  cycle method is renamed, `TickEngine` warns that queued tasks are stalled
+  instead of silently clicking off-thread.
 - The prayer diagnostics file (`fontconfig-pray.dat`) is now written only when
   `-Dfontmgr.praylog=true` (or with file logging on), not on every session.
 - The game JAR is located under `%USERPROFILE%\rpkzclient\` and is copied to

@@ -10,6 +10,9 @@ import java.util.concurrent.atomic.AtomicLong;
 /**
  * Client.tick increments every render cycle (~20ms). A game tick is ~30 cycles.
  * Combat runs on this dedicated thread so a slow onTick cannot skip the next dump.
+ * Decision listeners still fire here; client-state mutation is queued on
+ * {@link ClientThreadGuard} and drained by {@link ClientHooks#onClientTick()}
+ * on the real client thread. This poller must never call {@code pump()}.
  *
  * <p>Resolution order (most to least authoritative):
  *   1. {@code serverTick} field — set by the server, exact.
@@ -50,6 +53,8 @@ public class TickEngine implements Runnable {
 
     /** Consecutive poll failures; surfaced so a broken client field is visible. */
     private final AtomicLong pollErrors = new AtomicLong();
+    /** GameEngine tick hook never marked a thread while work sat in the queue. */
+    private final AtomicLong stallWarns = new AtomicLong();
 
     public TickEngine(Class<?> clientClass, Object clientInstance) throws NoSuchFieldException {
         Field tick = findField(clientClass, "tick");
@@ -107,6 +112,7 @@ public class TickEngine implements Runnable {
     public void removeListener(TickListener l) { listeners.remove(l); }
     public int  getLastTick()                  { return lastGameTick; }
     public long getPollErrors()                { return pollErrors.get(); }
+    public long getStallWarns()                { return stallWarns.get(); }
 
     @Override
     public void run() {
@@ -168,6 +174,23 @@ public class TickEngine implements Runnable {
         }
     }
 
+    /**
+     * {@link ClientThreadGuard#pump()} is owned by {@link ClientHooks#onClientTick()}.
+     * If the ASM hook missed (client renamed the cycle method) queued swaps sit
+     * forever — surface that instead of silently falling back to agent-tick.
+     */
+    private void warnIfClientQueueStalled() {
+        ClientThreadGuard guard = ClientThreadGuard.get();
+        int pending = guard.pendingCount();
+        if (pending <= 0 || guard.hasClientThread()) return;
+        long n = stallWarns.incrementAndGet();
+        if (n <= 3L || n % 50L == 0L) {
+            FontManager.warn("[TickEngine] " + pending
+                    + " client-thread task(s) waiting but GameEngine tick hook has not marked a thread"
+                    + " (warn #" + n + ")");
+        }
+    }
+
     private void fireGameTick(int tick, long now) {
         lastGameTick = tick;
         lastFireMs = now;
@@ -184,7 +207,7 @@ public class TickEngine implements Runnable {
             }
         }
 
-        ClientThreadGuard.get().pump();
+        warnIfClientQueueStalled();
         for (TickListener l : listeners) {
             try {
                 l.onTick(tick);
