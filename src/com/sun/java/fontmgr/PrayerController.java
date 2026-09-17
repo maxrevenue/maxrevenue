@@ -325,6 +325,30 @@ public final class PrayerController {
         }
     }
 
+    /**
+     * Canonical prayer names the EchoForge engine models, in stable order.
+     * Names absent from this client's Prayer enum read as inactive, so a client
+     * rename degrades to a shorter list rather than throwing on the tick thread.
+     */
+    private static final String[] RECORDED_PRAYERS = {
+            "PROTECT_FROM_MELEE", "PROTECT_FROM_MISSILES", "PROTECT_FROM_MAGIC",
+            "PIETY", "RIGOUR", "AUGURY", "SMITE", "REDEMPTION"
+    };
+
+    /**
+     * Active prayers among {@link #RECORDED_PRAYERS}, for the NDJSON recorder.
+     * Called only when recording is enabled (never on the hot path otherwise).
+     */
+    public java.util.List<String> activePrayerNames() {
+        java.util.List<String> out = new java.util.ArrayList<>(4);
+        for (String name : RECORDED_PRAYERS) {
+            if (isPrayerActive(name)) {
+                out.add(name);
+            }
+        }
+        return out;
+    }
+
     private boolean trySendPrayerEnumByName(String enumName) {
         if (enumName == null) return false;
         Object helper = script.livePacketHelper();

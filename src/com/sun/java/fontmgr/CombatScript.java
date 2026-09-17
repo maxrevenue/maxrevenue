@@ -1306,6 +1306,8 @@ public class CombatScript implements TickListener {
                     opponentLoadout != null ? opponentLoadout.weaponId() : 0,
                     lastTargetAnim,
                     stateReader != null ? stateReader.distanceTo(cachedTarget) : -1,
+                    recordedTargetStyle(),
+                    this.prayer.activePrayerNames(),
                     recordedAction(currentTick));
         }
     }
@@ -3375,6 +3377,20 @@ public class CombatScript implements TickListener {
             return "PRAYER:" + lastPrayerName;
         }
         return lastAction != null ? lastAction : "";
+    }
+
+    /**
+     * Attack style implied by the opponent's worn weapon, for the NDJSON
+     * {@code target.attackStyle} field. Reads the per-tick loadout the combat
+     * loop already captured — no extra reflection on the tick thread.
+     */
+    private String recordedTargetStyle() {
+        OpponentLoadout lo = opponentLoadout;
+        if (lo == null || lo.isEmpty()) {
+            return AnimationDb.AttackStyle.UNKNOWN.name();
+        }
+        AnimationDb.AttackStyle style = lo.weaponStyle();
+        return style == null ? AnimationDb.AttackStyle.UNKNOWN.name() : style.name();
     }
 
     public TickRecorder recorder() {

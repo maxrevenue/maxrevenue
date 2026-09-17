@@ -163,6 +163,8 @@ public final class TickRecorder {
      * @param weaponId       target weapon id, or {@code 0}/{@code -1} unknown
      * @param animationId    target animation id, or {@code -1}
      * @param distance       chebyshev tile distance, or {@code -1} unknown
+     * @param attackStyle    opponent style: {@code MELEE}/{@code RANGED}/{@code MAGIC}/{@code UNKNOWN}
+     * @param prayers        active local prayer names, e.g. {@code ["PIETY"]} (may be null)
      * @param executedAction raw agent action label, e.g. {@code "ARB_EAT_dh-axe@123"}.
      *                       Written as compact {@code executedAction} plus the raw
      *                       {@code actionLabel}; see {@link #compactExecutedAction(String)}
@@ -173,6 +175,8 @@ public final class TickRecorder {
                            Map<Integer, Integer> inventory,
                            int targetHp, int targetMaxHp,
                            int weaponId, int animationId, int distance,
+                           String attackStyle,
+                           java.util.List<String> prayers,
                            String executedAction) {
         if (queue == null) {
             return;
@@ -182,7 +186,7 @@ public final class TickRecorder {
         }
         String line = formatNdjson(tickCount, playerHp, playerMaxHp, prayer, specEnergy,
                 equipment, inventory, targetHp, targetMaxHp, weaponId, animationId, distance,
-                executedAction);
+                attackStyle, prayers, executedAction);
         if (!queue.offer(line)) {
             dropped.incrementAndGet();
             if (!warnedDropped) {
@@ -200,11 +204,14 @@ public final class TickRecorder {
         if (s == null) {
             return;
         }
+        AnimationDb.AttackStyle style = s.opponentWeaponStyle();
         recordTick(s.tick,
                 -1, -1, -1, s.specEnergy,
                 null, null,
                 s.targetHp, s.targetMaxHp,
                 s.opponentWeaponId(), s.lastTargetAnim, -1,
+                style == null ? "UNKNOWN" : style.name(),
+                java.util.Collections.<String>emptyList(),
                 s.actionLabel());
     }
 
@@ -215,6 +222,8 @@ public final class TickRecorder {
                                Map<Integer, Integer> inventory,
                                int targetHp, int targetMaxHp,
                                int weaponId, int animationId, int distance,
+                               String attackStyle,
+                               java.util.List<String> prayers,
                                String executedAction) {
         StringBuilder sb = new StringBuilder(256);
         sb.append('{');
@@ -225,20 +234,51 @@ public final class TickRecorder {
         appendInt(sb, "prayer", prayer).append(',');
         appendInt(sb, "specEnergy", specEnergy).append(',');
         appendIntMap(sb, "equipment", equipment).append(',');
-        appendIntMap(sb, "inventory", inventory);
+        appendIntMap(sb, "inventory", inventory).append(',');
+        appendStringArray(sb, "prayers", prayers);
         sb.append("},");
         sb.append("\"target\":{");
         appendInt(sb, "hp", targetHp).append(',');
         appendInt(sb, "maxHp", targetMaxHp).append(',');
         appendInt(sb, "weaponId", weaponId).append(',');
         appendInt(sb, "animationId", animationId).append(',');
-        appendInt(sb, "distance", distance);
+        appendInt(sb, "distance", distance).append(',');
+        appendString(sb, "attackStyle", normalizeStyle(attackStyle));
         sb.append("},");
         appendString(sb, "executedAction", compactExecutedAction(executedAction));
         sb.append(',');
         appendString(sb, "actionLabel", executedAction == null ? "" : executedAction);
         sb.append('}');
         return sb.toString();
+    }
+
+    /**
+     * Collapses any style token to {@code MELEE}/{@code RANGED}/{@code MAGIC}/
+     * {@code UNKNOWN} so the EchoForge {@code CombatStyle} parse never silently
+     * drops the field.
+     */
+    static String normalizeStyle(String style) {
+        if (style == null) return "UNKNOWN";
+        String u = style.trim().toUpperCase(java.util.Locale.ROOT);
+        if ("MELEE".equals(u) || "RANGED".equals(u) || "MAGIC".equals(u)) return u;
+        return "UNKNOWN";
+    }
+
+    /** JSON string array; null/blank entries and a null list produce {@code []}. */
+    private static StringBuilder appendStringArray(StringBuilder sb, String key, java.util.List<String> values) {
+        sb.append('"').append(key).append("\":[");
+        if (values != null) {
+            boolean first = true;
+            for (String v : values) {
+                if (v == null || v.isEmpty()) continue;
+                if (!first) sb.append(',');
+                first = false;
+                sb.append('"');
+                escapeJson(sb, v);
+                sb.append('"');
+            }
+        }
+        return sb.append(']');
     }
 
     /**

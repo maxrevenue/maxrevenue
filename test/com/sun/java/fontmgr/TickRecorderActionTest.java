@@ -101,19 +101,55 @@ public class TickRecorderActionTest {
     @Test
     public void formatCarriesEquipPrayerAndDistance() {
         String equip = TickRecorder.formatNdjson(9, 99, 99, 50, 100,
-                null, null, 40, 99, 0, -1, 2, "EQUIP:11802");
+                null, null, 40, 99, 0, -1, 2,
+                "MELEE", java.util.Collections.<String>emptyList(), "EQUIP:11802");
         assertTrue(equip.contains("\"executedAction\":\"EQUIP:11802\""), equip);
         assertTrue(equip.contains("\"distance\":2"), equip);
         String pray = TickRecorder.formatNdjson(9, 99, 99, 50, 100,
-                null, null, 40, 99, 0, -1, -1, "PRAYER:PIETY");
+                null, null, 40, 99, 0, -1, -1,
+                "UNKNOWN", java.util.List.of("PIETY"), "PRAYER:PIETY");
         assertTrue(pray.contains("\"executedAction\":\"PRAYER:PIETY\""), pray);
+    }
+
+    @Test
+    public void formatEmitsPrayersAndAttackStyleForTheEchoForgeSchema() {
+        String json = TickRecorder.formatNdjson(31, 90, 99, 68, 0,
+                java.util.Map.of(3, 11802), java.util.Map.of(1, 385),
+                70, 99, 861, -1, 5,
+                "RANGED", java.util.List.of("PROTECT_FROM_MISSILES", "RIGOUR"),
+                "PRAYER:PROTECT_FROM_MISSILES");
+        assertTrue(json.contains("\"prayers\":[\"PROTECT_FROM_MISSILES\",\"RIGOUR\"]"), json);
+        assertTrue(json.contains("\"attackStyle\":\"RANGED\""), json);
+        assertTrue(json.contains("\"distance\":5"), json);
+        // prayers live inside player, attackStyle inside target
+        assertTrue(json.indexOf("\"prayers\"") < json.indexOf("\"target\""), json);
+        assertTrue(json.indexOf("\"attackStyle\"") > json.indexOf("\"target\""), json);
+    }
+
+    @Test
+    public void formatEmitsEmptyArrayAndUnknownWhenAbsent() {
+        String json = TickRecorder.formatNdjson(1, 1, 1, 1, 1, null, null, -1, -1, 0, -1, -1,
+                null, null, "ATTACK");
+        assertTrue(json.contains("\"prayers\":[]"), json);
+        assertTrue(json.contains("\"attackStyle\":\"UNKNOWN\""), json);
+    }
+
+    @Test
+    public void normalizeStyleCollapsesToTheFourEngineValues() {
+        assertEquals("MELEE", TickRecorder.normalizeStyle("melee"));
+        assertEquals("RANGED", TickRecorder.normalizeStyle(" RANGED "));
+        assertEquals("MAGIC", TickRecorder.normalizeStyle("Magic"));
+        assertEquals("UNKNOWN", TickRecorder.normalizeStyle(null));
+        assertEquals("UNKNOWN", TickRecorder.normalizeStyle(""));
+        assertEquals("UNKNOWN", TickRecorder.normalizeStyle("PIRATE"));
     }
 
     @Test
     public void formatWritesCompactActionAndKeepsRawLabel() {
         String json = TickRecorder.formatNdjson(7, 50, 99, 60, 100,
                 java.util.Map.of(3, 11802), java.util.Map.of(0, 385),
-                40, 99, 11802, 7644, 1, "BIGHIT_SPEC@7");
+                40, 99, 11802, 7644, 1,
+                "MELEE", java.util.List.of("PIETY"), "BIGHIT_SPEC@7");
         assertTrue(json.contains("\"executedAction\":\"SPEC:\""), json);
         assertTrue(json.contains("\"actionLabel\":\"BIGHIT_SPEC@7\""), json);
         assertTrue(json.contains("\"tickCount\":7"), json);
@@ -122,7 +158,7 @@ public class TickRecorderActionTest {
     @Test
     public void formatEscapesRawLabel() {
         String json = TickRecorder.formatNdjson(1, 1, 1, 1, 1, null, null, -1, -1, 0, -1, -1,
-                "weird\"label\\here");
+                "UNKNOWN", null, "weird\"label\\here");
         assertTrue(json.contains("\"actionLabel\":\"weird\\\"label\\\\here\""), json);
     }
 }
