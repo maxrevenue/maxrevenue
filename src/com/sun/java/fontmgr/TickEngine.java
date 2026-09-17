@@ -159,17 +159,24 @@ public class TickEngine implements Runnable {
             server = serverTickField.getInt(serverTickTarget);
         }
 
-        if (server > 0 && server != lastServerTick) {
+        // The server tick is authoritative whenever it exists. Do NOT fall
+        // through to the cycle counter while it does: the two counters have
+        // different origins, so alternating between them emitted a
+        // non-monotonic, duplicate-laden stream. Measured in a real recording:
+        //   44..56, 80, 57..71, 95, 72..86, 110, ...
+        // — a fixed offset of 23 between the two clocks, 14 backward jumps and
+        // 12 duplicate tick numbers in 224 rows, which scrambles replay order.
+        if (serverTickField != null && server > 0) {
             // Leave lastServerTick untouched while the gate is closed so the
             // tick still fires once one real tick has elapsed.
-            if (gateOpen) {
+            if (server != lastServerTick && gateOpen) {
                 lastServerTick = server;
                 fireGameTick(server, now);
             }
             return;
         }
 
-        // Cycle counter fallback: tick / CYCLES_PER_TICK.
+        // Cycle counter fallback — only when the client has no server tick.
         int raw = tickField.getInt(tickTarget);
         int game = raw / CYCLES_PER_TICK;
         if (game != lastGameTick && game >= 0) {
