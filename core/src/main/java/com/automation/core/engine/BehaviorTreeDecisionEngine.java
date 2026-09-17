@@ -1,5 +1,10 @@
 package com.automation.core.engine;
 
+import com.automation.core.engine.spec.AgsStrategy;
+import com.automation.core.engine.spec.SpecStrategy;
+import com.automation.core.engine.spec.VlsStrategy;
+import com.automation.core.engine.spec.PrimarySpecFallbackStrategy;
+import com.automation.core.engine.spec.VoidwakerStrategy;
 import com.automation.core.model.ActionIntent;
 import com.automation.core.model.GameState;
 
@@ -43,7 +48,7 @@ public final class BehaviorTreeDecisionEngine implements DecisionEngine {
      * Sequence
      *  ├─ EmergencyEatNode(eatThresholdPercent, foodItemIds)   // survive
      *  └─ Selector                                             // one offensive action
-     *       ├─ SpecWhenReadyNode(minSpecPct)
+     *       ├─ SpecDecisionNode(ordered weapon strategies)
      *       └─ ReattackNode
      * </pre>
      *
@@ -57,12 +62,35 @@ public final class BehaviorTreeDecisionEngine implements DecisionEngine {
     public static BehaviorTreeDecisionEngine sample(int eatThresholdPercent,
                                                     Set<Integer> foodItemIds,
                                                     int minSpecPct) {
+        return withSpecStrategies(
+                eatThresholdPercent,
+                foodItemIds,
+                defaultSpecStrategies(minSpecPct));
+    }
+
+    /**
+     * Production-style tree with explicit {@link SpecStrategy} ordering (AGS →
+     * Voidwaker → VLS by default).
+     */
+    public static BehaviorTreeDecisionEngine withSpecStrategies(int eatThresholdPercent,
+                                                                Set<Integer> foodItemIds,
+                                                                List<SpecStrategy> strategies) {
         BehaviorNode offensive = new Selector(List.of(
-                new SpecWhenReadyNode(minSpecPct),
+                new SpecDecisionNode(strategies),
                 new ReattackNode()));
         BehaviorNode root = new Sequence(List.of(
                 new EmergencyEatNode(eatThresholdPercent, foodItemIds),
                 offensive));
         return new BehaviorTreeDecisionEngine(root);
+    }
+
+    /** Default weapon spec policies for live agent + golden replay. */
+    public static List<SpecStrategy> defaultSpecStrategies(int minSpecPct) {
+        int floor = Math.max(0, Math.min(100, minSpecPct));
+        return List.of(
+                new AgsStrategy(),
+                new VoidwakerStrategy(),
+                new VlsStrategy(),
+                new PrimarySpecFallbackStrategy(floor));
     }
 }

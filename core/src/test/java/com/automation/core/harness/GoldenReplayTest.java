@@ -45,7 +45,8 @@ class GoldenReplayTest {
         return Stream.of(
                         "fixtures/sample_fight.ndjson",
                         "fixtures/dh-combo-fixture.ndjson",
-                        "fixtures/survive-spec-fixture.ndjson")
+                        "fixtures/survive-spec-fixture.ndjson",
+                        "fixtures/eclipse-hybrid-spec.ndjson")
                 .flatMap(path -> NDJSONFixtureLoader.loadClasspathResource(path).stream()
                         .map(tick -> Arguments.of(path + "#" + tick.tickCount(), tick)));
     }

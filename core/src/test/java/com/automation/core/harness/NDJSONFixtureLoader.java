@@ -41,7 +41,8 @@ public final class NDJSONFixtureLoader {
         List<String> names = List.of(
                 "sample_fight.ndjson",
                 "dh-combo-fixture.ndjson",
-                "survive-spec-fixture.ndjson");
+                "survive-spec-fixture.ndjson",
+                "eclipse-hybrid-spec.ndjson");
         List<ReplayTick> all = new ArrayList<>();
         for (String name : names) {
             String resource = "fixtures/" + name;
