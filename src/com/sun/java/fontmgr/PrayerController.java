@@ -115,6 +115,53 @@ public final class PrayerController {
         }
     }
 
+    /**
+     * Which offensive prayer to actually send for an explicit request.
+     *
+     * <p>{@link #ensureOffensivePrayer} takes the first available candidate for a
+     * style, which is correct for the auto-prayer (it just wants "a magic attack
+     * prayer up", and tournament worlds lack the 99s). An explicit request must
+     * not be downgraded: {@code p:augury} has to mean Augury, {@code p:rigour}
+     * Rigour. The named prayer wins unless it is unavailable on this
+     * account/book, in which case the candidate list is the fallback.
+     */
+    static String resolveRequestedOffensivePrayer(String enumName,
+                                                  AnimationDb.AttackStyle style,
+                                                  boolean requestedDisabled) {
+        if (enumName != null && !requestedDisabled) {
+            return enumName;
+        }
+        String[] candidates = offensiveCandidates(style);
+        return candidates.length > 0 ? candidates[0] : enumName;
+    }
+
+    /**
+     * Activate the offensive prayer the caller named rather than merely the
+     * first candidate for its style. See
+     * {@link #resolveRequestedOffensivePrayer}.
+     */
+    public void ensureSpecificOffensivePrayer(String requestedEnum) {
+        if (requestedEnum == null) return;
+        AnimationDb.AttackStyle style = offensiveStyleOf(requestedEnum);
+        if (style == AnimationDb.AttackStyle.UNKNOWN) return;
+        if (isPrayerActive(requestedEnum)) {
+            script.lastAction("PRAY_ON@" + script.currentTick());
+            return;
+        }
+        String target = resolveRequestedOffensivePrayer(requestedEnum, style,
+                isPrayerDisabled(requestedEnum));
+        if (target == null) return;
+        if (!target.equals(requestedEnum)) {
+            FontManager.log("[Prayer] " + requestedEnum
+                    + " is unavailable on this account/book; using " + target);
+        }
+        activateOffensivePrayer(target,
+                livePrayerId(target, AnimationDb.offensiveIdForEnum(target)),
+                AnimationDb.offensivePrayerLabel(target,
+                        AnimationDb.offensivePrayerName(style)),
+                AnimationDb.offensiveWidgetForEnum(target));
+    }
+
     /** Tournament first: Eagle Eye / Mystic Might, then unlocked 99 prayers. */
     private static String[] offensiveCandidates(AnimationDb.AttackStyle style) {
         switch (style == null ? AnimationDb.AttackStyle.MELEE : style) {
@@ -1071,7 +1118,11 @@ public final class PrayerController {
         if (offStyle != AnimationDb.AttackStyle.UNKNOWN) {
             FontManager.log("[Swapper] prayer -> " + enumName + " (style "
                     + offStyle + ")");
-            ensureOffensivePrayer(offStyle);
+            // Activate the prayer that was ASKED for. ensureOffensivePrayer picks
+            // the first candidate for the style (Mystic Might before Augury,
+            // Eagle Eye before Rigour) which is right for the auto-prayer on
+            // tournament worlds but silently downgraded an explicit p:augury.
+            ensureSpecificOffensivePrayer(enumName);
             script.lastAction("PRAY_" + enumName + "@" + script.currentTick());
             return true;
         }
