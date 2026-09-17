@@ -55,6 +55,45 @@ sourceSets {
         runtimeClasspath += output
         runtimeClasspath += compileClasspath
     }
+    // ── Modern Sense-Think-Act engine (com.automation.core) ──────────────────
+    // Isolated from the agent's release-11 `src/` so it can use Java 17 records
+    // and sealed interfaces. It is a standalone, client-decoupled module and is
+    // NOT bundled into fontmanager-windows.jar.
+    create("core") {
+        java.setSrcDirs(listOf("core/src/main/java"))
+    }
+    create("coreTest") {
+        java.setSrcDirs(listOf("core/src/test/java"))
+        compileClasspath += sourceSets["core"].output
+        runtimeClasspath += sourceSets["core"].output
+    }
+}
+
+// JUnit 5 for the core engine's headless tests (config auto-created by the
+// `coreTest` source set above).
+dependencies {
+    "coreTestImplementation"("org.junit.jupiter:junit-jupiter:5.10.2")
+}
+
+// The core module targets Java 17 (records, sealed interfaces); the agent stays
+// on release 11. Same JDK 21 toolchain compiles both.
+tasks.named<JavaCompile>("compileCoreJava") {
+    options.release.set(17)
+}
+tasks.named<JavaCompile>("compileCoreTestJava") {
+    options.release.set(17)
+}
+
+val coreTest by tasks.registering(Test::class) {
+    group = "verification"
+    description = "Headless JUnit 5 tests for the com.automation.core Sense-Think-Act engine"
+    testClassesDirs = sourceSets["coreTest"].output.classesDirs
+    classpath = sourceSets["coreTest"].runtimeClasspath
+    useJUnitPlatform()
+}
+
+tasks.named("check") {
+    dependsOn(coreTest)
 }
 
 // ── Agent JAR (load-time + dynamic-attach) ───────────────────────────────
