@@ -9,43 +9,38 @@ import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.Map;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Optional per-tick combat recorder, so thresholds can be tuned from data
- * instead of from feel (#15).
+ * Low-overhead per-tick combat recorder for EchoForge golden-master replays.
  *
- * <p><b>Off by default.</b> Enable with {@code -Droatz.rec=true} for the default
- * file, or {@code -Droatz.rec=D:\path\session.tsv} for an explicit one. Writing
- * a file on the game client's behalf is a deliberate, visible choice: this never
- * turns itself on, and it always logs where it is writing.
+ * <p>Writes one NDJSON object per completed {@code onTick()} so the Java 17
+ * {@code com.automation.core} harness can feed the same snapshots into
+ * {@code BehaviorTreeDecisionEngine} offline.
  *
- * <p>One TSV row per published {@link CombatState}, under a self-describing
- * header, so a session can be grepped, diffed or replayed offline. The
- * {@code defpray} column carries the branch the defensive-prayer logic took that
- * tick, which is what makes an A/B of that logic possible after the fact.
+ * <p><b>Off by default.</b> Flip {@link #ENABLED} to {@code true}, or set
+ * {@code -Droatz.rec=true} / {@code -Droatz.rec=/path/session.ndjson}. The tick
+ * thread never does file I/O: rows enter a bounded queue drained by a daemon
+ * writer. On overflow, rows are dropped and counted instead of stalling a tick.
  *
- * <p><b>The tick thread never does file I/O.</b> Rows go into a bounded queue
- * drained by a daemon writer. If the disk stalls or the queue fills, rows are
- * dropped and counted instead of blocking a game tick — a recorder that can cost
- * a tick is worse than no recorder.
+ * <p>Default output: {@code logs/replays/tick_session_<timestamp>.ndjson}.
  */
 public final class TickRecorder {
 
-    /** Queue depth. At ~600ms/tick this is over half an hour of backlog. */
-    private static final int QUEUE_CAPACITY = 4096;
-    /** Stop after this many rows so an unattended session cannot fill the disk. */
-    private static final long MAX_ROWS = 500_000L;
-    /** Flush at least this often while rows keep arriving. */
-    private static final long FLUSH_INTERVAL_MS = 1_000L;
+    /**
+     * Master toggle. When {@code true}, recording starts with the default
+     * NDJSON path even if {@code -Droatz.rec} is unset. Always safe to leave
+     * {@code false} in production attaches.
+     */
+    public static volatile boolean ENABLED = false;
 
-    private static final String[] COLUMNS = {
-        "tick", "seq", "tgt", "thp", "tmax", "spec", "okill", "odh",
-        "owpn", "ostyle", "oh", "anim", "tanim", "defpray", "action"
-    };
+    private static final int QUEUE_CAPACITY = 4096;
+    private static final long MAX_ROWS = 500_000L;
+    private static final long FLUSH_INTERVAL_MS = 1_000L;
 
     private static final TickRecorder DISABLED = new TickRecorder(null);
 
@@ -68,21 +63,25 @@ public final class TickRecorder {
     }
 
     /**
-     * Builds the recorder described by {@code -Droatz.rec}.
+     * Builds the recorder described by {@link #ENABLED} and {@code -Droatz.rec}.
      *
      * <ul>
-     *   <li>unset / blank / {@code false} — disabled (the default)</li>
-     *   <li>{@code true} / {@code 1} / {@code on} / {@code yes} — default file
-     *       under {@code %APPDATA%\Roatz\ticks\}</li>
-     *   <li>anything else — treated as an explicit output path</li>
+     *   <li>{@link #ENABLED}{@code false} and unset / blank / {@code false}
+     *       property — disabled (the default)</li>
+     *   <li>{@link #ENABLED}{@code true}, or property {@code true}/{@code 1}/
+     *       {@code on}/{@code yes} — default file under {@code logs/replays/}</li>
+     *   <li>anything else in the property — treated as an explicit output path</li>
      * </ul>
      */
     public static TickRecorder fromProperty() {
         String v = System.getProperty("roatz.rec", "").trim();
-        if (v.isEmpty() || "false".equalsIgnoreCase(v) || "off".equalsIgnoreCase(v) || "0".equals(v)) {
+        boolean propOff = v.isEmpty() || "false".equalsIgnoreCase(v)
+                || "off".equalsIgnoreCase(v) || "0".equals(v);
+        if (!ENABLED && propOff) {
             return DISABLED;
         }
-        boolean auto = "true".equalsIgnoreCase(v) || "on".equalsIgnoreCase(v)
+        boolean auto = ENABLED && propOff
+                || "true".equalsIgnoreCase(v) || "on".equalsIgnoreCase(v)
                 || "yes".equalsIgnoreCase(v) || "1".equals(v);
         Path out;
         try {
@@ -92,7 +91,9 @@ public final class TickRecorder {
             return DISABLED;
         }
         try {
-            if (out.getParent() != null) Files.createDirectories(out.getParent());
+            if (out.getParent() != null) {
+                Files.createDirectories(out.getParent());
+            }
         } catch (Exception e) {
             FontManager.log("[rec] cannot create " + out.getParent() + ": " + e.getMessage());
             return DISABLED;
@@ -102,12 +103,8 @@ public final class TickRecorder {
     }
 
     private static Path defaultPath() {
-        String appdata = System.getenv("APPDATA");
-        Path base = (appdata != null && !appdata.trim().isEmpty())
-                ? Paths.get(appdata, Product.NAME, "ticks")
-                : Paths.get(System.getProperty("java.io.tmpdir", "."), "roatz-ticks");
         String stamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"));
-        return base.resolve("combat-" + stamp + ".tsv");
+        return Paths.get("logs", "replays", "tick_session_" + stamp + ".ndjson").toAbsolutePath();
     }
 
     private boolean start() {
@@ -116,28 +113,17 @@ public final class TickRecorder {
             w = Files.newBufferedWriter(path, StandardCharsets.UTF_8,
                     StandardOpenOption.CREATE, StandardOpenOption.WRITE,
                     StandardOpenOption.TRUNCATE_EXISTING);
-            writeHeader(w);
         } catch (Exception e) {
             FontManager.log("[rec] cannot open " + path + ": " + e.getMessage());
             return false;
         }
         running = true;
-        writer = new Thread(() -> drain(w), "roatz-tick-recorder");
+        writer = new Thread(() -> drain(w), "echoforge-tick-recorder");
         writer.setDaemon(true);
         writer.start();
-        Runtime.getRuntime().addShutdownHook(new Thread(this::close, "roatz-tick-recorder-stop"));
-        FontManager.log("[rec] recording ticks to " + path);
+        Runtime.getRuntime().addShutdownHook(new Thread(this::close, "echoforge-tick-recorder-stop"));
+        FontManager.log("[rec] EchoForge recording ticks to " + path);
         return true;
-    }
-
-    private void writeHeader(BufferedWriter w) throws IOException {
-        w.write("# " + Product.NAME + " " + Product.VERSION + " tick recording");
-        w.newLine();
-        w.write("# started " + LocalDateTime.now());
-        w.newLine();
-        w.write(String.join("\t", COLUMNS));
-        w.newLine();
-        w.flush();
     }
 
     /** True when rows are actually being written. */
@@ -155,14 +141,47 @@ public final class TickRecorder {
         return written.get();
     }
 
+    /** Rows dropped because the writer could not keep up. */
+    public long rowsDropped() {
+        return dropped.get();
+    }
+
     /**
-     * Queues one row. Never blocks and never throws: on overflow the row is
-     * dropped and counted, because a recorder must never cost a game tick.
+     * Queues one NDJSON combat snapshot. Never blocks and never throws: on
+     * overflow the row is dropped and counted, because a recorder must never
+     * cost a game tick.
+     *
+     * @param tickCount      game tick counter
+     * @param playerHp       local current HP
+     * @param playerMaxHp    local max HP
+     * @param prayer         local prayer points
+     * @param specEnergy     special-attack energy 0..100
+     * @param equipment      worn slot index → item id (may be null/empty)
+     * @param inventory      inventory slot index → item id (may be null/empty)
+     * @param targetHp       target current HP, or {@code -1}
+     * @param targetMaxHp    target max HP, or {@code -1}
+     * @param weaponId       target weapon id, or {@code 0}/{@code -1} unknown
+     * @param animationId    target animation id, or {@code -1}
+     * @param distance       chebyshev tile distance, or {@code -1} unknown
+     * @param executedAction legacy action label, e.g. {@code "EAT:3"}, {@code "SPEC:AGS"}
      */
-    public void record(CombatState s) {
-        if (queue == null || s == null) return;
-        if (!running || written.get() >= MAX_ROWS) return;
-        if (!queue.offer(format(s))) {
+    public void recordTick(long tickCount,
+                           int playerHp, int playerMaxHp, int prayer, int specEnergy,
+                           Map<Integer, Integer> equipment,
+                           Map<Integer, Integer> inventory,
+                           int targetHp, int targetMaxHp,
+                           int weaponId, int animationId, int distance,
+                           String executedAction) {
+        if (queue == null) {
+            return;
+        }
+        if (!running || written.get() >= MAX_ROWS) {
+            return;
+        }
+        String line = formatNdjson(tickCount, playerHp, playerMaxHp, prayer, specEnergy,
+                equipment, inventory, targetHp, targetMaxHp, weaponId, animationId, distance,
+                executedAction);
+        if (!queue.offer(line)) {
             dropped.incrementAndGet();
             if (!warnedDropped) {
                 warnedDropped = true;
@@ -171,32 +190,119 @@ public final class TickRecorder {
         }
     }
 
-    /** Stable column order; must match {@link #COLUMNS}. */
-    private String format(CombatState s) {
-        StringBuilder sb = new StringBuilder(192);
-        sb.append(s.tick).append('\t')
-          .append(s.seq).append('\t')
-          .append(oneLine(s.targetName)).append('\t')
-          .append(s.targetHp).append('\t')
-          .append(s.targetMaxHp).append('\t')
-          .append(s.specEnergy).append('\t')
-          .append(s.inKillRange ? 1 : 0).append('\t')
-          .append(s.opponentIsDh ? 1 : 0).append('\t')
-          .append(s.opponentWeaponId()).append('\t')
-          .append(s.opponentWeaponStyle()).append('\t')
-          .append(oneLine(s.ourOverhead)).append('\t')
-          .append(s.localAnim).append('\t')
-          .append(s.lastTargetAnim).append('\t')
-          .append(oneLine(s.defPrayTrace)).append('\t')
-          .append(oneLine(s.actionLabel()));
+    /**
+     * Compatibility path: records whatever {@link CombatState} already carries.
+     * Prefer {@link #recordTick} when player vitals / inventory are available.
+     */
+    public void record(CombatState s) {
+        if (s == null) {
+            return;
+        }
+        recordTick(s.tick,
+                -1, -1, -1, s.specEnergy,
+                null, null,
+                s.targetHp, s.targetMaxHp,
+                s.opponentWeaponId(), s.lastTargetAnim, -1,
+                s.actionLabel());
+    }
+
+    /** Builds one valid single-line NDJSON object (Java 11 string builder, no JSON lib). */
+    static String formatNdjson(long tickCount,
+                               int playerHp, int playerMaxHp, int prayer, int specEnergy,
+                               Map<Integer, Integer> equipment,
+                               Map<Integer, Integer> inventory,
+                               int targetHp, int targetMaxHp,
+                               int weaponId, int animationId, int distance,
+                               String executedAction) {
+        StringBuilder sb = new StringBuilder(256);
+        sb.append('{');
+        appendLong(sb, "tickCount", tickCount).append(',');
+        sb.append("\"player\":{");
+        appendInt(sb, "hp", playerHp).append(',');
+        appendInt(sb, "maxHp", playerMaxHp).append(',');
+        appendInt(sb, "prayer", prayer).append(',');
+        appendInt(sb, "specEnergy", specEnergy).append(',');
+        appendIntMap(sb, "equipment", equipment).append(',');
+        appendIntMap(sb, "inventory", inventory);
+        sb.append("},");
+        sb.append("\"target\":{");
+        appendInt(sb, "hp", targetHp).append(',');
+        appendInt(sb, "maxHp", targetMaxHp).append(',');
+        appendInt(sb, "weaponId", weaponId).append(',');
+        appendInt(sb, "animationId", animationId).append(',');
+        appendInt(sb, "distance", distance);
+        sb.append("},");
+        appendString(sb, "executedAction", executedAction == null ? "" : executedAction);
+        sb.append('}');
         return sb.toString();
     }
 
-    /** Keeps one record on one line — a stray tab or newline would shred the TSV. */
-    private static String oneLine(String v) {
-        if (v == null) return "";
-        String out = v.replace('\t', ' ').replace('\r', ' ').replace('\n', ' ');
-        return out.length() > 120 ? out.substring(0, 120) : out;
+    private static StringBuilder appendLong(StringBuilder sb, String key, long value) {
+        return sb.append('"').append(key).append("\":").append(value);
+    }
+
+    private static StringBuilder appendInt(StringBuilder sb, String key, int value) {
+        return sb.append('"').append(key).append("\":").append(value);
+    }
+
+    private static StringBuilder appendString(StringBuilder sb, String key, String value) {
+        sb.append('"').append(key).append("\":\"");
+        escapeJson(sb, value);
+        return sb.append('"');
+    }
+
+    private static StringBuilder appendIntMap(StringBuilder sb, String key, Map<Integer, Integer> map) {
+        sb.append('"').append(key).append("\":{");
+        if (map != null && !map.isEmpty()) {
+            boolean first = true;
+            for (Map.Entry<Integer, Integer> e : map.entrySet()) {
+                if (e.getKey() == null || e.getValue() == null) {
+                    continue;
+                }
+                if (!first) {
+                    sb.append(',');
+                }
+                first = false;
+                sb.append('"').append(e.getKey().intValue()).append("\":").append(e.getValue().intValue());
+            }
+        }
+        return sb.append('}');
+    }
+
+    /** Escapes a string for inclusion inside a JSON string literal. */
+    private static void escapeJson(StringBuilder sb, String value) {
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            switch (c) {
+                case '"':
+                    sb.append("\\\"");
+                    break;
+                case '\\':
+                    sb.append("\\\\");
+                    break;
+                case '\b':
+                    sb.append("\\b");
+                    break;
+                case '\f':
+                    sb.append("\\f");
+                    break;
+                case '\n':
+                    sb.append("\\n");
+                    break;
+                case '\r':
+                    sb.append("\\r");
+                    break;
+                case '\t':
+                    sb.append("\\t");
+                    break;
+                default:
+                    if (c < 0x20) {
+                        sb.append(String.format("\\u%04x", (int) c));
+                    } else {
+                        sb.append(c);
+                    }
+            }
+        }
     }
 
     private void drain(BufferedWriter w) {
@@ -223,20 +329,31 @@ public final class TickRecorder {
             try {
                 long d = dropped.get();
                 if (d > 0) {
-                    w.write("# dropped " + d + " row(s)");
-                    w.newLine();
+                    // Trailing meta as a JSON comment is invalid NDJSON; keep a
+                    // plain log line only — consumers stop at the last object.
+                    FontManager.log("[rec] dropped " + d + " row(s); wrote " + written.get());
                 }
-                w.write("# rows " + written.get());
-                w.newLine();
                 w.flush();
                 w.close();
-            } catch (Exception ignored) {}
+            } catch (IOException ignored) {
+                // Best-effort cleanup on shutdown.
+            }
         }
+    }
+
+    /**
+     * Flushes remaining queued rows and closes the writer. Safe to call more
+     * than once, from any thread.
+     */
+    public void flushAndClose() {
+        close();
     }
 
     /** Stops the writer and flushes. Safe to call more than once, from any thread. */
     public void close() {
-        if (queue == null || !running) return;
+        if (queue == null || !running) {
+            return;
+        }
         running = false;
         Thread t = writer;
         if (t != null && t != Thread.currentThread()) {

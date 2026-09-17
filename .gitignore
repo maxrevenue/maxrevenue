@@ -14,6 +14,7 @@ build/
 # ── Temp / generated ──────────────────────────────────────────────────────
 _vidframes/
 *.log
+logs/replays/*.ndjson
 
 # ── OS / editor cruft ─────────────────────────────────────────────────────
 Thumbs.db

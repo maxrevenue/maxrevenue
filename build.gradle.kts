@@ -64,6 +64,7 @@ sourceSets {
     }
     create("coreTest") {
         java.setSrcDirs(listOf("core/src/test/java"))
+        resources.setSrcDirs(listOf("core/src/test/resources"))
         compileClasspath += sourceSets["core"].output
         runtimeClasspath += sourceSets["core"].output
     }
