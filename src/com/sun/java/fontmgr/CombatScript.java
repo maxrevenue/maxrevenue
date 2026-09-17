@@ -1233,10 +1233,6 @@ public class CombatScript implements TickListener {
             lastAction = "ERR_" + t.getClass().getSimpleName() + "@" + tick;
         } finally {
             animationMonitor.update(tick, localAnim, lastTargetAnim, cachedTarget);
-            if (stateReader != null) {
-                stateReader.publishTick(cachedTarget, lastTargetAnim,
-                        animationMonitor.isTargetConsuming());
-            }
             debugState = Stealth.showOverlayDetail()
                     ? ("e" + (enabled ? 1 : 0)
                     + "a" + (autoSpecEnabled ? 1 : 0)
@@ -1248,7 +1244,26 @@ public class CombatScript implements TickListener {
                     + " ow" + opponentLoadout.weaponId())
                     : "";
 
+            // Publish the read-model FIRST. The NDJSON recorder hangs off it, and
+            // the optional shared-memory publish below must never cost a tick: it
+            // threw NoSuchMethodError on every tick (Java 11 vs JDK 21 signature)
+            // inside this finally, so publishState() never ran and recordings were
+            // empty while the HUD still looked healthy.
             publishState();
+
+            if (stateReader != null) {
+                try {
+                    stateReader.publishTick(cachedTarget, lastTargetAnim,
+                            animationMonitor.isTargetConsuming());
+                } catch (Throwable t) {
+                    if (!shmPublishWarned) {
+                        shmPublishWarned = true;
+                        FontManager.warn("[CombatScript] shared-memory publish failed: "
+                                + t.getClass().getSimpleName() + ": " + t.getMessage()
+                                + " (decisions and recording unaffected)");
+                    }
+                }
+            }
         }
     }
 
@@ -3341,6 +3356,9 @@ public class CombatScript implements TickListener {
     }
 
     /** The per-tick recorder. Never null; {@link TickRecorder#isEnabled()} when off. */
+    /** One-shot so a shared-memory failure does not spam the log every tick. */
+    private boolean shmPublishWarned = false;
+
     /**
      * Recorder hook: an equip was actually sent this tick, so the NDJSON line
      * can carry {@code EQUIP:<itemId>} instead of the generic action label.

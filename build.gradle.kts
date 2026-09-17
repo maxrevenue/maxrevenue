@@ -25,15 +25,29 @@ dependencies {
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")
 }
 
-java {
-    // Agent bytecode must run on the client's embedded JRE (~JDK 8-11 era),
-    // so compile to release 11 even though we build with a newer toolchain.
-    sourceCompatibility = JavaVersion.VERSION_11
-    targetCompatibility = JavaVersion.VERSION_11
+// The agent must run on the client's Java 11, and `--release` is REQUIRED for
+// that. `sourceCompatibility`/`targetCompatibility` only choose the emitted
+// bytecode version while still linking against the JDK running Gradle, so a
+// JDK 21 build emitted calls to JDK 21 signatures. That caused a live outage:
+//
+//   NoSuchMethodError: java.nio.MappedByteBuffer.duplicate()Ljava/nio/MappedByteBuffer;
+//
+// MappedByteBuffer.duplicate() returns MappedByteBuffer on JDK 21 but ByteBuffer
+// on Java 11. SharedMemory.publish threw it every tick, inside the finally block
+// before publishState(), so the NDJSON recorder wrote zero rows while the HUD
+// still looked healthy. `--release` resolves against the Java 11 API and makes
+// this whole class of bug impossible. See Java11ApiBoundaryTest.
+tasks.named<JavaCompile>("compileJava") {
+    options.release.set(11)
+}
+tasks.named<JavaCompile>("compileTestJava") {
+    options.release.set(11)
 }
 
 tasks.test {
     useJUnitPlatform()
+    // Java11ApiBoundaryTest reads build/classes/java/main directly.
+    dependsOn(tasks.named("classes"))
 }
 
 // Agent source lives directly under src/ (not the default src/main/java).
