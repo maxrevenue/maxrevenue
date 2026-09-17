@@ -303,6 +303,34 @@ See `config/gsoft-ags-gmaul-combo.gsoft` for an example block.
 - `.\fresh-install.bat` — back up `accounts.dat`, wipe `%USERPROFILE%\rpkzclient`,
   and force a fresh client download.
 
+## EchoForge (external engine + replay)
+
+**This repository is a data-collection client.** The agent records what happens;
+it does not host the decision engine.
+
+The Sense-Think-Act engine (`com.automation.core`), the golden-master replay
+harness, and the NDJSON fixtures live in a separate project, **EchoForge**
+(`C:\Users\Alec\Desktop\EchoForge`), which has its own Gradle build and
+`./gradlew test`. RoatzBot was briefly wired to it via a `-Droatz.v2engine`
+reflection bridge and a bundled `core/` module; both were removed because the
+engine is Java 17 and the Roatz client runs **Java 11** (Corretto 11), so those
+classes could never load live. `coreTest` therefore no longer exists here.
+
+How the two talk:
+
+1. Record in this repo (see `docs/echoforge-live-loop.md` is mirrored in
+   EchoForge; the agent-side flag is `-Rec`):
+
+   ```powershell
+   .\launch.ps1 -Attach -Rec C:\Users\Alec\Desktop\RoatzBot\logs\replays\session.ndjson
+   ```
+
+2. Copy the `.ndjson` into EchoForge's `src\test\resources\fixtures\` and run
+   `gradlew.bat test` there. Fixtures are auto-discovered.
+
+The only engine-adjacent code that stays here is `TickRecorder` (NDJSON writer)
+and `scripts\analyze-ticks.ps1`.
+
 ## Notes
 
 - Diagnostics: `FontManager` keeps an always-on 200-line in-memory log tail.

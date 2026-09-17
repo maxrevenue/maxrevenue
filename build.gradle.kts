@@ -23,8 +23,6 @@ dependencies {
     // Ed25519 verify for LicenseToken (Java 11 — JDK EdDSA is 15+).
     implementation("net.i2p.crypto:eddsa:0.3.0")
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")
-    // Agent bridge (ReflectionStateSensor / ReflectionActionDispatcher) calls into
-    // the headless engine; core bytecode is bundled for -Droatz.v2engine=true (JVM 17+).
 }
 
 java {
@@ -57,52 +55,12 @@ sourceSets {
         runtimeClasspath += output
         runtimeClasspath += compileClasspath
     }
-    // ── Modern Sense-Think-Act engine (com.automation.core) ──────────────────
-    // Isolated from the agent's release-11 `src/` so it can use Java 17 records
-    // and sealed interfaces. It is a standalone, client-decoupled module and is
-    // Bundled into fontmanager-windows.jar when the v2 reflection bridge is enabled.
-    create("core") {
-        java.setSrcDirs(listOf("core/src/main/java"))
-    }
-    create("coreTest") {
-        java.setSrcDirs(listOf("core/src/test/java"))
-        resources.setSrcDirs(listOf("core/src/test/resources"))
-        compileClasspath += sourceSets["core"].output
-        runtimeClasspath += sourceSets["core"].output
-    }
 }
 
-// JUnit 5 for the core engine's headless tests (config auto-created by the
-// `coreTest` source set above).
-dependencies {
-    "coreTestImplementation"("org.junit.jupiter:junit-jupiter:5.10.2")
-}
-
-// The core module targets Java 17 (records, sealed interfaces); the agent stays
-// on release 11. Same JDK 21 toolchain compiles both.
-tasks.named<JavaCompile>("compileCoreJava") {
-    options.release.set(17)
-}
-tasks.named<JavaCompile>("compileCoreTestJava") {
-    options.release.set(17)
-}
-
-tasks.named<JavaCompile>("compileJava") {
-    dependsOn(tasks.named("compileCoreJava"))
-    classpath += sourceSets["core"].output.classesDirs
-}
-
-val coreTest by tasks.registering(Test::class) {
-    group = "verification"
-    description = "Headless JUnit 5 tests for the com.automation.core Sense-Think-Act engine"
-    testClassesDirs = sourceSets["coreTest"].output.classesDirs
-    classpath = sourceSets["coreTest"].runtimeClasspath
-    useJUnitPlatform()
-}
-
-tasks.named("check") {
-    dependsOn(coreTest)
-}
+// NOTE: the Sense-Think-Act engine (com.automation.core) does NOT live here.
+// It is a standalone project (EchoForge) that consumes the NDJSON this agent
+// records via TickRecorder. It is Java 17 and this client runs Java 11, so it
+// must never be bundled into fontmanager-windows.jar.
 
 // ── Agent JAR (load-time + dynamic-attach) ───────────────────────────────
 val agentJar by tasks.registering(Jar::class) {
@@ -112,7 +70,6 @@ val agentJar by tasks.registering(Jar::class) {
     // Self-contained agent: main classes plus the bundled ASM used by
     // ClassFilePatcher (the client ships no ASM of its own).
     from(sourceSets.main.get().output)
-    from(sourceSets["core"].output)
     from(configurations.runtimeClasspath.map { cfg ->
         cfg.map { dep -> if (dep.isDirectory) dep else zipTree(dep) }
     })
@@ -154,7 +111,7 @@ val attach by tasks.registering {
 tasks.register("buildAll") {
     group = "build"
     description = "Build the agent JAR, the attach driver, and run coreTest (EchoForge headless suite)"
-    dependsOn(agentJar, attach, coreTest)
+    dependsOn(agentJar, attach)
 }
 
 tasks.build {

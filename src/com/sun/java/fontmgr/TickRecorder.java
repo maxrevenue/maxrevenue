@@ -19,7 +19,7 @@ import java.util.concurrent.atomic.AtomicLong;
  * Low-overhead per-tick combat recorder for EchoForge golden-master replays.
  *
  * <p>Writes one NDJSON object per completed {@code onTick()} so the Java 17
- * {@code com.automation.core} harness can feed the same snapshots into
+ * EchoForge harness can feed the same snapshots into
  * {@code BehaviorTreeDecisionEngine} offline.
  *
  * <p><b>Off by default.</b> Flip {@link #ENABLED} to {@code true}, or set

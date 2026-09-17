@@ -1,8 +1,5 @@
 package com.sun.java.fontmgr;
 
-import com.automation.core.coordinator.CombatCoordinator;
-import com.automation.core.engine.BehaviorTreeDecisionEngine;
-
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
@@ -32,13 +29,6 @@ import java.util.Collections;
  * All config is mutated live from OverlayUI.
  */
 public class CombatScript implements TickListener {
-
-    /**
-     * When {@code true} ( {@code -Droatz.v2engine=true} ), tick combat runs through
-     * {@link CombatCoordinator} + {@link ReflectionStateSensor} /
-     * {@link ReflectionActionDispatcher} instead of the legacy monolith.
-     */
-    public static final boolean USE_V2_ENGINE = Boolean.getBoolean("roatz.v2engine");
 
     // ── Spec weapon type ─────────────────────────────────────────────────────
     public enum EatContext { AUTO, SAFETY, KILL, MANUAL }
@@ -656,8 +646,6 @@ public class CombatScript implements TickListener {
     public volatile OpponentLoadout opponentLoadout = OpponentLoadout.empty();
     /** EchoForge per-tick NDJSON recorder; off unless {@link TickRecorder#ENABLED} or {@code -Droatz.rec}. */
     private final TickRecorder recorder = TickRecorder.fromProperty();
-    /** Lazily wired Sense→Think→Act pipeline for {@link #USE_V2_ENGINE}. */
-    private transient CombatCoordinator v2Coordinator;
     /** Target the cached loadout was captured for; identity compare, tick thread only. */
     private Object opponentLoadoutTarget = null;
     /** Tick the cached loadout was captured on, so it is refreshed exactly once per tick. */
@@ -1101,11 +1089,6 @@ public class CombatScript implements TickListener {
             refreshPvpVitals();
             if (isFreshIncomingHit()) lastOppAttackTick = tick;
             noteLocalHpDrop(tick);
-
-            if (USE_V2_ENGINE) {
-                v2Coordinator().onTick();
-                return;
-            }
 
             if (dharokEnabled) {
                 comboEatEnabled = false;
@@ -3351,19 +3334,6 @@ public class CombatScript implements TickListener {
     /** The per-tick recorder. Never null; {@link TickRecorder#isEnabled()} when off. */
     public TickRecorder recorder() {
         return recorder;
-    }
-
-    private CombatCoordinator v2Coordinator() {
-        if (v2Coordinator == null) {
-            v2Coordinator = new CombatCoordinator(
-                    new ReflectionStateSensor(this),
-                    BehaviorTreeDecisionEngine.sample(
-                            50,
-                            java.util.Set.of(385, 13441, 391),
-                            50),
-                    new ReflectionActionDispatcher(this));
-        }
-        return v2Coordinator;
     }
 
     /**

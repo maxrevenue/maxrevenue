@@ -1,3 +1,0 @@
-# EchoForge golden fixture: Eclipse + Blood Moon hybrid with Barrows gloves, AGS KO spec.
-{"tickCount":101,"player":{"hp":99,"maxHp":99,"prayer":68,"specEnergy":100,"equipment":{"0":28933,"4":28936,"7":28939,"3":11802,"9":12954},"inventory":{"2":385,"6":13441,"12":27690}},"target":{"hp":38,"maxHp":99,"weaponId":4587,"animationId":1658,"distance":1},"executedAction":"SPEC:AGS"}
-{"tickCount":102,"player":{"hp":99,"maxHp":99,"prayer":65,"specEnergy":50,"equipment":{"0":28933,"4":28936,"7":28939,"3":27690,"9":12954},"inventory":{"2":385}},"target":{"hp":44,"maxHp":99,"weaponId":11802,"animationId":7644,"distance":1},"executedAction":"SPEC:Voidwaker"}
