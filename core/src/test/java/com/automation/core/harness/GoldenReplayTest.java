@@ -4,10 +4,12 @@ import com.automation.core.engine.BehaviorTreeDecisionEngine;
 import com.automation.core.engine.DecisionEngine;
 import com.automation.core.model.ActionIntent;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
+import java.util.EnumMap;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Stream;
@@ -42,12 +44,33 @@ class GoldenReplayTest {
     }
 
     static Stream<Arguments> namedFixtures() {
-        return Stream.of(
-                        "fixtures/sample_fight.ndjson",
-                        "fixtures/dh-combo-fixture.ndjson",
-                        "fixtures/survive-spec-fixture.ndjson")
+        return NDJSONFixtureLoader.fixtureResourceNames().stream()
                 .flatMap(path -> NDJSONFixtureLoader.loadClasspathResource(path).stream()
                         .map(tick -> Arguments.of(path + "#" + tick.tickCount(), tick)));
+    }
+
+    /**
+     * Guards against the failure mode that made live recordings useless: raw
+     * agent labels parse as {@link ActionExpectation.Kind#OTHER}, which
+     * {@link #topIntentMatchesRecordedAction} skips, so the suite stays green
+     * while asserting nothing. If every fixture tick is OTHER, fail loudly.
+     */
+    @Test
+    @DisplayName("EchoForge fixtures carry assertable actions (not silently all-OTHER)")
+    void fixturesCarryAssertableActions() {
+        List<ReplayTick> ticks = NDJSONFixtureLoader.loadClasspathFixtures();
+        EnumMap<ActionExpectation.Kind, Integer> counts = new EnumMap<>(ActionExpectation.Kind.class);
+        for (ReplayTick tick : ticks) {
+            counts.merge(tick.expected().kind(), 1, Integer::sum);
+        }
+        System.out.println("[EchoForge] fixtures=" + NDJSONFixtureLoader.fixtureResourceNames()
+                + " ticks=" + ticks.size() + " breakdown=" + counts);
+        int assertable = counts.getOrDefault(ActionExpectation.Kind.EAT, 0)
+                + counts.getOrDefault(ActionExpectation.Kind.SPEC, 0)
+                + counts.getOrDefault(ActionExpectation.Kind.ATTACK, 0);
+        assertTrue(assertable > 0,
+                "no EAT/SPEC/ATTACK expectations in any fixture; recordings would be "
+                        + "silently skipped. breakdown=" + counts);
     }
 
     @ParameterizedTest(name = "{0}")

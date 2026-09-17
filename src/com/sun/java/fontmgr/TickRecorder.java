@@ -163,7 +163,9 @@ public final class TickRecorder {
      * @param weaponId       target weapon id, or {@code 0}/{@code -1} unknown
      * @param animationId    target animation id, or {@code -1}
      * @param distance       chebyshev tile distance, or {@code -1} unknown
-     * @param executedAction legacy action label, e.g. {@code "EAT:3"}, {@code "SPEC:AGS"}
+     * @param executedAction raw agent action label, e.g. {@code "ARB_EAT_dh-axe@123"}.
+     *                       Written as compact {@code executedAction} plus the raw
+     *                       {@code actionLabel}; see {@link #compactExecutedAction(String)}
      */
     public void recordTick(long tickCount,
                            int playerHp, int playerMaxHp, int prayer, int specEnergy,
@@ -232,9 +234,87 @@ public final class TickRecorder {
         appendInt(sb, "animationId", animationId).append(',');
         appendInt(sb, "distance", distance);
         sb.append("},");
-        appendString(sb, "executedAction", executedAction == null ? "" : executedAction);
+        appendString(sb, "executedAction", compactExecutedAction(executedAction));
+        sb.append(',');
+        appendString(sb, "actionLabel", executedAction == null ? "" : executedAction);
         sb.append('}');
         return sb.toString();
+    }
+
+    /**
+     * Maps an agent action label to the compact vocabulary the EchoForge fixture
+     * loader understands: {@code "EAT:"}, {@code "SPEC:"}, {@code "ATTACK"}, or
+     * {@code ""} for observational / failed / unknown ticks.
+     *
+     * <p>The agent's {@code lastAction} labels are rich ({@code "BIGHIT_SPEC@123"},
+     * {@code "ARB_EAT_dh-axe@123"}, {@code "GMAUL_NOENERGY@123"}). The loader's
+     * {@code ActionExpectation} only recognizes {@code EAT:}/{@code SPEC:}/{@code ATTACK}
+     * and silently skips anything else, so raw labels made every live recording
+     * assert nothing. This converts the common completed actions and maps failed
+     * attempts to {@code ""} (skipped) rather than guessing.
+     *
+     * <p>Trailing detail (inventory slot) is intentionally omitted: {@code "EAT:"}
+     * matches any {@code EatAction}, whereas a guessed slot would false-fail.
+     */
+    public static String compactExecutedAction(String label) {
+        if (label == null) {
+            return "";
+        }
+        String u = label.trim().toUpperCase(java.util.Locale.ROOT);
+        if (u.isEmpty() || "NONE".equals(u) || "IDLE".equals(u)) {
+            return "";
+        }
+        if (isFailedAttempt(u)) {
+            return "";
+        }
+        if (isEatLabel(u)) {
+            return "EAT:";
+        }
+        if (isSpecLabel(u)) {
+            return "SPEC:";
+        }
+        if (isAttackLabel(u)) {
+            return "ATTACK";
+        }
+        return "";
+    }
+
+    /** A failed/aborted attempt is never an executed action. */
+    private static boolean isFailedAttempt(String u) {
+        return u.contains("MISS")
+                || u.contains("NOFOOD")
+                || u.contains("NOENERGY")
+                || u.contains("NO_WIELD")
+                || u.contains("NO_")
+                || u.contains("NOSPLAT")
+                || u.contains("STALL")
+                || u.contains("HOLD")
+                || u.contains("SKIP")
+                || u.contains("FAIL")
+                || u.contains("ERR");
+    }
+
+    private static boolean isEatLabel(String u) {
+        return u.contains("EAT")
+                || u.contains("MARLIN")
+                || u.contains("BREW")
+                || u.startsWith("PK_SINGLE")
+                || u.startsWith("PK_DOUBLE")
+                || u.startsWith("PK_TRIPLE");
+    }
+
+    private static boolean isSpecLabel(String u) {
+        return u.contains("SPEC")
+                || u.contains("GMAUL")
+                || u.contains("VOIDWAKER")
+                || u.contains("SW_WACK")
+                || u.contains("Q_CLAWS");
+    }
+
+    private static boolean isAttackLabel(String u) {
+        return u.contains("ATTACK")
+                || u.contains("_ATK")
+                || u.contains("DH_MANUAL_AXE");
     }
 
     private static StringBuilder appendLong(StringBuilder sb, String key, long value) {

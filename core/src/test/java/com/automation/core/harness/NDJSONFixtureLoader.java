@@ -13,9 +13,12 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.UncheckedIOException;
+import java.net.JarURLConnection;
+import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.LinkedHashMap;
@@ -23,6 +26,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.jar.JarEntry;
+import java.util.jar.JarFile;
+import java.util.stream.Stream;
 
 /**
  * Loads EchoForge {@code .ndjson} combat fixtures into {@link ReplayTick}s.
@@ -36,15 +42,55 @@ public final class NDJSONFixtureLoader {
 
     private NDJSONFixtureLoader() {}
 
+    /**
+     * Fixtures shipped when nothing is discovered on the classpath (jar-only
+     * classloaders where the directory cannot be listed).
+     */
+    private static final List<String> FALLBACK_FIXTURES = List.of(
+            "fixtures/sample_fight.ndjson",
+            "fixtures/dh-combo-fixture.ndjson",
+            "fixtures/survive-spec-fixture.ndjson");
+
+    /**
+     * Every {@code fixtures/*.ndjson} resource visible on the classpath, sorted.
+     * Discovered from the directory listing so a recording dropped into
+     * {@code core/src/test/resources/fixtures/} is picked up automatically;
+     * falls back to the shipped fixtures when the classpath cannot be listed.
+     */
+    public static List<String> fixtureResourceNames() {
+        List<String> found = new ArrayList<>();
+        ClassLoader cl = NDJSONFixtureLoader.class.getClassLoader();
+        URL dir = cl.getResource("fixtures");
+        if (dir != null) {
+            try {
+                if ("file".equals(dir.getProtocol())) {
+                    try (Stream<Path> s = Files.list(Paths.get(dir.toURI()))) {
+                        s.filter(p -> p.getFileName().toString().endsWith(".ndjson"))
+                                .map(p -> "fixtures/" + p.getFileName())
+                                .sorted()
+                                .forEach(found::add);
+                    }
+                } else if ("jar".equals(dir.getProtocol())) {
+                    JarURLConnection conn = (JarURLConnection) dir.openConnection();
+                    try (JarFile jar = conn.getJarFile()) {
+                        jar.stream()
+                                .map(JarEntry::getName)
+                                .filter(n -> n.startsWith("fixtures/") && n.endsWith(".ndjson"))
+                                .sorted()
+                                .forEach(found::add);
+                    }
+                }
+            } catch (Exception ignored) {
+                // Fall through to the shipped list.
+            }
+        }
+        return found.isEmpty() ? FALLBACK_FIXTURES : List.copyOf(found);
+    }
+
     /** Loads every {@code .ndjson} file under {@code classpath:/fixtures/}. */
     public static List<ReplayTick> loadClasspathFixtures() {
-        List<String> names = List.of(
-                "sample_fight.ndjson",
-                "dh-combo-fixture.ndjson",
-                "survive-spec-fixture.ndjson");
         List<ReplayTick> all = new ArrayList<>();
-        for (String name : names) {
-            String resource = "fixtures/" + name;
+        for (String resource : fixtureResourceNames()) {
             try (InputStream in = NDJSONFixtureLoader.class.getClassLoader().getResourceAsStream(resource)) {
                 if (in == null) {
                     continue;

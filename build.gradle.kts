@@ -145,8 +145,8 @@ val attach by tasks.registering {
 // ── Convenience: mirror the old build.bat's single entry point ───────────
 tasks.register("buildAll") {
     group = "build"
-    description = "Build the agent JAR and the attach driver (full build.bat equivalent)"
-    dependsOn(agentJar, attach)
+    description = "Build the agent JAR, the attach driver, and run coreTest (EchoForge headless suite)"
+    dependsOn(agentJar, attach, coreTest)
 }
 
 tasks.build {
