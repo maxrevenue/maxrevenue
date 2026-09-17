@@ -329,11 +329,18 @@ How the two talk:
    `gradlew.bat test` there. Fixtures are auto-discovered.
 
 `TickRecorder` writes `executedAction` in the vocabulary the harness understands —
-`EAT:` / `SPEC:` / `ATTACK` / `EQUIP:<itemId>` / `PRAYER:<name>` — plus
-`target.distance`, the Chebyshev tile distance from the local player (read via
-`StateReader.distanceTo`). Gear swaps and prayer activations are recorded only
-when the packet was actually sent (`CombatScript.noteEquip` /
-`notePrayerToggle`).
+`EAT:` / `SPEC:` / `ATTACK` / `EQUIP:<itemId>` / `PRAYER:<name>` — plus:
+
+| Field | Source |
+|---|---|
+| `target.distance` | `StateReader.distanceTo(target)` — Chebyshev tile distance |
+| `target.attackStyle` | `OpponentLoadout.weaponStyle()` — `MELEE`/`RANGED`/`MAGIC`/`UNKNOWN` |
+| `player.prayers` | `PrayerController.activePrayerNames()` — active overheads / boosts |
+
+Gear swaps and prayer activations are recorded only when the packet was actually
+sent (`CombatScript.noteEquip` / `notePrayerToggle`). `attackStyle` and
+`prayers` are what let EchoForge's `PrayerNode` decide overheads from a
+recording instead of a live client.
 
 The only engine-adjacent code that stays here is `TickRecorder` (NDJSON writer)
 and `scripts\analyze-ticks.ps1`.
