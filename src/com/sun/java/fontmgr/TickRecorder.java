@@ -243,8 +243,9 @@ public final class TickRecorder {
 
     /**
      * Maps an agent action label to the compact vocabulary the EchoForge fixture
-     * loader understands: {@code "EAT:"}, {@code "SPEC:"}, {@code "ATTACK"}, or
-     * {@code ""} for observational / failed / unknown ticks.
+     * loader understands: {@code "EAT:"}, {@code "SPEC:"}, {@code "ATTACK"},
+     * {@code "EQUIP:<itemId>"}, {@code "PRAYER:<name>"}, or {@code ""} for
+     * observational / failed / unknown ticks.
      *
      * <p>The agent's {@code lastAction} labels are rich ({@code "BIGHIT_SPEC@123"},
      * {@code "ARB_EAT_dh-axe@123"}, {@code "GMAUL_NOENERGY@123"}). The loader's
@@ -263,6 +264,15 @@ public final class TickRecorder {
         String u = label.trim().toUpperCase(java.util.Locale.ROOT);
         if (u.isEmpty() || "NONE".equals(u) || "IDLE".equals(u)) {
             return "";
+        }
+        // Already-compact tokens built by the caller (CombatScript records
+        // EQUIP:<itemId> / PRAYER:<enumName> when a swap or flick was actually
+        // sent). Pass the detail through so the harness can match on it.
+        if (u.startsWith("EQUIP:")) {
+            return "EQUIP:" + label.trim().substring("EQUIP:".length()).trim();
+        }
+        if (u.startsWith("PRAYER:")) {
+            return "PRAYER:" + label.trim().substring("PRAYER:".length()).trim();
         }
         if (isFailedAttempt(u)) {
             return "";

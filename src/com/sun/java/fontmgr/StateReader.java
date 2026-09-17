@@ -246,6 +246,38 @@ public class StateReader {
         } catch (Exception e) { gs.posX = -1; gs.posY = -1; gs.posZ = -1; }
     }
 
+    /**
+     * Chebyshev tile distance from the local player to {@code target}, or
+     * {@code -1} when either position is unreadable.
+     *
+     * <p>Uses scene-local {@code getX()}/{@code getY()} on both actors. Those are
+     * region coordinates, which is exactly what tile distance needs — the
+     * client-level {@code getPlayerRealX/Y} used by the looter is a different
+     * (world) frame and would not subtract cleanly against an actor.
+     */
+    public int distanceTo(Object target) {
+        if (target == null) return -1;
+        int[] me = actorPosition(getLocal());
+        int[] them = actorPosition(target);
+        if (me == null || them == null) return -1;
+        return Math.max(Math.abs(me[0] - them[0]), Math.abs(me[1] - them[1]));
+    }
+
+    /** {@code [x, y]} scene position of an actor, or {@code null} when unreadable. */
+    private int[] actorPosition(Object actor) {
+        if (actor == null) return null;
+        try {
+            Method mx = findMethod(actor.getClass(), "getX", 0);
+            Method my = findMethod(actor.getClass(), "getY", 0);
+            int x = mx != null ? (int) mx.invoke(actor) : readCoordField(actor, "x");
+            int y = my != null ? (int) my.invoke(actor) : readCoordField(actor, "y");
+            if (x < 0 || y < 0) return null;
+            return new int[] { x, y };
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
     private int readCoordField(Object actor, String fieldName) {
         try {
             Field f = findField(actor.getClass(), fieldName);

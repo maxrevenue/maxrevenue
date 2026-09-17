@@ -328,6 +328,13 @@ How the two talk:
 2. Copy the `.ndjson` into EchoForge's `src\test\resources\fixtures\` and run
    `gradlew.bat test` there. Fixtures are auto-discovered.
 
+`TickRecorder` writes `executedAction` in the vocabulary the harness understands —
+`EAT:` / `SPEC:` / `ATTACK` / `EQUIP:<itemId>` / `PRAYER:<name>` — plus
+`target.distance`, the Chebyshev tile distance from the local player (read via
+`StateReader.distanceTo`). Gear swaps and prayer activations are recorded only
+when the packet was actually sent (`CombatScript.noteEquip` /
+`notePrayerToggle`).
+
 The only engine-adjacent code that stays here is `TickRecorder` (NDJSON writer)
 and `scripts\analyze-ticks.ps1`.
 

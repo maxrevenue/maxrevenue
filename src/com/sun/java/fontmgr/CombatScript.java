@@ -646,6 +646,12 @@ public class CombatScript implements TickListener {
     public volatile OpponentLoadout opponentLoadout = OpponentLoadout.empty();
     /** EchoForge per-tick NDJSON recorder; off unless {@link TickRecorder#ENABLED} or {@code -Droatz.rec}. */
     private final TickRecorder recorder = TickRecorder.fromProperty();
+    /** Item id of the last equip actually sent, for the recorder's {@code EQUIP:} action. */
+    private int lastEquipItemId = -1;
+    private int lastEquipTick = -99;
+    /** Prayer enum name of the last activation actually sent, for {@code PRAYER:}. */
+    private String lastPrayerName = null;
+    private int lastPrayerTick = -99;
     /** Target the cached loadout was captured for; identity compare, tick thread only. */
     private Object opponentLoadoutTarget = null;
     /** Tick the cached loadout was captured on, so it is refreshed exactly once per tick. */
@@ -1299,8 +1305,8 @@ public class CombatScript implements TickListener {
                     targetHp, targetMaxHp,
                     opponentLoadout != null ? opponentLoadout.weaponId() : 0,
                     lastTargetAnim,
-                    -1,
-                    lastAction != null ? lastAction : "");
+                    stateReader != null ? stateReader.distanceTo(cachedTarget) : -1,
+                    recordedAction(currentTick));
         }
     }
 
@@ -2846,6 +2852,7 @@ public class CombatScript implements TickListener {
         if (doActionMethod == null || slot < 0 || itemId < 0) return;
         try {
             doActionMethod.invoke(clientInstance, 0, slot, 3214, 454, itemId, 0, "Wield", "", -1, -1);
+            noteEquip(itemId);
             if (staffLcCast) leftClickCast.syncAfterWield(itemId, currentTick);
         } catch (Exception e) {
             FontManager.log("[CombatScript] wieldItem error: " + e.getMessage());
@@ -3332,6 +3339,44 @@ public class CombatScript implements TickListener {
     }
 
     /** The per-tick recorder. Never null; {@link TickRecorder#isEnabled()} when off. */
+    /**
+     * Recorder hook: an equip was actually sent this tick, so the NDJSON line
+     * can carry {@code EQUIP:<itemId>} instead of the generic action label.
+     */
+    public void noteEquip(int itemId) {
+        if (itemId > 0) {
+            lastEquipItemId = itemId;
+            lastEquipTick = currentTick;
+        }
+    }
+
+    /**
+     * Recorder hook: a prayer was actually activated this tick, so the line can
+     * carry {@code PRAYER:<enumName>}.
+     */
+    public void notePrayerToggle(String enumName) {
+        if (enumName != null && !enumName.isEmpty()) {
+            lastPrayerName = enumName;
+            lastPrayerTick = currentTick;
+        }
+    }
+
+    /**
+     * Action token for this tick. A gear swap or prayer flick outranks the
+     * generic label because those are the events the EchoForge harness exists to
+     * capture; everything else falls through to the usual classifier
+     * ({@code EAT:}/{@code SPEC:}/{@code ATTACK}).
+     */
+    private String recordedAction(int tick) {
+        if (lastEquipItemId > 0 && lastEquipTick == tick) {
+            return "EQUIP:" + lastEquipItemId;
+        }
+        if (lastPrayerName != null && lastPrayerTick == tick) {
+            return "PRAYER:" + lastPrayerName;
+        }
+        return lastAction != null ? lastAction : "";
+    }
+
     public TickRecorder recorder() {
         return recorder;
     }
@@ -7479,12 +7524,14 @@ public class CombatScript implements TickListener {
             // (packet 122) and must not ride along — that ate food on e: lines.
             if (doActionMethod != null) {
                 doActionMethod.invoke(clientInstance, 0, slot, 3214, 454, id, 0, "Wield", "", -1, -1);
+                noteEquip(id);
                 if (staffLcCast) leftClickCast.syncAfterWield(id, currentTick);
                 return;
             }
             int row = inventoryActionRow(id, "wield", "wear", "equip");
             if (row < 0) row = 0;
             clickInterfaceItem(3214, slot, id, row);
+            noteEquip(id);
             if (staffLcCast) leftClickCast.syncAfterWield(id, currentTick);
         } catch (Exception e) {
             FontManager.log("[CombatScript] equipFromSlot error: " + e.getMessage());

@@ -89,6 +89,27 @@ public class TickRecorderActionTest {
     }
 
     @Test
+    public void equipAndPrayerTokensPassThroughWithDetail() {
+        assertEquals("EQUIP:11802", c("EQUIP:11802"));
+        assertEquals("EQUIP:11802", c("equip:11802"));
+        assertEquals("PRAYER:PROTECT_FROM_MAGIC", c("PRAYER:PROTECT_FROM_MAGIC"));
+        assertEquals("PRAYER:piety", c("PRAYER:piety"));
+        // A bridge token is never mistaken for a failed attempt.
+        assertEquals("EQUIP:12954", c("EQUIP:12954"));
+    }
+
+    @Test
+    public void formatCarriesEquipPrayerAndDistance() {
+        String equip = TickRecorder.formatNdjson(9, 99, 99, 50, 100,
+                null, null, 40, 99, 0, -1, 2, "EQUIP:11802");
+        assertTrue(equip.contains("\"executedAction\":\"EQUIP:11802\""), equip);
+        assertTrue(equip.contains("\"distance\":2"), equip);
+        String pray = TickRecorder.formatNdjson(9, 99, 99, 50, 100,
+                null, null, 40, 99, 0, -1, -1, "PRAYER:PIETY");
+        assertTrue(pray.contains("\"executedAction\":\"PRAYER:PIETY\""), pray);
+    }
+
+    @Test
     public void formatWritesCompactActionAndKeepsRawLabel() {
         String json = TickRecorder.formatNdjson(7, 50, 99, 60, 100,
                 java.util.Map.of(3, 11802), java.util.Map.of(0, 385),

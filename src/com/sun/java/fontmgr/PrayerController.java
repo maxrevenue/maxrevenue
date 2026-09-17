@@ -260,6 +260,7 @@ public final class PrayerController {
         if (sent) {
             lastOffensiveSendTick = script.currentTick();
             lastOffensiveSent = enumName;
+            script.notePrayerToggle(enumName);
         }
         FontManager.prayLog("ON " + (enumName != null ? enumName : "?") + " id=" + prayerId
                 + " path=" + path + " allowTab=" + allowTab + " spellArmed=" + spellArmed
@@ -557,6 +558,7 @@ public final class PrayerController {
 
     void markProtectActivatedPublic(int prayerId, String label, long now) {
         String enumName = AnimationDb.protectPrayerEnumName(prayerId);
+        script.notePrayerToggle(enumName);
         deactivateOtherProtectOverheads(enumName);
         script.activeProtectPrayer(prayerId);
         script.lastPrayerSwitchMs(now);
@@ -1074,6 +1076,9 @@ public final class PrayerController {
         } else {
             clickOffensivePrayerWidget(AnimationDb.AUGURY_WIDGET, prayerName);
             setPrayerActive(enumName, true);
+        }
+        if (enumName != null && (sent || isPrayerActive(enumName))) {
+            script.notePrayerToggle(enumName);
         }
         script.lastAction((sent || isPrayerActive(enumName) ? "PRAY_" : "PRAY_TRY_")
                 + (enumName != null ? enumName : prayerName) + "@" + script.currentTick());
