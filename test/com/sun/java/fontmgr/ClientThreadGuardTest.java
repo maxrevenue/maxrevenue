@@ -119,6 +119,29 @@ public class ClientThreadGuardTest {
         assertNotEquals("agent-tick", Thread.currentThread().getName());
     }
 
+    @Test
+    public void listenerAddedBeforeStartReceivesTheFirstObservedTick() throws Exception {
+        // Regression: FontManager used to start the engine BEFORE addListener, so
+        // the first observed tick fired into an empty listener list and was
+        // consumed. With a client whose counters never advance again (e.g. not
+        // actually in-game) that meant a recording containing zero ticks.
+        TickEngine engine = new TickEngine(FakeClient.class, null);
+        AtomicInteger fired = new AtomicInteger();
+        engine.addListener(tick -> fired.incrementAndGet());
+        engine.start();
+        try {
+            long deadline = System.currentTimeMillis() + 2000L;
+            while (fired.get() == 0 && System.currentTimeMillis() < deadline) {
+                Thread.sleep(20L);
+            }
+            assertTrue(fired.get() > 0,
+                    "a listener registered before start() must get the first tick");
+            assertTrue(engine.describeSource().contains("tick=tick"), engine.describeSource());
+        } finally {
+            engine.stop();
+        }
+    }
+
     /** Static tick fields TickEngine can poll without a live client. */
     public static final class FakeClient {
         public static volatile int tick = 90;

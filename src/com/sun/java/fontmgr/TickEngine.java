@@ -76,6 +76,16 @@ public class TickEngine implements Runnable {
         }
     }
 
+    /**
+     * Which client fields the poll loop resolved, for diagnostics. Surfaced in
+     * the recording header so a row-less file names its own poll source.
+     */
+    public String describeSource() {
+        return "tick=" + tickField.getName()
+                + (serverTickField != null ? ", serverTick=" + serverTickField.getName()
+                                           : ", no serverTick");
+    }
+
     /** Walks the class hierarchy; {@code getDeclaredField} alone misses inherited fields. */
     private static Field findField(Class<?> cls, String name) {
         for (Class<?> c = cls; c != null; c = c.getSuperclass()) {

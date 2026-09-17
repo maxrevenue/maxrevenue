@@ -579,11 +579,14 @@ public class FontManager {
             SharedMemory.init();
             shmPath = SharedMemory.getShmPath();
 
-            // 4. TickEngine
+            // 4. TickEngine — constructed here but STARTED after the listeners are
+            //    registered (step 6c). Starting it first let the initial observed
+            //    tick fire into an empty listener list and be consumed, so a client
+            //    that never advanced its counter again recorded exactly nothing.
             String tickNote = "tick engine ok";
             try {
                 tickEngine = new TickEngine(clientClass, clientInstance);
-                tickEngine.start();
+                tickNote = "tick engine ok (" + tickEngine.describeSource() + ")";
             } catch (Exception e) {
                 tickEngine = null;
                 tickNote = "tick engine FAILED: " + e.getClass().getSimpleName() + ": " + e.getMessage()
@@ -631,7 +634,13 @@ public class FontManager {
                 }
             }
 
-            // 6c. In-game overlays (Callbacks proxy → buffer-image tile outlines)
+            // 6c. Start polling now that every listener (combat, looter) is
+            //     registered, so the first observed tick is not lost.
+            if (tickEngine != null) {
+                tickEngine.start();
+            }
+
+            // 6d. In-game overlays (Callbacks proxy → buffer-image tile outlines)
             installGameOverlays();
 
             // 7. OverlayUI (EDT) — consolidated always-on-top HUD
