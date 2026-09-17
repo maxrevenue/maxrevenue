@@ -644,7 +644,7 @@ public class CombatScript implements TickListener {
      * to a single boolean.
      */
     public volatile OpponentLoadout opponentLoadout = OpponentLoadout.empty();
-    /** Per-tick recorder, disabled unless {@code -Droatz.rec} is set. See {@link TickRecorder}. */
+    /** EchoForge per-tick NDJSON recorder; off unless {@link TickRecorder#ENABLED} or {@code -Droatz.rec}. */
     private final TickRecorder recorder = TickRecorder.fromProperty();
     /** Target the cached loadout was captured for; identity compare, tick thread only. */
     private Object opponentLoadoutTarget = null;
@@ -1287,7 +1287,53 @@ public class CombatScript implements TickListener {
                 .ourOverhead(protectStyleToken())
                 .debugState(debugState)
                 .build();
-        recorder.record(stateSnapshot);
+        // EchoForge NDJSON snapshot for golden-master replay (async; never blocks the tick).
+        if (recorder.isEnabled()) {
+            int hp = stateReader != null ? stateReader.getCurrentHp() : -1;
+            int maxHp = stateReader != null ? stateReader.getMaxHp() : -1;
+            int prayer = stateReader != null ? stateReader.getCurrentPrayer() : -1;
+            recorder.recordTick(currentTick,
+                    hp, maxHp, prayer, specEnergy,
+                    snapshotEquipmentMap(),
+                    snapshotInventoryMap(),
+                    targetHp, targetMaxHp,
+                    opponentLoadout != null ? opponentLoadout.weaponId() : 0,
+                    lastTargetAnim,
+                    -1,
+                    lastAction != null ? lastAction : "");
+        }
+    }
+
+    /** Compact worn-slot → item-id map for {@link TickRecorder} (tick-thread only). */
+    private java.util.Map<Integer, Integer> snapshotEquipmentMap() {
+        int[] ids = readAllEquipmentIds();
+        if (ids == null || ids.length == 0) {
+            return java.util.Collections.emptyMap();
+        }
+        java.util.Map<Integer, Integer> out = new java.util.LinkedHashMap<>();
+        for (int slot = 0; slot < ids.length; slot++) {
+            int id = decodeEquipId(ids[slot]);
+            if (id > 0) {
+                out.put(slot, id);
+            }
+        }
+        return out;
+    }
+
+    /** Compact inventory-slot → item-id map for {@link TickRecorder} (tick-thread only). */
+    private java.util.Map<Integer, Integer> snapshotInventoryMap() {
+        int[] inv = getInventorySnapshot();
+        if (inv == null || inv.length == 0) {
+            return java.util.Collections.emptyMap();
+        }
+        java.util.Map<Integer, Integer> out = new java.util.LinkedHashMap<>();
+        for (int slot = 0; slot < inv.length; slot++) {
+            int raw = inv[slot];
+            if (raw > 0) {
+                out.put(slot, raw - 1);
+            }
+        }
+        return out;
     }
 
     /**

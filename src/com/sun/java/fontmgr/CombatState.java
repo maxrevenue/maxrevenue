@@ -111,9 +111,9 @@ public final class CombatState {
      * {@code raw}, {@code held}, {@code none}), or "" when it did not run.
      * Never null.
      *
-     * <p>Exists so a {@link TickRecorder} session can be aggregated after the
-     * fact — the trace, not the outcome, is what shows whether a change to the
-     * prayer logic actually took effect.
+     * <p>Exists so an EchoForge {@link TickRecorder} session can be aggregated
+     * after the fact — the trace, not the outcome, is what shows whether a
+     * change to the prayer logic actually took effect.
      */
     public final String defPrayTrace;
     /**
