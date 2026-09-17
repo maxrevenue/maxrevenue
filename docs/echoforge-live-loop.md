@@ -26,14 +26,21 @@ git switch cursor/echoforge-live-loop-3f6a
 
 ## 2. Record a live session
 
-Build/attach the agent as usual, with an **absolute** output path:
+`launch.ps1` has a `-Rec` switch that enables the recorder in either mode:
 
-```
--Droatz.rec=C:\Users\Alec\Desktop\RoatzBot\logs\replays\session.ndjson
+```powershell
+# attach-after-login (recommended) + record to an absolute path
+.\launch.ps1 -Attach -Rec C:\Users\Alec\Desktop\RoatzBot\logs\replays\session.ndjson
+
+# or premain
+.\launch.ps1 -Premain -Rec C:\Users\Alec\Desktop\RoatzBot\logs\replays\session.ndjson
 ```
 
-- `-Droatz.rec=true` also works but writes relative to the **game client's**
-  working directory (not this repo), so prefer the absolute form.
+- `-Rec true` uses the default `logs\replays\tick_session_<stamp>.ndjson`, which is
+  relative to the **game client's** working directory, so prefer an absolute path.
+- `-Premain` adds `-Droatz.rec=<path>` to the game JVM. `-Attach` cannot set a
+  JVM property on an already-running client, so it passes `rec=<path>` as the
+  agent arg instead; `FontManager.AgentOptions` turns that into the same property.
 - The resolved path is logged at startup (`[rec] EchoForge recording ticks to …`),
   readable over the command socket with `LOG`.
 - The writer flushes every second and on JVM exit. **Quit the client** to be

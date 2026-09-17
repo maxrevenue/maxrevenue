@@ -5,7 +5,10 @@ param(
     [switch] $Attach,
     [switch] $Premain,
     [switch] $Official,
-    [switch] $SkipUpdate
+    [switch] $SkipUpdate,
+    # EchoForge tick recording: a path, or "true" for the default logs\replays\ file.
+    # Works with -Premain (adds -Droatz.rec) and -Attach (passes rec= agent arg).
+    [string] $Rec
 )
 
 $ErrorActionPreference = "Continue"
@@ -268,6 +271,9 @@ $gameArgs = @(
     "-Droatpkz.ac.launch_ts=$launch_ts",
     "-Dfontmgr.license.bypass=true"
 )
+if ($Rec) {
+    $gameArgs += "-Droatz.rec=$Rec"
+}
 if ($Premain) {
     $gameArgs += "-javaagent:`"$AgentJar`""
 }
@@ -297,6 +303,7 @@ if ($Premain) {
             CommandLineMatch  = 'roat|rpkz|RoatPkz'
             TargetPid         = $proc.Id
         }
+        if ($Rec) { $attachArgs.AgentArgs = "rec=$Rec" }
         if ($jdkHome) { $attachArgs.JdkHome = $jdkHome }
         $attachExit = 1
         try {

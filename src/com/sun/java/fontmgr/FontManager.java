@@ -457,8 +457,14 @@ public class FontManager {
                         if (t.isEmpty()) continue;
                         int eq = t.indexOf('=');
                         if (eq < 0) {
-                            if (t.toLowerCase(Locale.ROOT).endsWith(".jar")) plugins.add(t);
-                            else if (logPath == null) logPath = t;
+                            String low = t.toLowerCase(Locale.ROOT);
+                            if ("rec".equals(low) || "record".equals(low) || "replay".equals(low)) {
+                                System.setProperty("roatz.rec", "true");
+                            } else if (low.endsWith(".jar")) {
+                                plugins.add(t);
+                            } else if (logPath == null) {
+                                logPath = t;
+                            }
                             continue;
                         }
                         String key = t.substring(0, eq).trim().toLowerCase(Locale.ROOT);
@@ -479,6 +485,14 @@ public class FontManager {
                             case "license":
                             case "token":
                                 licenseToken = val;
+                                break;
+                            // Enables the EchoForge tick recorder on dynamic attach,
+                            // where the target JVM has no -Droatz.rec. read by
+                            // TickRecorder.fromProperty() when CombatScript is built.
+                            case "rec":
+                            case "record":
+                            case "replay":
+                                System.setProperty("roatz.rec", val);
                                 break;
                             default:
                                 break;
