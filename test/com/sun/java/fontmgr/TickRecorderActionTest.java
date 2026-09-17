@@ -135,6 +135,45 @@ public class TickRecorderActionTest {
     }
 
     @Test
+    public void configTogglesAreNotEatActions() {
+        // "AUTO_EAT_OFF" is a switch, not an eat; it was scoring as a false
+        // EAT: expectation on every repeated row of a real capture.
+        assertEquals("", c("AUTO_EAT_OFF"));
+        assertEquals("", c("AUTO_EAT_ON"));
+        assertEquals("", c("NHV2_ON"));
+        assertEquals("", c("AUTO_SPEC_OFF"));
+        // A real eat is unaffected.
+        assertEquals("EAT:", c("NH_BREW1@698"));
+    }
+
+    @Test
+    public void recordedActionIsNotSticky() throws Exception {
+        // lastAction keeps its value until the next action overwrites it, so a
+        // naive read stamped 84 later rows with one eat's label. The agent only
+        // reports a label for the tick it happened on.
+        String prev = System.getProperty("roatz.rec");
+        System.clearProperty("roatz.rec");
+        try {
+            CombatScript s = new CombatScript(null, Object.class, null);
+
+            s.lastAction = "NH_MARLIN_BREW@730";
+            assertEquals("NH_MARLIN_BREW@730", s.recordedAction(730));
+            assertEquals("", s.recordedAction(731), "stale label must not mark later ticks");
+            assertEquals("", s.recordedAction(875));
+
+            s.lastAction = "NH_BREW1@876";
+            assertEquals("NH_BREW1@876", s.recordedAction(876));
+
+            // No tick stamp: reported once, when it changes.
+            s.lastAction = "SW_WACK";
+            assertEquals("SW_WACK", s.recordedAction(900));
+            assertEquals("", s.recordedAction(901));
+        } finally {
+            if (prev != null) System.setProperty("roatz.rec", prev);
+        }
+    }
+
+    @Test
     public void normalizeStyleCollapsesToTheFourEngineValues() {
         assertEquals("MELEE", TickRecorder.normalizeStyle("melee"));
         assertEquals("RANGED", TickRecorder.normalizeStyle(" RANGED "));

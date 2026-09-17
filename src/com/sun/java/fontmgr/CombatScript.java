@@ -3387,14 +3387,45 @@ public class CombatScript implements TickListener {
      * capture; everything else falls through to the usual classifier
      * ({@code EAT:}/{@code SPEC:}/{@code ATTACK}).
      */
-    private String recordedAction(int tick) {
+    /** Previous tick's recorded label, to detect a stale carry-over. */
+    private String prevRecordedLabel = "";
+
+    String recordedAction(int tick) {
         if (lastEquipItemId > 0 && lastEquipTick == tick) {
-            return "EQUIP:" + lastEquipItemId;
+            prevRecordedLabel = "EQUIP:" + lastEquipItemId;
+            return prevRecordedLabel;
         }
         if (lastPrayerName != null && lastPrayerTick == tick) {
-            return "PRAYER:" + lastPrayerName;
+            prevRecordedLabel = "PRAYER:" + lastPrayerName;
+            return prevRecordedLabel;
         }
-        return lastAction != null ? lastAction : "";
+
+        String label = (lastAction == null) ? "" : lastAction;
+        if (label.isEmpty()) {
+            prevRecordedLabel = "";
+            return "";
+        }
+        // lastAction is STICKY: it keeps its value until the next action
+        // overwrites it, so naively recording it stamps every later tick with the
+        // last thing we ever did. One eat at tick 791 produced 84 rows of
+        // "EAT:" and 200 false triage disagreements. Only report a label that
+        // demonstrably belongs to this tick: either it carries this tick's own
+        // "@<tick>" stamp, or it changed since the previous tick.
+        int at = label.lastIndexOf('@');
+        if (at >= 0) {
+            try {
+                if (Long.parseLong(label.substring(at + 1).trim()) != tick) {
+                    prevRecordedLabel = "";
+                    return "";
+                }
+            } catch (NumberFormatException ignored) {
+                // No numeric stamp; fall through to the change check.
+            }
+        } else if (label.equals(prevRecordedLabel)) {
+            return "";
+        }
+        prevRecordedLabel = label;
+        return label;
     }
 
     /**

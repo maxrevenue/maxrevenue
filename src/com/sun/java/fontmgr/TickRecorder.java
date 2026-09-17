@@ -369,6 +369,11 @@ public final class TickRecorder {
         if (u.startsWith("PRAYER:")) {
             return "PRAYER:" + label.trim().substring("PRAYER:".length()).trim();
         }
+        // Config toggles are not actions: "AUTO_EAT_OFF" is a switch, not an eat,
+        // and it was scoring as a false EAT: expectation on every repeated row.
+        if (u.endsWith("_ON") || u.endsWith("_OFF")) {
+            return "";
+        }
         if (isFailedAttempt(u)) {
             return "";
         }
