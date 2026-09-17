@@ -8,7 +8,10 @@ param(
     [switch] $SkipUpdate,
     # EchoForge tick recording: a path, or "true" for the default logs\replays\ file.
     # Works with -Premain (adds -Droatz.rec) and -Attach (passes rec= agent arg).
-    [string] $Rec
+    [string] $Rec,
+    # Agent file log + command socket (127.0.0.1:9998) for diagnosing a silent
+    # agent: no ticks, no HUD, attach looked fine.
+    [switch] $AgentDebug
 )
 
 $ErrorActionPreference = "Continue"
@@ -276,6 +279,10 @@ $gameArgs = @(
 )
 if ($Rec) {
     $gameArgs += "-Droatz.rec=$Rec"
+}
+if ($AgentDebug) {
+    $gameArgs += "-Dagent.filelog=true"
+    $gameArgs += "-Dagent.cmd=true"
 }
 if ($Premain) {
     $gameArgs += "-javaagent:`"$AgentJar`""

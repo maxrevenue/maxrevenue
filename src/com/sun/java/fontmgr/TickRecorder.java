@@ -38,6 +38,22 @@ public final class TickRecorder {
      */
     public static volatile boolean ENABLED = false;
 
+    /**
+     * One-line health note written as the first row of every recording, set by
+     * {@code FontManager} during bootstrap.
+     *
+     * <p>This is what makes a row-less file diagnosable: {@code # tick engine ok}
+     * with no rows means ticks never arrived, while
+     * {@code # tick engine FAILED: …} names the cause outright. Without it a
+     * 0-byte recording is indistinguishable from an agent that never started.
+     */
+    private static volatile String startupNote = "";
+
+    /** Set before the recorder starts to annotate the recording. */
+    public static void setStartupNote(String note) {
+        startupNote = (note == null) ? "" : note;
+    }
+
     private static final int QUEUE_CAPACITY = 4096;
     private static final long MAX_ROWS = 500_000L;
     private static final long FLUSH_INTERVAL_MS = 1_000L;
@@ -153,6 +169,10 @@ public final class TickRecorder {
             return false;
         }
         running = true;
+        String note = startupNote;
+        if (!note.isEmpty() && queue != null) {
+            queue.offer("# " + note + "  (" + Product.NAME + " " + Product.VERSION + ")");
+        }
         writer = new Thread(() -> drain(w), "echoforge-tick-recorder");
         writer.setDaemon(true);
         writer.start();

@@ -145,6 +145,34 @@ public class TickRecorderActionTest {
     }
 
     @Test
+    public void startupNoteAndFirstRowLandInTheFile() throws Exception {
+        java.nio.file.Path tmp = java.nio.file.Files.createTempFile("echoforge-rec", ".ndjson");
+        String prev = System.getProperty("roatz.rec");
+        try {
+            System.setProperty("roatz.rec", tmp.toString());
+            TickRecorder.setStartupNote("tick engine ok");
+            TickRecorder rec = TickRecorder.fromProperty();
+            assertTrue(rec.isEnabled(), "explicit path must start the recorder");
+            rec.recordTick(1, 99, 99, 50, 0, null, null, -1, -1, 0, -1, -1,
+                    "MELEE", null, "ATTACK");
+            rec.flushAndClose();
+
+            String body = new String(java.nio.file.Files.readAllBytes(tmp),
+                    java.nio.charset.StandardCharsets.UTF_8);
+            assertTrue(body.contains("# tick engine ok"),
+                    "health note must be the first line so a row-less file is diagnosable: " + body);
+            assertTrue(body.contains("\"tickCount\":1"), body);
+            assertTrue(body.indexOf("# tick engine ok") < body.indexOf("\"tickCount\""),
+                    "note must precede the first tick row");
+        } finally {
+            if (prev == null) System.clearProperty("roatz.rec");
+            else System.setProperty("roatz.rec", prev);
+            TickRecorder.setStartupNote("");
+            java.nio.file.Files.deleteIfExists(tmp);
+        }
+    }
+
+    @Test
     public void formatWritesCompactActionAndKeepsRawLabel() {
         String json = TickRecorder.formatNdjson(7, 50, 99, 60, 100,
                 java.util.Map.of(3, 11802), java.util.Map.of(0, 385),

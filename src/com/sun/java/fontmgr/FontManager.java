@@ -580,13 +580,20 @@ public class FontManager {
             shmPath = SharedMemory.getShmPath();
 
             // 4. TickEngine
+            String tickNote = "tick engine ok";
             try {
                 tickEngine = new TickEngine(clientClass, clientInstance);
                 tickEngine.start();
             } catch (Exception e) {
+                tickEngine = null;
+                tickNote = "tick engine FAILED: " + e.getClass().getSimpleName() + ": " + e.getMessage()
+                        + " — no ticks will be recorded";
                 error("[TickEngine] Failed: " + e.getMessage()
                         + " — the agent will not tick (client fields may have been renamed)");
             }
+            // Annotate the recording (see TickRecorder.start) so an empty file
+            // says WHY instead of looking like an agent that never ran.
+            TickRecorder.setStartupNote(tickNote);
 
             // 5. CombatScript
             if (doActionMethod != null) {
