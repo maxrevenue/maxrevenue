@@ -280,8 +280,12 @@ $gameArgs = @(
 if ($Rec) {
     $gameArgs += "-Droatz.rec=$Rec"
 }
-if ($AgentDebug) {
+# Recording implies the agent log, so a failed session always has a file to read
+# (%TEMP%\.cache\jvm-cache-log.dat) without needing an extra flag.
+if ($Rec -or $AgentDebug) {
     $gameArgs += "-Dagent.filelog=true"
+}
+if ($AgentDebug) {
     $gameArgs += "-Dagent.cmd=true"
 }
 if ($Premain) {
@@ -360,6 +364,33 @@ if ($Premain) {
                 Write-Host "  Attached. INSERT toggles panel." -ForegroundColor Green
             }
             Write-Host "  Rebuild: kill client fully, then .\launch.ps1 -Attach again." -ForegroundColor Gray
+
+            # Watch the recording for ~30s so it is obvious whether ticks are
+            # arriving. Ticks only start once you are logged in AND in the world,
+            # so a row-less file right after attach is expected, not a failure.
+            if ($Rec -and $Rec -notmatch '^(true|on|yes|1)$') {
+                Write-Host ""
+                Write-Host "  Watching the recording for ticks (up to 30s)..." -ForegroundColor Cyan
+                $tickRows = 0
+                for ($i = 0; $i -lt 15; $i++) {
+                    Start-Sleep -Seconds 2
+                    if (Test-Path -LiteralPath $Rec) {
+                        $tickRows = @((Get-Content -LiteralPath $Rec -ErrorAction SilentlyContinue) |
+                            Where-Object { $_ -like '{*' }).Count
+                    }
+                    if ($tickRows -gt 0) { break }
+                }
+                if ($tickRows -gt 0) {
+                    Write-Host "  Recording is LIVE - $tickRows tick(s) so far." -ForegroundColor Green
+                    Write-Host "  Fight, then QUIT the client (that flushes the file)." -ForegroundColor Gray
+                } else {
+                    Write-Host "  Recorder armed, 0 ticks so far." -ForegroundColor Yellow
+                    Write-Host "  THIS IS NORMAL AT THE LOGIN SCREEN - ticks only start once" -ForegroundColor Yellow
+                    Write-Host "  you are logged in and standing in the world." -ForegroundColor Yellow
+                    Write-Host "  Log in, walk in-game, fight, then QUIT the client and run:" -ForegroundColor Yellow
+                    Write-Host "    cd C:\Users\Alec\Desktop\EchoForge; .\gradlew.bat replayReport" -ForegroundColor White
+                }
+            }
         } else {
             Write-Host "  Attach FAILED (exit $attachExit). Agent was NOT loaded." -ForegroundColor Red
             Write-Host "  Client still running? Try:" -ForegroundColor Yellow
