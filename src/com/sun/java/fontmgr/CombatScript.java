@@ -1323,7 +1323,8 @@ public class CombatScript implements TickListener {
                     stateReader != null ? stateReader.distanceTo(cachedTarget) : -1,
                     recordedTargetStyle(),
                     this.prayer.activePrayerNames(),
-                    recordedAction(currentTick));
+                    recordedAction(currentTick),
+                    lastAction);
         }
     }
 

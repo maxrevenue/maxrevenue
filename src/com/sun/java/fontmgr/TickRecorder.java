@@ -220,9 +220,13 @@ public final class TickRecorder {
      * @param distance       chebyshev tile distance, or {@code -1} unknown
      * @param attackStyle    opponent style: {@code MELEE}/{@code RANGED}/{@code MAGIC}/{@code UNKNOWN}
      * @param prayers        active local prayer names, e.g. {@code ["PIETY"]} (may be null)
-     * @param executedAction raw agent action label, e.g. {@code "ARB_EAT_dh-axe@123"}.
-     *                       Written as compact {@code executedAction} plus the raw
-     *                       {@code actionLabel}; see {@link #compactExecutedAction(String)}
+     * @param executedAction this tick's action, already filtered to only what
+     *                       happened on this tick (may be {@code ""}); written as
+     *                       the compact {@code executedAction}
+     * @param rawLabel       the agent's {@code lastAction} verbatim, for
+     *                       {@code actionLabel} provenance. Recorded even when
+     *                       {@code executedAction} is empty, so a capture still
+     *                       shows what the agent was doing.
      */
     public void recordTick(long tickCount,
                            int playerHp, int playerMaxHp, int prayer, int specEnergy,
@@ -232,7 +236,8 @@ public final class TickRecorder {
                            int weaponId, int animationId, int distance,
                            String attackStyle,
                            java.util.List<String> prayers,
-                           String executedAction) {
+                           String executedAction,
+                           String rawLabel) {
         if (queue == null) {
             return;
         }
@@ -241,7 +246,7 @@ public final class TickRecorder {
         }
         String line = formatNdjson(tickCount, playerHp, playerMaxHp, prayer, specEnergy,
                 equipment, inventory, targetHp, targetMaxHp, weaponId, animationId, distance,
-                attackStyle, prayers, executedAction);
+                attackStyle, prayers, executedAction, rawLabel);
         if (!queue.offer(line)) {
             dropped.incrementAndGet();
             if (!warnedDropped) {
@@ -267,7 +272,7 @@ public final class TickRecorder {
                 s.opponentWeaponId(), s.lastTargetAnim, -1,
                 style == null ? "UNKNOWN" : style.name(),
                 java.util.Collections.<String>emptyList(),
-                s.actionLabel());
+                s.actionLabel(), s.actionLabel());
     }
 
     /** Builds one valid single-line NDJSON object (Java 11 string builder, no JSON lib). */
@@ -279,7 +284,8 @@ public final class TickRecorder {
                                int weaponId, int animationId, int distance,
                                String attackStyle,
                                java.util.List<String> prayers,
-                               String executedAction) {
+                               String executedAction,
+                               String rawLabel) {
         StringBuilder sb = new StringBuilder(256);
         sb.append('{');
         appendLong(sb, "tickCount", tickCount).append(',');
@@ -302,7 +308,10 @@ public final class TickRecorder {
         sb.append("},");
         appendString(sb, "executedAction", compactExecutedAction(executedAction));
         sb.append(',');
-        appendString(sb, "actionLabel", executedAction == null ? "" : executedAction);
+        // rawLabel (lastAction verbatim), NOT the filtered action: an empty
+        // executedAction is normal on observational ticks and must not erase the
+        // provenance of what the agent was actually doing.
+        appendString(sb, "actionLabel", rawLabel == null ? "" : rawLabel);
         sb.append('}');
         return sb.toString();
     }

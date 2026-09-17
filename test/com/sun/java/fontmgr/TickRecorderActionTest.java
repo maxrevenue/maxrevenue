@@ -102,12 +102,12 @@ public class TickRecorderActionTest {
     public void formatCarriesEquipPrayerAndDistance() {
         String equip = TickRecorder.formatNdjson(9, 99, 99, 50, 100,
                 null, null, 40, 99, 0, -1, 2,
-                "MELEE", java.util.Collections.<String>emptyList(), "EQUIP:11802");
+                "MELEE", java.util.Collections.<String>emptyList(), "EQUIP:11802", "SWAP_MELEE@9");
         assertTrue(equip.contains("\"executedAction\":\"EQUIP:11802\""), equip);
         assertTrue(equip.contains("\"distance\":2"), equip);
         String pray = TickRecorder.formatNdjson(9, 99, 99, 50, 100,
                 null, null, 40, 99, 0, -1, -1,
-                "UNKNOWN", java.util.List.of("PIETY"), "PRAYER:PIETY");
+                "UNKNOWN", java.util.List.of("PIETY"), "PRAYER:PIETY", "PIETY@9");
         assertTrue(pray.contains("\"executedAction\":\"PRAYER:PIETY\""), pray);
     }
 
@@ -117,7 +117,7 @@ public class TickRecorderActionTest {
                 java.util.Map.of(3, 11802), java.util.Map.of(1, 385),
                 70, 99, 861, -1, 5,
                 "RANGED", java.util.List.of("PROTECT_FROM_MISSILES", "RIGOUR"),
-                "PRAYER:PROTECT_FROM_MISSILES");
+                "PRAYER:PROTECT_FROM_MISSILES", "PRAYER:PROTECT_FROM_MISSILES");
         assertTrue(json.contains("\"prayers\":[\"PROTECT_FROM_MISSILES\",\"RIGOUR\"]"), json);
         assertTrue(json.contains("\"attackStyle\":\"RANGED\""), json);
         assertTrue(json.contains("\"distance\":5"), json);
@@ -129,7 +129,7 @@ public class TickRecorderActionTest {
     @Test
     public void formatEmitsEmptyArrayAndUnknownWhenAbsent() {
         String json = TickRecorder.formatNdjson(1, 1, 1, 1, 1, null, null, -1, -1, 0, -1, -1,
-                null, null, "ATTACK");
+                null, null, "ATTACK", "PLAYER_ATK@1");
         assertTrue(json.contains("\"prayers\":[]"), json);
         assertTrue(json.contains("\"attackStyle\":\"UNKNOWN\""), json);
     }
@@ -193,7 +193,7 @@ public class TickRecorderActionTest {
             TickRecorder rec = TickRecorder.fromProperty();
             assertTrue(rec.isEnabled(), "explicit path must start the recorder");
             rec.recordTick(1, 99, 99, 50, 0, null, null, -1, -1, 0, -1, -1,
-                    "MELEE", null, "ATTACK");
+                    "MELEE", null, "ATTACK", "PLAYER_ATK@1");
             rec.flushAndClose();
 
             String body = new String(java.nio.file.Files.readAllBytes(tmp),
@@ -216,7 +216,7 @@ public class TickRecorderActionTest {
         String json = TickRecorder.formatNdjson(7, 50, 99, 60, 100,
                 java.util.Map.of(3, 11802), java.util.Map.of(0, 385),
                 40, 99, 11802, 7644, 1,
-                "MELEE", java.util.List.of("PIETY"), "BIGHIT_SPEC@7");
+                "MELEE", java.util.List.of("PIETY"), "BIGHIT_SPEC@7", "BIGHIT_SPEC@7");
         assertTrue(json.contains("\"executedAction\":\"SPEC:\""), json);
         assertTrue(json.contains("\"actionLabel\":\"BIGHIT_SPEC@7\""), json);
         assertTrue(json.contains("\"tickCount\":7"), json);
@@ -225,7 +225,18 @@ public class TickRecorderActionTest {
     @Test
     public void formatEscapesRawLabel() {
         String json = TickRecorder.formatNdjson(1, 1, 1, 1, 1, null, null, -1, -1, 0, -1, -1,
-                "UNKNOWN", null, "weird\"label\\here");
+                "UNKNOWN", null, "weird\"label\\here", "weird\"label\\here");
         assertTrue(json.contains("\"actionLabel\":\"weird\\\"label\\\\here\""), json);
+    }
+
+    @Test
+    public void rawLabelSurvivesAnEmptyExecutedAction() {
+        // Regression: the sticky suppression filtered executedAction and, because
+        // both fields came from one argument, erased actionLabel too — a whole
+        // capture ended up with no provenance at all (664 rows of "").
+        String json = TickRecorder.formatNdjson(700, 90, 99, 60, 0, null, null, -1, -1, 0, -1, -1,
+                "UNKNOWN", null, "", "LC_SKIP_NO_STAFF@700");
+        assertTrue(json.contains("\"executedAction\":\"\""), json);
+        assertTrue(json.contains("\"actionLabel\":\"LC_SKIP_NO_STAFF@700\""), json);
     }
 }
