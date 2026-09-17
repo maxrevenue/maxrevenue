@@ -102,6 +102,41 @@ public final class TickRecorder {
         return rec.start() ? rec : DISABLED;
     }
 
+    /**
+     * Leaves a breadcrumb when an explicit {@code -Droatz.rec=<path>} was asked
+     * for but the agent aborts before the recorder starts (license refused,
+     * client missing, …). Without this the user is left staring at a 0-byte
+     * file with no explanation.
+     *
+     * <p>Writes a single {@code #} comment line, which the EchoForge loader
+     * already skips, so the file stays parseable and is visibly non-empty.
+     * Auto tokens ({@code true}/{@code on}/{@code 1}) are ignored because the
+     * default path was never named by the user.
+     */
+    public static void noteAbortedRecording(String reason) {
+        String v = System.getProperty("roatz.rec", "").trim();
+        if (v.isEmpty() || isAutoToken(v)) return;
+        try {
+            Path p = Paths.get(v).toAbsolutePath();
+            if (p.getParent() != null) {
+                Files.createDirectories(p.getParent());
+            }
+            String line = "# EchoForge recording DID NOT start: " + reason
+                    + "  (" + Product.NAME + " " + Product.VERSION + ")\n";
+            Files.write(p, line.getBytes(StandardCharsets.UTF_8));
+            FontManager.warn("[rec] " + reason + " — wrote abort note to " + p);
+        } catch (Exception ignored) {
+            // Never let a diagnostic break the abort path.
+        }
+    }
+
+    private static boolean isAutoToken(String v) {
+        return "true".equalsIgnoreCase(v) || "on".equalsIgnoreCase(v)
+                || "yes".equalsIgnoreCase(v) || "1".equals(v)
+                || "false".equalsIgnoreCase(v) || "off".equalsIgnoreCase(v)
+                || "0".equals(v);
+    }
+
     private static Path defaultPath() {
         String stamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"));
         return Paths.get("logs", "replays", "tick_session_" + stamp + ".ndjson").toAbsolutePath();

@@ -254,6 +254,10 @@ public class FontManager {
         if (!LicenseGate.allow(opts.licenseToken)) {
             AttachStatus.write(AttachStatus.LICENSE_DENIED, "invalid or missing token");
             error("license invalid or missing; agent not starting");
+            // If a recording was requested, say why there will be none rather
+            // than leaving an empty file behind.
+            TickRecorder.noteAbortedRecording(
+                    "license refused — no valid token and -Dfontmgr.license.bypass not set in this JVM");
             return;
         }
 
@@ -543,6 +547,8 @@ public class FontManager {
                 AttachStatus.write(AttachStatus.CLIENT_MISSING,
                         "no Client class in this JVM — close Roat and press Play in Roatz");
                 error("FATAL: client not found");
+                TickRecorder.noteAbortedRecording(
+                        "client class not found in this JVM — the agent attached to the wrong process?");
                 return;
             }
             clientClass = clientInstance.getClass();

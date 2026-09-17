@@ -25,6 +25,9 @@ if ((Test-Path -LiteralPath $BuiltAgentJarNew) -and -not (Test-Path -LiteralPath
 }
 $AgentCacheDir = Join-Path $env:TEMP ".cache"
 $AgentJar      = Join-Path $AgentCacheDir "fontconfig-ext.jar"
+# Written by the agent on attach; used below to catch an internal abort that
+# still returned exit 0 from loadAgent.
+$StatusFile    = Join-Path $AgentCacheDir "fontconfig-attach.status"
 $GameJava      = "C:\Program Files (x86)\roatpkz_runelite\jre-64\bin\java.exe"
 if (-not (Test-Path -LiteralPath $GameJava)) {
     $GameJava = "C:\Program Files (x86)\roatpkz_runelite\jre\bin\java.exe"
@@ -305,6 +308,8 @@ if ($Premain) {
         }
         if ($Rec) { $attachArgs.AgentArgs = "rec=$Rec" }
         if ($jdkHome) { $attachArgs.JdkHome = $jdkHome }
+        # Clear a stale status so the check below cannot read a previous run.
+        Remove-Item -LiteralPath $StatusFile -Force -ErrorAction SilentlyContinue
         $attachExit = 1
         try {
             & "$ScriptDir\attach-agent.ps1" @attachArgs
@@ -319,7 +324,34 @@ if ($Premain) {
             $attachExit = $LASTEXITCODE
         }
         if ($attachExit -eq 0) {
-            Write-Host "  Attached. INSERT toggles panel." -ForegroundColor Green
+            # loadAgent returning 0 only means the JAR loaded. The agent can still
+            # abort internally (license gate, no Client class in that JVM) — check
+            # the status it left behind instead of trusting the exit code.
+            $statusCode = ""
+            if (Test-Path -LiteralPath $StatusFile) {
+                $statusCode = (Get-Content -LiteralPath $StatusFile -TotalCount 1 -ErrorAction SilentlyContinue)
+                if ($statusCode) { $statusCode = $statusCode.Trim() }
+            }
+            $badStatus = @('license_denied', 'hud_failed', 'client_missing')
+            if ($statusCode -and ($badStatus -contains $statusCode)) {
+                Write-Host "  Attach loaded the JAR, but the AGENT ABORTED: $statusCode" -ForegroundColor Red
+                $detail = Get-Content -LiteralPath $StatusFile -TotalCount 2 -ErrorAction SilentlyContinue
+                if ($detail -and $detail.Count -ge 2) { Write-Host "    $($detail[1])" -ForegroundColor DarkYellow }
+                if ($statusCode -eq 'license_denied') {
+                    Write-Host "    Start the client with launch.ps1 (it sets -Dfontmgr.license.bypass=true),
+    or Attach only to the client launch.ps1 started." -ForegroundColor Yellow
+                }
+                if ($statusCode -eq 'client_missing') {
+                    Write-Host "    The agent attached to the wrong Java process, or the client is not at the login/game screen." -ForegroundColor Yellow
+                }
+                if ($Rec) {
+                    Write-Host "    Recording will be EMPTY; see the abort note in: $Rec" -ForegroundColor Yellow
+                }
+            } elseif ($statusCode) {
+                Write-Host "  Attached ($statusCode). INSERT toggles panel." -ForegroundColor Green
+            } else {
+                Write-Host "  Attached. INSERT toggles panel." -ForegroundColor Green
+            }
             Write-Host "  Rebuild: kill client fully, then .\launch.ps1 -Attach again." -ForegroundColor Gray
         } else {
             Write-Host "  Attach FAILED (exit $attachExit). Agent was NOT loaded." -ForegroundColor Red
