@@ -90,8 +90,8 @@ class DecisionEngineTest {
     void specReadyChoosesSpecOverAttack() {
         GameState state = new GameState(
                 3,
-                player(99, 99, 75, EquipmentSnapshot.empty()),
-                Optional.of(opponentWithAgs()),
+                player(99, 99, 75, new EquipmentSnapshot(Map.of(EquipmentSlot.WEAPON, AGS_ITEM_ID))),
+                Optional.of(player(38, 99, 0, EquipmentSnapshot.empty())),
                 withShark());
 
         List<ActionIntent> intents = engine.evaluate(state);
@@ -106,8 +106,8 @@ class DecisionEngineTest {
     void simultaneousIntentsArePrioritySorted() {
         GameState state = new GameState(
                 4,
-                player(15, 99, 75, EquipmentSnapshot.empty()),
-                Optional.of(opponentWithAgs()),
+                player(15, 99, 75, new EquipmentSnapshot(Map.of(EquipmentSlot.WEAPON, AGS_ITEM_ID))),
+                Optional.of(player(38, 99, 0, EquipmentSnapshot.empty())),
                 withShark());
 
         List<ActionIntent> intents = engine.evaluate(state);

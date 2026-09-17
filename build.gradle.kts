@@ -23,6 +23,8 @@ dependencies {
     // Ed25519 verify for LicenseToken (Java 11 — JDK EdDSA is 15+).
     implementation("net.i2p.crypto:eddsa:0.3.0")
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")
+    // Agent bridge (ReflectionStateSensor / ReflectionActionDispatcher) calls into
+    // the headless engine; core bytecode is bundled for -Droatz.v2engine=true (JVM 17+).
 }
 
 java {
@@ -58,7 +60,7 @@ sourceSets {
     // ── Modern Sense-Think-Act engine (com.automation.core) ──────────────────
     // Isolated from the agent's release-11 `src/` so it can use Java 17 records
     // and sealed interfaces. It is a standalone, client-decoupled module and is
-    // NOT bundled into fontmanager-windows.jar.
+    // Bundled into fontmanager-windows.jar when the v2 reflection bridge is enabled.
     create("core") {
         java.setSrcDirs(listOf("core/src/main/java"))
     }
@@ -85,6 +87,11 @@ tasks.named<JavaCompile>("compileCoreTestJava") {
     options.release.set(17)
 }
 
+tasks.named<JavaCompile>("compileJava") {
+    dependsOn(tasks.named("compileCoreJava"))
+    classpath += sourceSets["core"].output.classesDirs
+}
+
 val coreTest by tasks.registering(Test::class) {
     group = "verification"
     description = "Headless JUnit 5 tests for the com.automation.core Sense-Think-Act engine"
@@ -105,6 +112,7 @@ val agentJar by tasks.registering(Jar::class) {
     // Self-contained agent: main classes plus the bundled ASM used by
     // ClassFilePatcher (the client ships no ASM of its own).
     from(sourceSets.main.get().output)
+    from(sourceSets["core"].output)
     from(configurations.runtimeClasspath.map { cfg ->
         cfg.map { dep -> if (dep.isDirectory) dep else zipTree(dep) }
     })

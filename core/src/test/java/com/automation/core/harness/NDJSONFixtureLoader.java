@@ -49,7 +49,8 @@ public final class NDJSONFixtureLoader {
     private static final List<String> FALLBACK_FIXTURES = List.of(
             "fixtures/sample_fight.ndjson",
             "fixtures/dh-combo-fixture.ndjson",
-            "fixtures/survive-spec-fixture.ndjson");
+            "fixtures/survive-spec-fixture.ndjson",
+            "fixtures/eclipse-hybrid-spec.ndjson");
 
     /**
      * Every {@code fixtures/*.ndjson} resource visible on the classpath, sorted.
