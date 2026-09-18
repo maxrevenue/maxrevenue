@@ -139,6 +139,35 @@ public final class OffThreadNDJSONRecorder {
         slot.targetNpcIndex = projection.targetNpcIndex;
     }
 
+    /**
+     * Stub orch when {@code evaluateEarly} did not run — pairs with legacy for shadow diff.
+     * Empty winners; {@code skipped} enum names the early-return path.
+     */
+    public void enqueueSkippedOrch(long tickIndex,
+                                   OrchestratorSkipReason reason,
+                                   SidecarTickMetrics sidecarMetrics) {
+        TickRecord slot = ring[ringCursor];
+        ringCursor = (ringCursor + 1) % RING_SIZE;
+        slot.reset();
+        slot.recordKind = TickRecord.RECORD_ORCH;
+        slot.tickIndex = tickIndex;
+        slot.orchestratorSkipReason = reason == null
+                ? OrchestratorSkipReason.DISABLED.ordinal()
+                : reason.ordinal();
+        slot.busSize = 0;
+        slot.maxRankDropped = -1;
+        slot.recordsDropped = recordsDropped;
+        if (sidecarMetrics != null) {
+            slot.masklessIntents = sidecarMetrics.masklessIntents();
+            slot.sidecarAckLag = sidecarMetrics.sidecarAckLag();
+            slot.sidecarHealthy = sidecarMetrics.sidecarHealthy();
+            slot.sidecarStaleTickDrops = sidecarMetrics.staleTickDrops();
+            slot.sidecarStaleStateDrops = sidecarMetrics.staleStateDrops();
+            slot.wireRejects = sidecarMetrics.wireRejects();
+        }
+        offer(slot);
+    }
+
     /** Shadow mode: legacy {@code lastAction} after monolith runs (end of tick). */
     public void enqueueLegacyTail(long tickIndex, String legacyAction) {
         TickRecord slot = ring[ringCursor];
@@ -264,6 +293,10 @@ public final class OffThreadNDJSONRecorder {
         sb.append(",\"damageTaken\":").append(rec.damageTaken);
         sb.append(",\"targetNpcIndex\":").append(rec.targetNpcIndex);
         sb.append('}');
+        if (rec.orchestratorSkipReason != OrchestratorSkipReason.NONE.ordinal()) {
+            OrchestratorSkipReason skip = OrchestratorSkipReason.values()[rec.orchestratorSkipReason];
+            sb.append(",\"skipped\":\"").append(skip.name()).append('"');
+        }
         sb.append(",\"busSize\":").append(rec.busSize);
         sb.append(",\"droppedPublishes\":").append(rec.droppedPublishes);
         sb.append(",\"maxRankDropped\":").append(rec.maxRankDropped);

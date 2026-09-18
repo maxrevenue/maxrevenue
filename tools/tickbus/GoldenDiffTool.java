@@ -26,7 +26,7 @@ public final class GoldenDiffTool {
             System.exit(2);
         }
         Path path = Path.of(args[0]);
-        Map<Long, String> orchSummary = new HashMap<>();
+        Map<Long, OrchRow> orchRows = new HashMap<>();
         Map<Long, LegacyRow> legacyRows = new HashMap<>();
 
         try (BufferedReader reader = Files.newBufferedReader(path)) {
@@ -34,7 +34,9 @@ public final class GoldenDiffTool {
             while ((line = reader.readLine()) != null) {
                 if (line.contains("\"recordKind\":\"orch\"")) {
                     long tick = readLong(line, "tickIndex");
-                    orchSummary.put(tick, summarizeOrchWinners(line));
+                    orchRows.put(tick, new OrchRow(
+                            readString(line, "skipped"),
+                            summarizeOrchWinners(line)));
                 } else if (line.contains("\"recordKind\":\"legacy\"")) {
                     long tick = readLong(line, "tickIndex");
                     legacyRows.put(tick, new LegacyRow(
@@ -51,16 +53,19 @@ public final class GoldenDiffTool {
         int feasibility = 0;
         int uncomparableNoOpinion = 0;
         int uncomparableOutOfVocab = 0;
+        int orchSkipped = 0;
 
-        Set<Long> allTicks = new HashSet<>(orchSummary.keySet());
+        Set<Long> allTicks = new HashSet<>(orchRows.keySet());
         allTicks.addAll(legacyRows.keySet());
 
         for (long tick : allTicks) {
             LegacyRow legacyRow = legacyRows.get(tick);
             String legacy = legacyRow == null ? "" : legacyRow.action;
             String subtype = legacyRow == null ? "" : legacyRow.uncomparableSubtype;
-            String orch = orchSummary.get(tick);
-            ParityInput input = new ParityInput(tick, orch, legacy, subtype);
+            OrchRow orchRow = orchRows.get(tick);
+            String orch = orchRow == null ? null : orchRow.winnerSummary;
+            String skipped = orchRow == null ? "" : orchRow.skippedReason;
+            ParityInput input = new ParityInput(tick, orch, legacy, subtype, skipped);
             switch (GoldenParityClassifier.classify(input)) {
                 case MATCH:
                     match++;
@@ -83,6 +88,9 @@ public final class GoldenDiffTool {
                 case UNCOMPARABLE_OUT_OF_VOCAB:
                     uncomparableOutOfVocab++;
                     break;
+                case ORCH_SKIPPED:
+                    orchSkipped++;
+                    break;
                 default:
                     break;
             }
@@ -96,6 +104,7 @@ public final class GoldenDiffTool {
         System.out.println("  PRIORITY_DIFF=" + priorityDiff);
         System.out.println("  TIMING_DIFF=" + timingDiff);
         System.out.println("  FEASIBILITY=" + feasibility);
+        System.out.println("  ORCH_SKIPPED=" + orchSkipped + " (excluded from rates)");
         System.out.println("  UNCOMPARABLE=" + uncomparable + " (excluded from rates)");
         System.out.println("    NO_OPINION=" + uncomparableNoOpinion);
         System.out.println("    OUT_OF_VOCAB=" + uncomparableOutOfVocab);
@@ -139,6 +148,16 @@ public final class GoldenDiffTool {
             return "";
         }
         return json.substring(start, end);
+    }
+
+    private static final class OrchRow {
+        final String skippedReason;
+        final String winnerSummary;
+
+        OrchRow(String skippedReason, String winnerSummary) {
+            this.skippedReason = skippedReason == null ? "" : skippedReason;
+            this.winnerSummary = winnerSummary == null ? "" : winnerSummary;
+        }
     }
 
     private static final class LegacyRow {

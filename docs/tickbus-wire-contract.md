@@ -44,7 +44,11 @@ Attach agent as today ({@code launch.ps1} unchanged). Legacy monolith still disp
 ./gradlew goldenDiff -Psession=<path/to/session.ndjson>
 ```
 
-Paste category counts: **MATCH**, **RULE_DIFF**, **PRIORITY_DIFF**, **TIMING_DIFF**, **FEASIBILITY**, **UNCOMPARABLE** with subtypes **NO_OPINION** / **OUT_OF_VOCAB** (excluded from match rates).
+Paste category counts: **MATCH**, **RULE_DIFF**, **PRIORITY_DIFF**, **TIMING_DIFF**, **FEASIBILITY**, **ORCH_SKIPPED**, **UNCOMPARABLE** with subtypes **NO_OPINION** / **OUT_OF_VOCAB**. **ORCH_SKIPPED** and **UNCOMPARABLE** are excluded from match rates.
+
+**Reading protocol:** {@code TIMING_DIFF} means the orchestrator **evaluated** but no legacy line paired — not stub {@code skipped} ticks ({@code ORCH_SKIPPED}). {@code replayProjection.specAvailableFromTick} is a placeholder (current tick) until legacy spec cooldown is transcribed; do not chase SPECIAL-channel diffs driven by lease replay until wired.
+
+**{@code specAvailableFromTick}:** NDJSON may show {@code tick} as placeholder — SPECIAL-lease replay fidelity is limited until bound to real cooldown; ignore phantom SPECIAL diffs attributable to projection placeholder during golden review.
 
 **Gate to flip production tickbus (drop shadow):**
 
@@ -97,6 +101,10 @@ Authoritative table: `docs/fingerprint-registry.md` and `FingerprintRegistry`.
 
 **Rule:** any new state field consulted by a sidecar intent must be added to the registry (or explicitly waived). {@code FingerprintCoverageTest} + {@code FingerprintLayoutTest} guard layout.
 
+### Precondition checking at resolve time ({@code STALE_STATE}) — **decision (pre-sidecar publish)**
+
+**Chosen model (a):** Sidecar preconditions are enforced when the sidecar intent is **published onto the bus** ({@code AsyncSidecarAdvisor.evaluate} — masked fingerprint check). {@code TTL} absorbs arrival skew only. {@code EliminationReason.STALE_STATE} is **reserved** for a future resolve-time check if model (b) is adopted; it **does not fire** today and {@code staleStateDrops} remains zero until explicitly wired. **Do not** add resolve-time {@code precondSatisfied} without a contract revision — that would change arbitration semantics once EchoForge publishes multi-tick intents.
+
 ## TickBus overflow
 
 When the 32-slot bus is full, publish evicts the **lowest rank** only if the incoming intent **strictly outranks** it; otherwise the incoming intent is dropped. Per tick NDJSON records {@code droppedPublishes} and {@code maxRankDropped} ({@code -1} if none). High-priority bursts that still overflow indicate advisor logic bugs (counter spike), not a sort pass.
@@ -142,7 +150,11 @@ After {@code ChannelRules}: **DEFENSIVE → SUSTAIN → OFFENSIVE** (prayer/gear
 
 {@code kind}, {@code priority}, {@code advisorOrdinal}, {@code rank}, {@code itemId}, {@code npcIndex}, {@code slotIndex}, {@code bornTick}, {@code ttlTicks}, {@code byline} (interned id → label on writer thread only), {@code elimination} (enum name on non-winners / losers).
 
+Optional {@code skipped}: {@code COMBO_PHASE} | {@code PENDING_SPEC} | {@code PAUSED} | {@code DISABLED} when {@code evaluateEarly} did not run — stub orch for legacy pairing; {@code goldenDiff} → **ORCH_SKIPPED** (excluded from rates). Empty {@code winners[]}, {@code busIntents[]}.
+
 Also: {@code winners[]}, {@code channelDrops[]}, {@code dispatchState[]}, {@code busSize}, {@code droppedPublishes}, {@code maxRankDropped}, {@code recordsDropped} (queue drop counter snapshot), sidecar observe fields ({@code masklessIntents}, {@code sidecarAckLag}, {@code sidecarHealthy}, {@code staleTickDrops}, {@code staleStateDrops}, {@code wireRejects}).
+
+**{@code wireRejects}:** session-cumulative counter (monotonic); each orch line snapshots the current total — never reset per tick.
 
 ### {@code recordKind: "legacy"}
 
@@ -156,8 +168,11 @@ Also: {@code winners[]}, {@code channelDrops[]}, {@code dispatchState[]}, {@code
 
 {@code goldenDiff} uses {@code ParityInput} only; periodic/outcome/latency fields do not influence classification.
 
-### Landed (PR #21 rev 2)
+### Landed (PR #21 rev 2 + pre-capture)
 
+- Stub orch {@code skipped} + **ORCH_SKIPPED** {@code goldenDiff} bucket (early-return pairing)
+- Session-cumulative {@code wireRejects} ({@code AtomicLong}, snapshot on orch lines)
+- {@code STALE_STATE} decision documented (publish-time preconds only; see above)
 - {@code FingerprintRegistry} seed + coverage/layout tests; {@code docs/fingerprint-registry.md}
 - Schema v2 {@code replayProjection}, full {@code busIntents[]}, overflow + queue drop counters
 - {@code UNCOMPARABLE} subtypes on legacy lines; {@code ParityInput} structural parity gate

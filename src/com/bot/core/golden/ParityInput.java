@@ -17,14 +17,18 @@ public final class ParityInput {
     public final String orchWinnerSummary;
     public final String legacyAction;
     public final String uncomparableSubtype;
+    /** Non-empty when orch line is a stub ({@code skipped} field) — excluded from parity rates. */
+    public final String orchSkippedReason;
 
     public ParityInput(long tickIndex,
                        String orchWinnerSummary,
                        String legacyAction,
-                       String uncomparableSubtype) {
+                       String uncomparableSubtype,
+                       String orchSkippedReason) {
         this.tickIndex = tickIndex;
         this.orchWinnerSummary = orchWinnerSummary == null ? "" : orchWinnerSummary;
         this.legacyAction = legacyAction == null ? "" : legacyAction;
         this.uncomparableSubtype = uncomparableSubtype == null ? "" : uncomparableSubtype;
+        this.orchSkippedReason = orchSkippedReason == null ? "" : orchSkippedReason;
     }
 }

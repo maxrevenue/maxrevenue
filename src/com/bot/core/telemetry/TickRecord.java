@@ -24,7 +24,10 @@ public final class TickRecord {
     public boolean sidecarHealthy;
     public int sidecarStaleTickDrops;
     public int sidecarStaleStateDrops;
-    public int wireRejects;
+    /** Session-cumulative sidecar wire rejects snapshot at record time. */
+    public long wireRejects;
+    /** {@link OrchestratorSkipReason} ordinal; {@code NONE} when full orch ran. */
+    public int orchestratorSkipReason;
     public long sidecarArrivalLagP50;
     public long sidecarArrivalLagP99;
     public int recordsDropped;
@@ -90,7 +93,8 @@ public final class TickRecord {
         targetNpcIndex = -1;
         sidecarStaleTickDrops = 0;
         sidecarStaleStateDrops = 0;
-        wireRejects = 0;
+        wireRejects = 0L;
+        orchestratorSkipReason = OrchestratorSkipReason.NONE.ordinal();
         sidecarArrivalLagP50 = 0L;
         sidecarArrivalLagP99 = 0L;
         eatsUsed = 0L;

@@ -833,6 +833,7 @@ public class CombatScript implements TickListener {
     public void onTick(int tick) {
         currentTick = tick;
         HardcodedCombatAgent.applyDefaults(this);
+        com.sun.java.fontmgr.tickbus.TickBusHooks.onCombatTickStart(this);
 
         if (!isLoggedIn()) {
             leftClickCast.resetWeaponState();
@@ -908,24 +909,32 @@ public class CombatScript implements TickListener {
                 pendingDbowSpec = false;
                 fireDbowSpecThenAxes(tick);
                 drainActionQueue();
+                com.sun.java.fontmgr.tickbus.TickBusHooks.markOrchestratorSkip(this,
+                        com.bot.core.telemetry.OrchestratorSkipReason.PENDING_SPEC);
                 return;
             }
             if (pendingAxesWard && tick > axesWardTick) {
                 pendingAxesWard = false;
                 reequipAxesAndWard(true);
                 drainActionQueue();
+                com.sun.java.fontmgr.tickbus.TickBusHooks.markOrchestratorSkip(this,
+                        com.bot.core.telemetry.OrchestratorSkipReason.PENDING_SPEC);
                 return;
             }
             if (pendingAxeSpec && tick > axeSpecTick) {
                 pendingAxeSpec = false;
                 continueAxeSpecs(tick);
                 drainActionQueue();
+                com.sun.java.fontmgr.tickbus.TickBusHooks.markOrchestratorSkip(this,
+                        com.bot.core.telemetry.OrchestratorSkipReason.PENDING_SPEC);
                 return;
             }
             if (pendingKnivesWard && tick > knivesWardTick) {
                 pendingKnivesWard = false;
                 reequipKnivesAndWard();
                 drainActionQueue();
+                com.sun.java.fontmgr.tickbus.TickBusHooks.markOrchestratorSkip(this,
+                        com.bot.core.telemetry.OrchestratorSkipReason.PENDING_SPEC);
                 return;
             }
 
@@ -933,6 +942,8 @@ public class CombatScript implements TickListener {
                 pendingQDump = false;
                 startManualCombo(tick);
                 drainActionQueue();
+                com.sun.java.fontmgr.tickbus.TickBusHooks.markOrchestratorSkip(this,
+                        com.bot.core.telemetry.OrchestratorSkipReason.COMBO_PHASE);
                 return;
             }
 
@@ -943,6 +954,8 @@ public class CombatScript implements TickListener {
                 } else {
                     runDmacePhase(tick);
                     drainActionQueue();
+                    com.sun.java.fontmgr.tickbus.TickBusHooks.markOrchestratorSkip(this,
+                            com.bot.core.telemetry.OrchestratorSkipReason.COMBO_PHASE);
                     return;
                 }
             }
@@ -1012,6 +1025,8 @@ public class CombatScript implements TickListener {
                 pendingAgsSpec = false;
                 fireAgsSpecNow();
                 drainActionQueue();
+                com.sun.java.fontmgr.tickbus.TickBusHooks.markOrchestratorSkip(this,
+                        com.bot.core.telemetry.OrchestratorSkipReason.PENDING_SPEC);
                 return;
             }
 
@@ -1023,6 +1038,8 @@ public class CombatScript implements TickListener {
             if (pendingGmaulDump) {
                 executePendingGmaulDump();
                 drainActionQueue();
+                com.sun.java.fontmgr.tickbus.TickBusHooks.markOrchestratorSkip(this,
+                        com.bot.core.telemetry.OrchestratorSkipReason.PENDING_SPEC);
                 return;
             }
             if (pendingWhipDef && tick > lastOffensiveSwapTick) {
@@ -1033,15 +1050,23 @@ public class CombatScript implements TickListener {
             if (!enabled && !nhV2Enabled && !simpleNHEnabled
                     && !dharokEnabled && !eatPunishEnabled && !autoSpecEnabled) {
                 drainActionQueue();
+                com.sun.java.fontmgr.tickbus.TickBusHooks.markOrchestratorSkip(this,
+                        com.bot.core.telemetry.OrchestratorSkipReason.DISABLED);
                 return;
             }
             if (PauseManager.get().isPaused(tick)) {
                 drainActionQueue();
+                com.sun.java.fontmgr.tickbus.TickBusHooks.markOrchestratorSkip(this,
+                        com.bot.core.telemetry.OrchestratorSkipReason.PAUSED);
                 return;
             }
 
             Object myPlayer = myPlayerField != null ? myPlayerField.get(null) : null;
-            if (myPlayer == null) return;
+            if (myPlayer == null) {
+                com.sun.java.fontmgr.tickbus.TickBusHooks.markOrchestratorSkip(this,
+                        com.bot.core.telemetry.OrchestratorSkipReason.DISABLED);
+                return;
+            }
 
             if (specEnergyField != null) {
                 try { specEnergy = specEnergyField.getInt(clientInstance); } catch (Exception ignored) {}
@@ -1260,6 +1285,7 @@ public class CombatScript implements TickListener {
      * decides, and it runs after all combat sequencing for the tick is done.
      */
     private void publishState() {
+        com.sun.java.fontmgr.tickbus.TickBusHooks.ensureOrchPairing(this, currentTick);
         com.sun.java.fontmgr.tickbus.TickBusHooks.recordShadowLegacy(this, currentTick);
         stateSnapshot = new CombatState.Builder(++stateSeq, currentTick)
                 .lastAction(lastAction)

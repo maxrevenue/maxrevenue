@@ -12,17 +12,22 @@ public final class GoldenParityClassifier {
         TIMING_DIFF,
         FEASIBILITY,
         UNCOMPARABLE_NO_OPINION,
-        UNCOMPARABLE_OUT_OF_VOCAB
+        UNCOMPARABLE_OUT_OF_VOCAB,
+        /** Stub orch ({@code skipped}) — orchestrator did not run; excluded from parity rates. */
+        ORCH_SKIPPED
     }
 
     private GoldenParityClassifier() {
     }
 
     public static Category classify(ParityInput input) {
-        if (input.orchWinnerSummary == null) {
-            return Category.TIMING_DIFF;
+        if (input.orchSkippedReason != null && !input.orchSkippedReason.isEmpty()) {
+            return Category.ORCH_SKIPPED;
         }
         String orch = input.orchWinnerSummary;
+        if (orch.isEmpty() && !input.legacyAction.isEmpty()) {
+            return Category.TIMING_DIFF;
+        }
         if ("NO_OPINION".equals(input.uncomparableSubtype)
                 || (input.uncomparableSubtype.isEmpty() && isNoOpinionLegacy(input.legacyAction))) {
             return Category.UNCOMPARABLE_NO_OPINION;

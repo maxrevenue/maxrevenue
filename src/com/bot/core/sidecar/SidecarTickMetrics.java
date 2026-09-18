@@ -1,14 +1,17 @@
 package com.bot.core.sidecar;
 
+import java.util.concurrent.atomic.AtomicLong;
+
 /**
- * Per-tick sidecar counters surfaced in NDJSON (tick thread only writes ints).
+ * Sidecar counters surfaced in NDJSON. Per-tick fields reset in {@link #beginTick()};
+ * {@link #wireRejects()} is session-cumulative (never reset).
  */
 public final class SidecarTickMetrics {
 
     private int masklessIntents;
     private long sidecarAckLag;
     private boolean sidecarHealthy;
-    private int wireRejects;
+    private final AtomicLong wireRejectsSession = new AtomicLong();
     private int staleTickDrops;
     private int staleStateDrops;
 
@@ -16,7 +19,6 @@ public final class SidecarTickMetrics {
         masklessIntents = 0;
         sidecarAckLag = 0L;
         sidecarHealthy = true;
-        wireRejects = 0;
         staleTickDrops = 0;
         staleStateDrops = 0;
     }
@@ -45,13 +47,13 @@ public final class SidecarTickMetrics {
         return sidecarHealthy;
     }
 
-    /** Version / length / decode reject (log + count; never silent close). */
+    /** Version / length / decode reject (reader thread safe; session cumulative). */
     public void noteWireFrameReject() {
-        wireRejects++;
+        wireRejectsSession.incrementAndGet();
     }
 
-    public int wireRejects() {
-        return wireRejects;
+    public long wireRejects() {
+        return wireRejectsSession.get();
     }
 
     public void noteStaleTickDrop() {
