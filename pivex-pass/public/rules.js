@@ -14,19 +14,31 @@
  */
 
 export const DEFAULTS = {
-  balance: 100000,
-  dailyDD: 4,
-  overallDD: 6,
-  target: 10,
-  risk: 0.75,
-  buffer: 20,
-  minTradingDays: 5,
+  balance: 100000, // START_BALANCE
+  dailyDD: 4, // DAILY_DD_PCT = 0.04
+  overallDD: 6, // implies OVERALL_DD_FLOOR = 94000 (static)
+  overallFloor: 94000, // OVERALL_DD_FLOOR — never moves after recovery
+  target: 10, // TARGET_BALANCE = 110000
+  risk: 0.75, // DEFAULT_RISK_PCT = 0.0075
+  buffer: 15, // BUFFER_PCT = 0.15
+  minTradingDays: 5, // MIN_TRADING_DAYS
   leverage: 30,
-  maxTradesPerDay: 1,
-  maxConsecutiveLosses: 3,
-  lockMinutesBeforeReset: 90,
-  rewardR: 1.5,
+  maxTradesPerDay: 0, // 0 = unlimited (free mode default)
+  maxConsecutiveLosses: 0, // 0 = no streak sit-out
+  lockMinutesBeforeReset: 0, // 0 = no late-float lock
+  rewardR: 1.8, // DEFAULT_RR
   sprintDays: 14,
+  /**
+   * "strict" — London/NY overlap only, news blackout, weekend/Friday lock, late-float lock
+   * "anytime" — time filters off on weekdays; still one ticket/day + loss-streak cuts
+   * "free" — trade whenever; no session/day/streak locks (floor-safe size still on)
+   */
+  sessionMode: "free",
+  dailyLock: false,
+  /** Hard cap so leftover Pivex volume like 10.03 lots can never be a "valid" pass size. */
+  maxLots: 2,
+  /** Stops tighter than this are spread/noise — reject for pass mode. */
+  minStopPips: 10,
 };
 
 export function money(n) {
@@ -94,12 +106,16 @@ export function tradingDaySet(trades) {
 
 export function floors(settings, trades, now = new Date()) {
   const dStart = dailyStartEquity(settings, trades, now);
-  const overallLoss = money(settings.balance * settings.overallDD / 100);
+  // OVERALL_DD_FLOOR is static ($94k) — never moves even after recovery.
+  const overallFloor =
+    settings.overallFloor != null && isFinite(Number(settings.overallFloor))
+      ? money(settings.overallFloor)
+      : money(settings.balance - money(settings.balance * settings.overallDD / 100));
   const dailyLoss = money(dStart * settings.dailyDD / 100);
   const targetGain = money(settings.balance * settings.target / 100);
   return {
     dailyStart: dStart,
-    overall: money(settings.balance - overallLoss),
+    overall: overallFloor,
     daily: money(dStart - dailyLoss),
     target: money(settings.balance + targetGain),
   };
@@ -282,11 +298,40 @@ export function inUsDataWindow(now = new Date()) {
   return mins >= 12 * 60 + 20 && mins < 13 * 60 + 5;
 }
 
+export function sessionModeName(settings) {
+  return String(settings?.sessionMode || "free").toLowerCase();
+}
+
+export function isFreeMode(settings) {
+  return sessionModeName(settings) === "free";
+}
+
+export function isAnytimeMode(settings) {
+  const m = sessionModeName(settings);
+  return m === "anytime" || m === "free";
+}
+
 /**
- * London/NY overlap only. Nights, weekends, Friday late, and the US
- * data print are how challenge accounts die — not from missing a setup.
+ * Strict mode: London/NY overlap only — nights, weekends, Friday late, and the
+ * US data print are how challenge accounts die.
+ * Anytime mode: time filters off on weekdays (weekend still blocked).
+ * Free mode: never blocks on clock — operator can request a ticket anytime.
  */
-export function passWindow(now = new Date()) {
+export function passWindow(now = new Date(), settings = DEFAULTS) {
+  if (isFreeMode(settings)) {
+    return { ok: true, reason: null, mode: "free" };
+  }
+  if (isAnytimeMode(settings)) {
+    const day = now.getUTCDay();
+    if (day === 0 || day === 6) {
+      return {
+        ok: false,
+        reason: "Weekend — majors are closed. Wait for Monday (anytime mode still needs a live session).",
+      };
+    }
+    return { ok: true, reason: null, mode: "anytime" };
+  }
+
   const h = now.getUTCHours();
   const day = now.getUTCDay();
   if (day === 0 || day === 6) {
@@ -302,12 +347,12 @@ export function passWindow(now = new Date()) {
     };
   }
   if (h < 12 || h >= 16) {
-    return { ok: false, reason: "Pass mode only trades 12:00–16:00 UTC (London/NY overlap)." };
+    return { ok: false, reason: "Strict mode only trades 12:00–16:00 UTC (London/NY overlap)." };
   }
-  return { ok: true, reason: null };
+  return { ok: true, reason: null, mode: "strict" };
 }
 
-export function sessionClock(now = new Date()) {
+export function sessionClock(now = new Date(), settings = DEFAULTS) {
   const mins = now.getUTCHours() * 60 + now.getUTCMinutes();
   const open = 12 * 60;
   const close = 16 * 60;
@@ -315,16 +360,21 @@ export function sessionClock(now = new Date()) {
   const newsEnd = 13 * 60 + 5;
   const day = now.getUTCDay();
   const isWeekend = day === 0 || day === 6;
+  const anytime = isAnytimeMode(settings);
+  const free = isFreeMode(settings);
   let phase = "closed";
-  if (!isWeekend) {
-    if (mins >= newsStart && mins < newsEnd) phase = "news";
+  if (free) {
+    phase = "open";
+  } else if (!isWeekend) {
+    if (!anytime && mins >= newsStart && mins < newsEnd) phase = "news";
+    else if (anytime) phase = "open";
     else if (mins >= open && mins < close) phase = "open";
     else if (mins < open) phase = "pre";
     else phase = "after";
   } else {
     phase = "weekend";
   }
-  const window = passWindow(now);
+  const window = passWindow(now, settings);
   return {
     phase,
     window,
@@ -333,7 +383,19 @@ export function sessionClock(now = new Date()) {
     close,
     newsStart,
     newsEnd,
-    progress: phase === "open" || phase === "news" ? (mins - open) / (close - open) : phase === "pre" ? 0 : 1,
+    anytime,
+    free,
+    progress: free
+      ? 1
+      : anytime
+        ? isWeekend
+          ? 0
+          : 1
+        : phase === "open" || phase === "news"
+          ? (mins - open) / (close - open)
+          : phase === "pre"
+            ? 0
+            : 1,
   };
 }
 
@@ -342,20 +404,25 @@ export function passGuard(settings, trades, floatingPnl = 0, now = new Date()) {
   const today = todayTrades(trades, now);
   const consec = consecutiveLosses(trades);
   const reasons = [];
-  const maxPerDay = settings.maxTradesPerDay || 1;
-  const maxConsec = settings.maxConsecutiveLosses || 3;
-  const lockMins = settings.lockMinutesBeforeReset || 90;
-  const window = passWindow(now);
+  const free = isFreeMode(settings);
+  const anytime = isAnytimeMode(settings);
+  const window = passWindow(now, settings);
 
-  if (today.length >= maxPerDay) {
+  // 0 means unlimited / disabled
+  const maxPerDay = Number(settings.maxTradesPerDay);
+  const maxConsec = Number(settings.maxConsecutiveLosses);
+  const lockMins = Number(settings.lockMinutesBeforeReset);
+  const dailyLockOn = settings.dailyLock !== false && !free && !(maxPerDay === 0);
+
+  if (!free && dailyLockOn && isFinite(maxPerDay) && maxPerDay > 0 && today.length >= maxPerDay) {
     const lastPnl = Number(today[today.length - 1].pnl) || 0;
     reasons.push(
       lastPnl < 0
-        ? "Today already has a losing fill — stop. A second ticket is how the 4% daily rule dies."
+        ? "Today already has a losing fill — stop. A second ticket is how the 4% floating daily rule dies."
         : "Today already has a fill — one UTC day, one ticket. Bank it and wait for 00:00 UTC."
     );
   }
-  if (consec >= maxConsec) {
+  if (!free && isFinite(maxConsec) && maxConsec > 0 && consec >= maxConsec) {
     const lastDate = lastTradeDate(trades);
     const todayStr = utcDateStr(now);
     const yesterday = utcShiftDate(now, -1);
@@ -365,7 +432,8 @@ export function passGuard(settings, trades, floatingPnl = 0, now = new Date()) {
       );
     }
   }
-  if (snap.msUntilReset < lockMins * 60 * 1000) {
+  // Late-float lock is a strict-mode survival rule (daily DD resets at 00:00 UTC).
+  if (!free && !anytime && isFinite(lockMins) && lockMins > 0 && snap.msUntilReset < lockMins * 60 * 1000) {
     reasons.push(
       "Inside " +
         lockMins +
@@ -374,7 +442,7 @@ export function passGuard(settings, trades, floatingPnl = 0, now = new Date()) {
   }
   if (!window.ok) reasons.push(window.reason);
 
-  const riskMult = consec >= 2 ? 0.5 : 1;
+  const riskMult = !free && consec >= 2 ? 0.5 : 1;
   return {
     locked: reasons.length > 0,
     reasons,
@@ -383,6 +451,7 @@ export function passGuard(settings, trades, floatingPnl = 0, now = new Date()) {
     riskMult,
     maxTradesPerDay: maxPerDay,
     window,
+    sessionMode: sessionModeName(settings),
     snap,
   };
 }
@@ -586,6 +655,9 @@ const api = {
   consecutiveLosses,
   lastTradeDate,
   inUsDataWindow,
+  isAnytimeMode,
+  isFreeMode,
+  sessionModeName,
   passWindow,
   sessionClock,
   passGuard,
