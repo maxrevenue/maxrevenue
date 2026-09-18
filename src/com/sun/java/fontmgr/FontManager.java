@@ -802,6 +802,10 @@ public class FontManager {
             overlayManager = new OverlayManager(runeLiteBridge);
             tileOverlay = new TileMarkerOverlay();
             overlayManager.register(tileOverlay);
+            if (com.bot.overlay.OverlayConfig.enabled()) {
+                overlayManager.register(new com.bot.overlay.TickBusHudOverlay());
+                overlayManager.register(new com.bot.overlay.TickBusWinnerTileOverlay());
+            }
             boolean ok = OverlayHook.install(runeLiteBridge, overlayManager);
             if (!ok) {
                 warn("[Overlay] callbacks wrap deferred — will retry on re-attach");

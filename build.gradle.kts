@@ -36,6 +36,59 @@ tasks.test {
     useJUnitPlatform()
 }
 
+tasks.named<JavaCompile>("compileJava") {
+    options.release.set(11)
+}
+
+tasks.named<JavaCompile>("compileTestJava") {
+    options.release.set(11)
+}
+
+tasks.register("checkBusNoWallClock") {
+    group = "verification"
+    description = "Fail if com.bot.core.bus uses wall-clock APIs"
+    doLast {
+        val hits = fileTree("src/com/bot/core").matching {
+            include("**/bus/**/*.java", "**/orchestrator/**/*.java")
+        }.files.flatMap { file ->
+            file.readLines().mapIndexedNotNull { idx, line ->
+                if (line.contains("currentTimeMillis") || line.contains("nanoTime")
+                    || line.contains("Instant.now") || line.contains("Clock.system")
+                ) {
+                    "${file}:${idx + 1}:$line"
+                } else {
+                    null
+                }
+            }
+        }
+        if (hits.isNotEmpty()) {
+            throw GradleException("Wall-clock forbidden in com.bot.core.bus:\n" + hits.joinToString("\n"))
+        }
+    }
+}
+
+tasks.check {
+    dependsOn("checkBusNoWallClock")
+}
+
+val goldenDiffTool by tasks.registering(JavaCompile::class) {
+    source(fileTree("tools/tickbus"))
+    classpath = sourceSets.main.get().compileClasspath
+    options.release.set(11)
+    destinationDirectory.set(layout.buildDirectory.dir("tickbus-tools"))
+}
+
+tasks.register<JavaExec>("goldenDiff") {
+    group = "verification"
+    description = "Compare shadow orch vs legacy lines in tickbus NDJSON"
+    dependsOn(goldenDiffTool, "classes")
+    classpath = files(layout.buildDirectory.dir("tickbus-tools")) + sourceSets.main.get().runtimeClasspath
+    mainClass.set("tickbus.GoldenDiffTool")
+    if (project.hasProperty("session")) {
+        args(project.property("session").toString())
+    }
+}
+
 // Agent source lives directly under src/ (not the default src/main/java).
 // AttachLoader is compiled separately (it lives in tools/ and is not part of
 // this source set), so no exclude is needed here.

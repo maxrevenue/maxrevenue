@@ -833,6 +833,7 @@ public class CombatScript implements TickListener {
     public void onTick(int tick) {
         currentTick = tick;
         HardcodedCombatAgent.applyDefaults(this);
+        com.sun.java.fontmgr.tickbus.TickBusHooks.onCombatTickStart(this);
 
         if (!isLoggedIn()) {
             leftClickCast.resetWeaponState();
@@ -908,24 +909,32 @@ public class CombatScript implements TickListener {
                 pendingDbowSpec = false;
                 fireDbowSpecThenAxes(tick);
                 drainActionQueue();
+                com.sun.java.fontmgr.tickbus.TickBusHooks.markOrchestratorSkip(this,
+                        com.bot.core.telemetry.OrchestratorSkipReason.PENDING_SPEC);
                 return;
             }
             if (pendingAxesWard && tick > axesWardTick) {
                 pendingAxesWard = false;
                 reequipAxesAndWard(true);
                 drainActionQueue();
+                com.sun.java.fontmgr.tickbus.TickBusHooks.markOrchestratorSkip(this,
+                        com.bot.core.telemetry.OrchestratorSkipReason.PENDING_SPEC);
                 return;
             }
             if (pendingAxeSpec && tick > axeSpecTick) {
                 pendingAxeSpec = false;
                 continueAxeSpecs(tick);
                 drainActionQueue();
+                com.sun.java.fontmgr.tickbus.TickBusHooks.markOrchestratorSkip(this,
+                        com.bot.core.telemetry.OrchestratorSkipReason.PENDING_SPEC);
                 return;
             }
             if (pendingKnivesWard && tick > knivesWardTick) {
                 pendingKnivesWard = false;
                 reequipKnivesAndWard();
                 drainActionQueue();
+                com.sun.java.fontmgr.tickbus.TickBusHooks.markOrchestratorSkip(this,
+                        com.bot.core.telemetry.OrchestratorSkipReason.PENDING_SPEC);
                 return;
             }
 
@@ -933,6 +942,8 @@ public class CombatScript implements TickListener {
                 pendingQDump = false;
                 startManualCombo(tick);
                 drainActionQueue();
+                com.sun.java.fontmgr.tickbus.TickBusHooks.markOrchestratorSkip(this,
+                        com.bot.core.telemetry.OrchestratorSkipReason.COMBO_PHASE);
                 return;
             }
 
@@ -943,6 +954,8 @@ public class CombatScript implements TickListener {
                 } else {
                     runDmacePhase(tick);
                     drainActionQueue();
+                    com.sun.java.fontmgr.tickbus.TickBusHooks.markOrchestratorSkip(this,
+                            com.bot.core.telemetry.OrchestratorSkipReason.COMBO_PHASE);
                     return;
                 }
             }
@@ -1012,6 +1025,8 @@ public class CombatScript implements TickListener {
                 pendingAgsSpec = false;
                 fireAgsSpecNow();
                 drainActionQueue();
+                com.sun.java.fontmgr.tickbus.TickBusHooks.markOrchestratorSkip(this,
+                        com.bot.core.telemetry.OrchestratorSkipReason.PENDING_SPEC);
                 return;
             }
 
@@ -1023,6 +1038,8 @@ public class CombatScript implements TickListener {
             if (pendingGmaulDump) {
                 executePendingGmaulDump();
                 drainActionQueue();
+                com.sun.java.fontmgr.tickbus.TickBusHooks.markOrchestratorSkip(this,
+                        com.bot.core.telemetry.OrchestratorSkipReason.PENDING_SPEC);
                 return;
             }
             if (pendingWhipDef && tick > lastOffensiveSwapTick) {
@@ -1033,15 +1050,23 @@ public class CombatScript implements TickListener {
             if (!enabled && !nhV2Enabled && !simpleNHEnabled
                     && !dharokEnabled && !eatPunishEnabled && !autoSpecEnabled) {
                 drainActionQueue();
+                com.sun.java.fontmgr.tickbus.TickBusHooks.markOrchestratorSkip(this,
+                        com.bot.core.telemetry.OrchestratorSkipReason.DISABLED);
                 return;
             }
             if (PauseManager.get().isPaused(tick)) {
                 drainActionQueue();
+                com.sun.java.fontmgr.tickbus.TickBusHooks.markOrchestratorSkip(this,
+                        com.bot.core.telemetry.OrchestratorSkipReason.PAUSED);
                 return;
             }
 
             Object myPlayer = myPlayerField != null ? myPlayerField.get(null) : null;
-            if (myPlayer == null) return;
+            if (myPlayer == null) {
+                com.sun.java.fontmgr.tickbus.TickBusHooks.markOrchestratorSkip(this,
+                        com.bot.core.telemetry.OrchestratorSkipReason.DISABLED);
+                return;
+            }
 
             if (specEnergyField != null) {
                 try { specEnergy = specEnergyField.getInt(clientInstance); } catch (Exception ignored) {}
@@ -1089,6 +1114,13 @@ public class CombatScript implements TickListener {
             refreshPvpVitals();
             if (isFreshIncomingHit()) lastOppAttackTick = tick;
             noteLocalHpDrop(tick);
+
+            // TickBus evaluates on pre-legacy vitals (orchestrator-first, legacy-dispatches in shadow).
+            if (com.sun.java.fontmgr.tickbus.TickBusHooks.evaluateEarly(this, tick)) {
+                drainActionQueue();
+                publishState();
+                return;
+            }
 
             if (dharokEnabled) {
                 comboEatEnabled = false;
@@ -1253,6 +1285,8 @@ public class CombatScript implements TickListener {
      * decides, and it runs after all combat sequencing for the tick is done.
      */
     private void publishState() {
+        com.sun.java.fontmgr.tickbus.TickBusHooks.ensureOrchPairing(this, currentTick);
+        com.sun.java.fontmgr.tickbus.TickBusHooks.recordShadowLegacy(this, currentTick);
         stateSnapshot = new CombatState.Builder(++stateSeq, currentTick)
                 .lastAction(lastAction)
                 .targetName(targetName)
@@ -8226,6 +8260,11 @@ public class CombatScript implements TickListener {
     int activeProtectPrayer() { return activeProtectPrayer; }
     void activeProtectPrayer(int v) { activeProtectPrayer = v; }
 
+    /** TickBus replay projection — overhead protect active (not offensive prayers). */
+    public int protectPrayerMaskForTelemetry() {
+        return activeProtectPrayer >= 0 ? 1 : 0;
+    }
+
     int lastProtectSendTick() { return lastProtectSendTick; }
     void lastProtectSendTick(int v) { lastProtectSendTick = v; }
 
@@ -8282,4 +8321,132 @@ public class CombatScript implements TickListener {
         } catch (Exception ignored) {}
         return null;
     }
+
+    /**
+     * TickBus dispatch bridge. When {@code execute} is false (shadow), performs feasibility only.
+     */
+    public com.bot.core.telemetry.TickDispatchState applyTickBusIntent(
+            com.bot.core.bus.ActionKind kind, int itemId, int slotIndex, int npcIndex, boolean execute) {
+        switch (kind) {
+            case EAT:
+            case SIP: {
+                int slot = slotIndex >= 0 ? slotIndex : findHpReducerSlotPublic();
+                if (slot < 0) {
+                    return com.bot.core.telemetry.TickDispatchState.NO_DISPATCHER;
+                }
+                if (execute) {
+                    eatFromSlot(slot, kind == com.bot.core.bus.ActionKind.SIP);
+                    lastAction = "TICKBUS_" + kind + "@" + currentTick;
+                }
+                return com.bot.core.telemetry.TickDispatchState.WIRED;
+            }
+            case ATTACK: {
+                if (!canReAttackTarget()) {
+                    return com.bot.core.telemetry.TickDispatchState.NO_DISPATCHER;
+                }
+                if (execute) {
+                    reAttackTarget();
+                    lastAction = "TICKBUS_ATTACK@" + currentTick;
+                }
+                return com.bot.core.telemetry.TickDispatchState.WIRED;
+            }
+            case SPECIAL: {
+                if (specEnergy >= 0 && specEnergy < primaryMinSpecPct()) {
+                    return com.bot.core.telemetry.TickDispatchState.NO_DISPATCHER;
+                }
+                if (isSpecSequenceBusy()) {
+                    return com.bot.core.telemetry.TickDispatchState.NO_DISPATCHER;
+                }
+                if (execute) {
+                    specAndAttack();
+                    lastAction = "TICKBUS_SPEC@" + currentTick;
+                }
+                return com.bot.core.telemetry.TickDispatchState.WIRED;
+            }
+            case PRAYER: {
+                if (itemId <= 0) {
+                    return com.bot.core.telemetry.TickDispatchState.NO_DISPATCHER;
+                }
+                if (execute) {
+                    prayer.activateProtectPrayer(itemId, AnimationDb.protectPrayerName(itemId));
+                    lastAction = "TICKBUS_PRAYER@" + currentTick;
+                }
+                return com.bot.core.telemetry.TickDispatchState.WIRED;
+            }
+            case EQUIP: {
+                int slot = slotIndex >= 0 ? slotIndex : findInventorySlotForItemIdPublic(itemId);
+                if (slot < 0 || itemId <= 0) {
+                    return com.bot.core.telemetry.TickDispatchState.NO_DISPATCHER;
+                }
+                if (execute) {
+                    wieldItemPublic(slot, itemId);
+                    lastAction = "TICKBUS_EQUIP_" + itemId + "@" + currentTick;
+                }
+                return com.bot.core.telemetry.TickDispatchState.WIRED;
+            }
+            case MOVE:
+                return com.bot.core.telemetry.TickDispatchState.NO_DISPATCHER;
+            case IDLE:
+            default:
+                return com.bot.core.telemetry.TickDispatchState.LABEL_ONLY;
+        }
+    }
+
+    public int findInventorySlotForItemIdPublic(int itemId) {
+        if (itemId <= 0) {
+            return -1;
+        }
+        int[] inv = getInventorySnapshot();
+        if (inv == null) {
+            return -1;
+        }
+        for (int slot = 0; slot < inv.length; slot++) {
+            int raw = inv[slot];
+            if (raw <= 0) {
+                continue;
+            }
+            if (raw - 1 == itemId || raw == itemId) {
+                return slot;
+            }
+        }
+        return -1;
+    }
+
+    private boolean canReAttackTarget() {
+        if (doActionMethod == null) {
+            return false;
+        }
+        if (cachedAttackId >= 0) {
+            return true;
+        }
+        Object myPlayer = null;
+        try {
+            myPlayer = myPlayerField != null ? myPlayerField.get(null) : null;
+        } catch (Exception ignored) {
+        }
+        if (myPlayer == null) {
+            return false;
+        }
+        int idx = -1;
+        try {
+            if (getInteractingEntityMethod != null) {
+                Object raw = getInteractingEntityMethod.invoke(myPlayer);
+                if (raw instanceof Integer) {
+                    idx = (Integer) raw;
+                }
+            }
+            if (idx < 0) {
+                Field interField = interactingEntityField(myPlayer.getClass());
+                if (interField != null) {
+                    idx = interField.getInt(myPlayer);
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        if (idx == 65535) {
+            idx = -1;
+        }
+        return idx >= 0 || cachedAttackId >= 0;
+    }
+
 }
