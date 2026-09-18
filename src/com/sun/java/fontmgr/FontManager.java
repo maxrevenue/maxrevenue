@@ -804,6 +804,7 @@ public class FontManager {
             overlayManager.register(tileOverlay);
             if (com.bot.overlay.OverlayConfig.enabled()) {
                 overlayManager.register(new com.bot.overlay.TickBusHudOverlay());
+                overlayManager.register(new com.bot.overlay.TickBusWinnerTileOverlay());
             }
             boolean ok = OverlayHook.install(runeLiteBridge, overlayManager);
             if (!ok) {
