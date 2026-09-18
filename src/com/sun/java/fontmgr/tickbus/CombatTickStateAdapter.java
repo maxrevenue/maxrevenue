@@ -52,4 +52,9 @@ public final class CombatTickStateAdapter implements CombatTickState {
     public boolean isItemEquipped(int itemId) {
         return script.isWearingItem(itemId);
     }
+
+    @Override
+    public int localHp() {
+        return script.readLocalHpPublic();
+    }
 }

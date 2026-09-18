@@ -7,7 +7,9 @@ import com.bot.core.bus.Intent;
 import com.bot.core.bus.TickBus;
 import com.bot.core.model.CombatTickState;
 import com.bot.core.sidecar.SidecarTickMetrics;
+import com.bot.core.orchestrator.DispatchStateSource;
 import com.bot.core.telemetry.OffThreadNDJSONRecorder;
+import com.bot.overlay.OverlayPublisher;
 
 /**
  * Sole owner of tick combat arbitration when {@code -Droatz.tickbus=true}.
@@ -75,6 +77,12 @@ public final class LiveTickOrchestrator {
         dispatchWinner(winners[CH_DEFENSIVE], state, CH_DEFENSIVE);
         dispatchWinner(winners[CH_SUSTAIN], state, CH_SUSTAIN);
         dispatchWinner(winners[CH_OFFENSIVE], state, CH_OFFENSIVE);
+
+        int[] dispatchOrdinals = null;
+        if (dispatcher instanceof DispatchStateSource) {
+            dispatchOrdinals = ((DispatchStateSource) dispatcher).dispatchStateOrdinals();
+        }
+        OverlayPublisher.publish(state, winners, dispatchOrdinals, eliminationReasons, suppression, sidecarMetrics);
 
         if (recorder != null) {
             recorder.enqueue(state, bus, winners, eliminationReasons, sidecarMetrics, dispatcher);

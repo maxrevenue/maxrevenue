@@ -11,6 +11,12 @@ In `CombatScript.onTick`, ordering is fixed:
 
 If the orchestrator ran after legacy dispatch, golden diffs would show ordering artifacts (HP/prayer already mutated), not logic bugs.
 
+## Render overlay (paint thread)
+
+The tickbus HUD is **not** a decision brain. `OverlayPublisher` hands off a double-buffered {@code OverlayState} once per tick after resolution; the client paint hook reads {@code OverlayPublisher.current()} only. Never read {@code TickBus} from paint.
+
+Enable with {@code -Droatz.overlay=true} (same agent JAR / {@code launch.ps1} attach; no script changes required). Meaningful when {@code -Droatz.tickbus=true} is also on.
+
 Cross-JVM contract between the Java 11 RoatzBot agent and the Java 17 EchoForge sidecar.
 
 ## Intent freshness (TTL)

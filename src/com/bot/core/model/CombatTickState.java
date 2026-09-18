@@ -14,4 +14,9 @@ public interface CombatTickState extends GameState {
 
     /** True when {@code itemId} is already worn (weapon or gear slot). */
     boolean isItemEquipped(int itemId);
+
+    /** Local HP for overlay HUD, or {@code -1} if unknown. */
+    default int localHp() {
+        return -1;
+    }
 }

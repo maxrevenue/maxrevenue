@@ -9,6 +9,7 @@ public final class StubCombatState implements CombatTickState {
     public int spec = 100;
     public long specAvailableFromTick;
     public int equippedItemId = -1;
+    public int hp = -1;
 
     public StubCombatState(long tick) {
         this.tick = tick;
@@ -37,5 +38,10 @@ public final class StubCombatState implements CombatTickState {
     @Override
     public boolean isItemEquipped(int itemId) {
         return equippedItemId == itemId;
+    }
+
+    @Override
+    public int localHp() {
+        return hp;
     }
 }
