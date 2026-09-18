@@ -112,26 +112,37 @@ Lease-holding despite invalidated state is a bug class — extend this table whe
 
 After {@code ChannelRules}: **DEFENSIVE → SUSTAIN → OFFENSIVE** (prayer/gear before food before attack). Source: {@code LiveTickOrchestrator.onTick}.
 
-## NDJSON recorder schema v2 ({@code schemaVersion: 2})
+## NDJSON recorder schema v2 ({@code schemaVersion: 2}) — **frozen pre-shadow**
 
 Orchestrator lines ({@code recordKind: "orch"}) include:
 
-- {@code state}: {@code fingerprint}, {@code localHp}, {@code specEnergy}, {@code specAvailableFromTick} — **replay reads, never recomputes client randomness**
+- {@code replayProjection}: **fingerprint registry ∪ vitals ∪ suppression-release inputs only** — {@code fingerprint}, {@code localHp}, {@code specEnergy}, {@code specAvailableFromTick}. Single-source with {@code FingerprintLayout} + sidecar preconds. **Replay reads; never recomputes client randomness.**
 - {@code busIntents[]}: per-intent {@code kind}, {@code priority}, {@code advisor}, {@code rank}, ids/slots, {@code bornTick}, {@code ttlTicks}
 - {@code droppedPublishes}, {@code maxRankDropped}
 - {@code sidecarWireFrameRejects} (increment on wire decode/version reject — log + count, never silent close)
 
-Legacy tail lines unchanged: {@code recordKind: "legacy"}, {@code legacyAction}.
+Legacy tail lines: {@code recordKind: "legacy"}, {@code legacyAction}, optional {@code uncomparableSubtype} ({@code NO_OPINION} | {@code OUT_OF_VOCAB}) **classified at record time** ({@code LegacyComparability}).
 
-### Pre-shadow checklist (PR #21)
+{@code goldenDiff} reports {@code UNCOMPARABLE} with subtype counts; excluded from match rates.
 
-- [x] {@code goldenDiff}: {@code UNCOMPARABLE} bucket
-- [x] Recorder schema v2 (state projection, bus intents, overflow counters, wire reject counter field)
-- [x] Parity gate documented (legacy = oracle)
-- [x] Fingerprint registry table + test
-- [x] Lease early-release (HP recover) + test
-- [x] Intent pool {@code checkedOut()} test after N ticks
-- [ ] **Operator:** shadow capture + paste category counts
+### Tier 1 (frozen — ship before capture)
+
+- {@code UNCOMPARABLE} subtypes {@code NO_OPINION} / {@code OUT_OF_VOCAB} on legacy NDJSON
+- Fingerprint registry seed (CombatAdvisor + SustainAdvisor fields)
+- Recorder schema v2 ({@code replayProjection}, bus intents, overflow counters)
+- Parity gate sentence (legacy oracle, transcription candidate)
+- Sidecar **wire reject logging + counter** ({@code SidecarWireRejectLog}) — independent of watchdog hysteresis deferral
+
+### Tier 2 (hardening; may trail first capture)
+
+- Lease early-release spec expansion + tests
+- Pool outstanding-count assertion
+- Dispatch order as data table
+- Fingerprint **coverage** enforcement test (registry vs builder)
+
+### Operator gate (only remaining risk)
+
+- [ ] Shadow capture + paste MATCH / RULE_DIFF / PRIORITY_DIFF / TIMING_DIFF / FEASIBILITY / UNCOMPARABLE (subtype counts)
 
 ## Sidecar frame (WIRE_V1 / WIRE_V2)
 

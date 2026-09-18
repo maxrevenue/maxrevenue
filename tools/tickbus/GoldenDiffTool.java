@@ -28,7 +28,7 @@ public final class GoldenDiffTool {
         }
         Path path = Path.of(args[0]);
         Map<Long, String> orchSummary = new HashMap<>();
-        Map<Long, String> legacyAction = new HashMap<>();
+        Map<Long, LegacyRow> legacyRows = new HashMap<>();
 
         try (BufferedReader reader = Files.newBufferedReader(path)) {
             String line;
@@ -38,7 +38,9 @@ public final class GoldenDiffTool {
                     orchSummary.put(tick, summarizeOrchWinners(line));
                 } else if (line.contains("\"recordKind\":\"legacy\"")) {
                     long tick = readLong(line, "tickIndex");
-                    legacyAction.put(tick, readString(line, "legacyAction"));
+                    legacyRows.put(tick, new LegacyRow(
+                            readString(line, "legacyAction"),
+                            readString(line, "uncomparableSubtype")));
                 }
             }
         }
@@ -48,39 +50,47 @@ public final class GoldenDiffTool {
         int timingDiff = 0;
         int feasibility = 0;
         int match = 0;
-        int uncomparable = 0;
+        int uncomparableNoOpinion = 0;
+        int uncomparableOutOfVocab = 0;
 
         Set<Long> allTicks = new HashSet<>(orchSummary.keySet());
-        allTicks.addAll(legacyAction.keySet());
+        allTicks.addAll(legacyRows.keySet());
 
         for (long tick : allTicks) {
             String orch = orchSummary.get(tick);
-            String legacy = legacyAction.get(tick);
+            LegacyRow legacyRow = legacyRows.get(tick);
+            String legacy = legacyRow == null ? null : legacyRow.action;
             if (orch == null) {
                 timingDiff++;
                 continue;
             }
-            if (isUncomparableLegacy(legacy)) {
-                uncomparable++;
+            String subtype = legacyRow == null ? null : legacyRow.uncomparableSubtype;
+            if (isUncomparable(subtype, legacy)) {
+                if ("OUT_OF_VOCAB".equals(subtype) || isOutOfVocabHeuristic(legacy)) {
+                    uncomparableOutOfVocab++;
+                } else {
+                    uncomparableNoOpinion++;
+                }
                 continue;
             }
             if (orch.contains("LABEL_ONLY") || orch.contains("NO_DISPATCHER")) {
                 feasibility++;
                 continue;
             }
-            if (legacy.startsWith("TICKBUS_")) {
+            if (legacy != null && legacy.startsWith("TICKBUS_")) {
                 match++;
                 continue;
             }
             if (normalize(legacy).equals(normalize(orch))) {
                 match++;
-            } else if (orch.isEmpty() && !legacy.isEmpty()) {
+            } else if (orch.isEmpty() && legacy != null && !legacy.isEmpty()) {
                 ruleDiff++;
             } else {
                 priorityDiff++;
             }
         }
 
+        int uncomparable = uncomparableNoOpinion + uncomparableOutOfVocab;
         int comparable = match + ruleDiff + priorityDiff + timingDiff + feasibility;
         System.out.println("GoldenDiff verdict for " + path);
         System.out.println("  MATCH=" + match);
@@ -89,20 +99,32 @@ public final class GoldenDiffTool {
         System.out.println("  TIMING_DIFF=" + timingDiff);
         System.out.println("  FEASIBILITY=" + feasibility);
         System.out.println("  UNCOMPARABLE=" + uncomparable + " (excluded from rates)");
+        System.out.println("    NO_OPINION=" + uncomparableNoOpinion);
+        System.out.println("    OUT_OF_VOCAB=" + uncomparableOutOfVocab);
         if (comparable > 0) {
             System.out.printf("  MATCH_RATE=%.4f (%d comparable ticks)%n",
                     (double) match / (double) comparable, comparable);
         }
     }
 
-    private static boolean isUncomparableLegacy(String legacy) {
+    private static boolean isUncomparable(String schemaSubtype, String legacy) {
+        if ("NO_OPINION".equals(schemaSubtype) || "OUT_OF_VOCAB".equals(schemaSubtype)) {
+            return true;
+        }
         if (legacy == null || legacy.isEmpty()) {
             return true;
         }
-        if (legacy.startsWith("UNKNOWN_") || legacy.equals("NONE") || legacy.equals("-")) {
+        if (legacy.equals("-") || legacy.equals("NONE")) {
+            return true;
+        }
+        if (legacy.startsWith("UNKNOWN_")) {
             return true;
         }
         return false;
+    }
+
+    private static boolean isOutOfVocabHeuristic(String legacy) {
+        return legacy != null && legacy.startsWith("UNKNOWN_");
     }
 
     private static String summarizeOrchWinners(String line) {
@@ -150,5 +172,15 @@ public final class GoldenDiffTool {
             return "";
         }
         return json.substring(start, end);
+    }
+
+    private static final class LegacyRow {
+        final String action;
+        final String uncomparableSubtype;
+
+        LegacyRow(String action, String uncomparableSubtype) {
+            this.action = action;
+            this.uncomparableSubtype = uncomparableSubtype == null ? "" : uncomparableSubtype;
+        }
     }
 }

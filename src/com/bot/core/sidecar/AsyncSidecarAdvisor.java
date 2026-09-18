@@ -51,6 +51,16 @@ public final class AsyncSidecarAdvisor implements Advisor {
         this.lastAppliedEvalTick = new AtomicLong(Long.MIN_VALUE);
     }
 
+    /**
+     * Reader thread: version-prefixed frame. Rejects log + increment {@link SidecarTickMetrics} (watchdog separate).
+     */
+    public void ingestWireFrame(byte[] source, int offset, int length) {
+        SidecarPayload parsed = payloadRing[payloadRingCursor];
+        if (codec.tryDecodeWireFrame(source, offset, length, parsed, metrics)) {
+            offerPayload(parsed);
+        }
+    }
+
     /** Reader thread: install a freshly parsed payload (CAS ordering). */
     public void offerPayload(SidecarPayload parsed) {
         if (parsed == null) {

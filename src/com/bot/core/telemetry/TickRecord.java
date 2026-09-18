@@ -48,6 +48,7 @@ public final class TickRecord {
     /** {@code 0} = orchestrator snapshot, {@code 1} = legacy tail (shadow diff). */
     public int recordKind;
     public String legacyAction;
+    public LegacyComparability.Subtype legacyUncomparableSubtype;
 
     public void reset() {
         schemaVersion = SCHEMA_V2;
@@ -66,6 +67,7 @@ public final class TickRecord {
         specAvailableFromTick = 0L;
         recordKind = 0;
         legacyAction = null;
+        legacyUncomparableSubtype = LegacyComparability.Subtype.COMPARABLE;
         busIntentCount = 0;
         for (int i = 0; i < 3; i++) {
             winnerKind[i] = null;

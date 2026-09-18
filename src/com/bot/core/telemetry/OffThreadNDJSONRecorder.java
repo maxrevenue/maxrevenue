@@ -100,6 +100,7 @@ public final class OffThreadNDJSONRecorder {
         slot.recordKind = RECORD_LEGACY;
         slot.tickIndex = tickIndex;
         slot.legacyAction = legacyAction == null ? "" : legacyAction;
+        slot.legacyUncomparableSubtype = LegacyComparability.classify(slot.legacyAction);
         offer(slot);
     }
 
@@ -167,10 +168,15 @@ public final class OffThreadNDJSONRecorder {
         sb.append(",\"recordKind\":").append(rec.recordKind == RECORD_LEGACY ? "\"legacy\"" : "\"orch\"");
         sb.append(",\"tickIndex\":").append(rec.tickIndex);
         if (rec.recordKind == RECORD_LEGACY) {
-            sb.append(",\"legacyAction\":\"").append(escapeJson(rec.legacyAction)).append("\"}");
+            sb.append(",\"legacyAction\":\"").append(escapeJson(rec.legacyAction)).append('"');
+            String subtype = LegacyComparability.subtypeJson(rec.legacyUncomparableSubtype);
+            if (subtype != null) {
+                sb.append(",\"uncomparableSubtype\":\"").append(subtype).append('"');
+            }
+            sb.append('}');
             return sb.toString();
         }
-        sb.append(",\"state\":{");
+        sb.append(",\"replayProjection\":{");
         sb.append("\"fingerprint\":").append(rec.stateFingerprint);
         sb.append(",\"localHp\":").append(rec.localHp);
         sb.append(",\"specEnergy\":").append(rec.specEnergyPercent);
