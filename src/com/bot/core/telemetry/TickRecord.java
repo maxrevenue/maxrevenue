@@ -22,7 +22,6 @@ public final class TickRecord {
     public int masklessIntents;
     public long sidecarAckLag;
     public boolean sidecarHealthy;
-    public int sidecarWireFrameRejects;
     public int sidecarStaleTickDrops;
     public int sidecarStaleStateDrops;
     public int wireRejects;
@@ -79,7 +78,6 @@ public final class TickRecord {
         masklessIntents = 0;
         sidecarAckLag = 0L;
         sidecarHealthy = true;
-        sidecarWireFrameRejects = 0;
         recordsDropped = 0;
         stateFingerprint = 0;
         localHp = -1;

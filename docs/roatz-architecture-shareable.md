@@ -144,7 +144,7 @@ Long-term: EchoForge sidecar replaces transcription; shadow golden must pass bef
 ## 7. EchoForge sidecar wire (summary)
 
 - **Version byte** + body: **WIRE_V1** (32 B body, not fully decoded yet) / **WIRE_V2** (40 B body).
-- **Reject path:** truncated frame, version mismatch → **`SidecarWireRejectLog`** + `sidecarWireFrameRejects` (never silent close). Separate from watchdog “healthy” lag policy (deferred hysteresis).
+- **Reject path:** truncated frame, version mismatch → **`SidecarWireRejectLog`** + `wireRejects` (never silent close). Separate from watchdog “healthy” lag policy (deferred hysteresis).
 - **Health:** ack lag vs `ackTick`; unhealthy skips publish for that tick; healthy resets on fresh payload.
 - Full detail: `docs/tickbus-wire-contract.md`, `SidecarFrameCodec`.
 
@@ -166,7 +166,7 @@ Rule: new sidecar-precondition fields must register here or be explicitly waived
 - `replayProjection`: `fingerprint`, `localHp`, `specEnergy`, `specAvailableFromTick` — **replay reads; never recomputes RNG/client state**.
 - `busIntents[]`: kind, priority, advisor, rank, item/npc/slot, bornTick, ttlTicks.
 - `winners[]`, `channelDrops[]`, `dispatchState[]`.
-- `droppedPublishes`, `maxRankDropped`, sidecar metrics + `sidecarWireFrameRejects`.
+- `droppedPublishes`, `maxRankDropped`, sidecar metrics + `wireRejects`.
 
 **Legacy line** (`recordKind: "legacy"`):
 

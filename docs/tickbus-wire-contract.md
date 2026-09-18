@@ -135,14 +135,14 @@ After {@code ChannelRules}: **DEFENSIVE → SUSTAIN → OFFENSIVE** (prayer/gear
 | {@code protectPrayerMask} | 0/1 overhead protect; registry bit 9 |
 | {@code eatThreshold} | {@code comboEatHpThreshold} — suppression EAT early-release input |
 | {@code specAvailableFromTick} | Spec cooldown / SPECIAL lease input ({@code specCooldown}) |
-| {@code damageTaken} | HP drop this tick from adapter ({@code noteLocalHpDrop} / vitals path — hitsplat-aligned delta, 0 if none) |
+| {@code damageTaken} | Per-tick HP drop in orch lines (adapter/vitals delta, 0 if none). **Not** the session-cumulative {@code damageTaken} on periodic lines — same name, different {@code recordKind}. |
 | {@code targetNpcIndex} | Reserved {@code -1} until advisor transcribes interacting target (rev 2) |
 
 **{@code busIntents[]}** (every intent on the bus, winners and losers):
 
 {@code kind}, {@code priority}, {@code advisorOrdinal}, {@code rank}, {@code itemId}, {@code npcIndex}, {@code slotIndex}, {@code bornTick}, {@code ttlTicks}, {@code byline} (interned id → label on writer thread only), {@code elimination} (enum name on non-winners / losers).
 
-Also: {@code winners[]}, {@code channelDrops[]}, {@code dispatchState[]}, {@code busSize}, {@code droppedPublishes}, {@code maxRankDropped}, {@code recordsDropped} (queue drop counter snapshot), sidecar observe fields ({@code masklessIntents}, {@code sidecarAckLag}, {@code sidecarHealthy}, {@code staleTickDrops}, {@code staleStateDrops}, {@code wireRejects}, {@code sidecarWireFrameRejects}).
+Also: {@code winners[]}, {@code channelDrops[]}, {@code dispatchState[]}, {@code busSize}, {@code droppedPublishes}, {@code maxRankDropped}, {@code recordsDropped} (queue drop counter snapshot), sidecar observe fields ({@code masklessIntents}, {@code sidecarAckLag}, {@code sidecarHealthy}, {@code staleTickDrops}, {@code staleStateDrops}, {@code wireRejects}).
 
 ### {@code recordKind: "legacy"}
 

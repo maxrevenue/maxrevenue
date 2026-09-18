@@ -81,7 +81,6 @@ public final class OffThreadNDJSONRecorder {
             slot.masklessIntents = sidecarMetrics.masklessIntents();
             slot.sidecarAckLag = sidecarMetrics.sidecarAckLag();
             slot.sidecarHealthy = sidecarMetrics.sidecarHealthy();
-            slot.sidecarWireFrameRejects = sidecarMetrics.wireFrameRejects();
             slot.sidecarStaleTickDrops = sidecarMetrics.staleTickDrops();
             slot.sidecarStaleStateDrops = sidecarMetrics.staleStateDrops();
             slot.wireRejects = sidecarMetrics.wireRejects();
@@ -272,7 +271,6 @@ public final class OffThreadNDJSONRecorder {
         sb.append(",\"masklessIntents\":").append(rec.masklessIntents);
         sb.append(",\"sidecarHealthy\":").append(rec.sidecarHealthy);
         sb.append(",\"sidecarAckLag\":").append(rec.sidecarAckLag);
-        sb.append(",\"sidecarWireFrameRejects\":").append(rec.sidecarWireFrameRejects);
         sb.append(",\"staleTickDrops\":").append(rec.sidecarStaleTickDrops);
         sb.append(",\"staleStateDrops\":").append(rec.sidecarStaleStateDrops);
         sb.append(",\"wireRejects\":").append(rec.wireRejects);

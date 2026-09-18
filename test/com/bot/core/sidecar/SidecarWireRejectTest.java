@@ -14,6 +14,6 @@ class SidecarWireRejectTest {
         metrics.beginTick();
         byte[] frame = new byte[] {99, 0, 0};
         assertFalse(codec.tryDecodeWireFrame(frame, 0, frame.length, new SidecarPayload(), metrics));
-        assertEquals(1, metrics.wireFrameRejects());
+        assertEquals(1, metrics.wireRejects());
     }
 }
