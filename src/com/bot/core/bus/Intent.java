@@ -63,8 +63,12 @@ public final class Intent {
         return rank;
     }
 
+    /**
+     * Wire TTL semantics (see docs/tickbus-wire-contract.md):
+     * publishable iff {@code tick >= bornTick && tick <= bornTick + ttlTicks}.
+     */
     public boolean isValidAt(long tick) {
-        return tick >= bornTick && tick < bornTick + (long) ttlTicks;
+        return tick >= bornTick && tick <= bornTick + (long) ttlTicks;
     }
 
     /**

@@ -68,6 +68,7 @@ public final class TickBus {
                 lowestIndex = i;
             }
         }
+        // Strictly greater: equal rank keeps the incumbent (advisor registration order).
         if (intent.rank() > lowestRank) {
             intents[lowestIndex] = intent;
             droppedPublishes++;

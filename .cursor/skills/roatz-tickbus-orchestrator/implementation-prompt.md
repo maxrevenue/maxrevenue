@@ -137,6 +137,10 @@ Use 40 bytes (the 32-byte spec cannot fit `ackTick`, which the health watchdog r
 - Wrapping priority: SustainAdvisor (food/prayer) and CombatAdvisor (attack/spec) first — these replace the legacy monolith's hot path. Terminator kill-window math becomes a third advisor publishing MOVE/SPECIAL intents.
 - Do NOT ship `com.automation.core` (Java 17) classes in the agent JAR. The J11 agent depends only on the wire format and fingerprint layout, never on EchoForge classes.
 
+## Wire TTL (review note — do not reinterpret locally)
+
+`ttlTicks` on the wire means **publishable through `evalTick + ttlTicks` inclusive** (`tick >= evalTick && tick <= evalTick + ttlTicks`). Pass through untouched from the J17 sidecar; see `docs/tickbus-wire-contract.md`.
+
 ## Working Instructions for You (Cursor)
 
 - Implement package by package in the order: `bus` → `orchestrator` → `sidecar` → `telemetry` → tests. Stop after `bus` and show me `TickBus`/`Intent` before continuing.

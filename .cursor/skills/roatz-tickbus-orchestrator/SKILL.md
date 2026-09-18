@@ -20,7 +20,22 @@ Read and follow the full implementation spec verbatim:
 
 ## Implementation order
 
-`bus` → `orchestrator` → `sidecar` → `telemetry` → tests. Pause after `bus` for review unless the user asks to continue.
+`bus` → `orchestrator` → `sidecar` → `telemetry` → tests.
+
+## Review notes (logged)
+
+1. Wire `ttlTicks` is inclusive through `evalTick + ttlTicks` — no local `+1` conversion (`docs/tickbus-wire-contract.md`).
+2. Bus eviction uses strict `rank > lowestRank` on ties; test `fullBusRejectsIncomingOnEqualRank`.
+3. Sidecar `precondMask == 0` increments `masklessIntents` in NDJSON for golden review.
+
+## Flags
+
+| Property | Effect |
+|---|---|
+| `-Droatz.tickbus=true` | Orchestrator owns dispatch; skips legacy combat tail |
+| `-Droatz.tickbus.shadow=true` | Orchestrator logs only; legacy still runs |
+| `-Droatz.tickbus.rec=<path>` | NDJSON telemetry output |
+| `-Droatz.sidecar=<host>` | Enables sidecar advisor (socket reader TBD) |
 
 ## Related
 

@@ -48,8 +48,8 @@ tasks.register("checkBusNoWallClock") {
     group = "verification"
     description = "Fail if com.bot.core.bus uses wall-clock APIs"
     doLast {
-        val hits = fileTree("src/com/bot/core/bus").matching {
-            include("**/*.java")
+        val hits = fileTree("src/com/bot/core").matching {
+            include("**/bus/**/*.java", "**/orchestrator/**/*.java")
         }.files.flatMap { file ->
             file.readLines().mapIndexedNotNull { idx, line ->
                 if (line.contains("currentTimeMillis") || line.contains("nanoTime")

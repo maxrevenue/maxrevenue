@@ -52,8 +52,26 @@ class TickBusArbitrationTest {
     void skipsExpiredIntents() {
         TickBus bus = new TickBus();
         bus.beginTick(20L);
-        bus.publish(intent(0, ActionKind.ATTACK, ActionPriority.CRITICAL, 18L, 2));
+        bus.publish(intent(0, ActionKind.ATTACK, ActionPriority.CRITICAL, 18L, 1));
         assertEquals(null, bus.resolveChannel(Channel.OFFENSIVE));
+    }
+
+    @Test
+    void fullBusRejectsIncomingOnEqualRank() {
+        TickBus bus = new TickBus();
+        bus.beginTick(1L);
+        IntentPool pool = new IntentPool(5, TickBus.CAPACITY + 1);
+        for (int i = 0; i < TickBus.CAPACITY; i++) {
+            Intent slot = pool.obtain(ActionKind.ATTACK, ActionPriority.OFFENSIVE, 0, 0, 0, 1L, 5, 0, 0);
+            bus.publish(slot);
+        }
+        int dropsBefore = bus.droppedPublishes();
+        Intent challenger = pool.obtain(ActionKind.ATTACK, ActionPriority.OFFENSIVE, 0, 0, 0, 1L, 5, 0, 0);
+        bus.publish(challenger);
+        assertEquals(dropsBefore + 1, bus.droppedPublishes());
+        Intent winner = bus.resolveChannel(Channel.OFFENSIVE);
+        assertNotNull(winner);
+        assertEquals(5, winner.advisorOrdinal());
     }
 
     private static Intent intent(int ordinal,

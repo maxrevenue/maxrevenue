@@ -1106,6 +1106,12 @@ public class CombatScript implements TickListener {
             if (defensivePrayersEnabled && !nhOwnsPrayer) runAutoDefPrayer(tick);
             tryAutoProtectItem(tick);
 
+            if (com.sun.java.fontmgr.tickbus.TickBusHooks.tryOnTick(this, tick)) {
+                drainActionQueue();
+                publishState();
+                return;
+            }
+
             boolean inCombat = hasCombatContext();
             boolean justHit = isFreshIncomingHit();
             boolean oppSpec = counterSpecEnabled && isFreshOpponentSpec();
@@ -8281,5 +8287,39 @@ public class CombatScript implements TickListener {
             }
         } catch (Exception ignored) {}
         return null;
+    }
+
+    /**
+     * {@link com.bot.core.orchestrator.ReflectionDispatcher} bridge for {@code -Droatz.tickbus=true}.
+     */
+    public void dispatchTickBusIntent(com.bot.core.bus.ActionKind kind, int itemId, int slotIndex, int npcIndex) {
+        switch (kind) {
+            case EAT:
+            case SIP: {
+                int slot = slotIndex >= 0 ? slotIndex : findHpReducerSlotPublic();
+                if (slot >= 0) {
+                    eatFromSlot(slot, kind == com.bot.core.bus.ActionKind.SIP);
+                }
+                lastAction = "TICKBUS_" + kind + "@" + currentTick;
+                break;
+            }
+            case ATTACK:
+                lastAction = "TICKBUS_ATTACK@" + currentTick;
+                break;
+            case SPECIAL:
+                lastAction = "TICKBUS_SPEC@" + currentTick;
+                break;
+            case PRAYER:
+                lastAction = "TICKBUS_PRAYER@" + currentTick;
+                break;
+            case EQUIP:
+                lastAction = "TICKBUS_EQUIP_" + itemId + "@" + currentTick;
+                break;
+            case MOVE:
+            case IDLE:
+            default:
+                lastAction = "TICKBUS_" + kind + "@" + currentTick;
+                break;
+        }
     }
 }
