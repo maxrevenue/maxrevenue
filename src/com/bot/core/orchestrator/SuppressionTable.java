@@ -5,7 +5,7 @@ import com.bot.core.bus.ActionKind;
 /**
  * Per-kind tick deadlines (lease ends when {@code tickIndex >= deadline}).
  *
- * <p>Leases also {@link #onVitals(int, long) early-release} on invalidating vitals (see wire contract).
+ * <p>Leases also {@link #onReleaseInputs early-release} from replay projection (see wire contract).
  */
 public final class SuppressionTable {
 
@@ -57,21 +57,17 @@ public final class SuppressionTable {
      * @param localHp current local HP or {@code -1} if unknown
      * @param tickIndex current tick (deadline set to this tick = immediately expired)
      */
-    public void onVitals(int localHp, long tickIndex) {
-        if (localHp >= 0 && lastObservedHp >= 0 && localHp > lastObservedHp) {
-            expireNow(ActionKind.EAT, tickIndex);
-            expireNow(ActionKind.SIP, tickIndex);
-        }
+    /**
+     * Early-release inputs from {@link com.bot.core.telemetry.ReplayProjection}.
+     *
+     * <p>EAT/SIP: {@code localHp > eatThreshold} where {@code eatThreshold} is
+     * {@code CombatScript.comboEatHpThreshold} — mirrors {@code SustainAdvisor}
+     * ({@code hp <= threshold} triggers eat; above band invalidates eat-lease purpose).
+     */
+    public void onReleaseInputs(int localHp, int eatThreshold, int protectPrayerMask, long tickIndex) {
         if (localHp >= 0) {
             lastObservedHp = localHp;
         }
-    }
-
-    /**
-     * Early-release inputs from {@link com.bot.core.telemetry.ReplayProjection} (legacy eat threshold transcription).
-     */
-    public void onReleaseInputs(int localHp, int eatThreshold, int protectPrayerMask, long tickIndex) {
-        onVitals(localHp, tickIndex);
         if (localHp >= 0 && eatThreshold >= 0 && localHp > eatThreshold) {
             expireNow(ActionKind.EAT, tickIndex);
             expireNow(ActionKind.SIP, tickIndex);
@@ -81,7 +77,7 @@ public final class SuppressionTable {
         }
     }
 
-    /** PRAYER flick lease: release when prayer no longer active (fingerprint bit TBD). */
+    /** PRAYER flick lease: release when overhead protect inactive ({@link FingerprintRegistry#PROTECT_PRAYER_MASK}). */
     public void onPrayerInactive(long tickIndex) {
         expireNow(ActionKind.PRAYER, tickIndex);
     }

@@ -7,7 +7,7 @@ In `CombatScript.onTick`, ordering is fixed:
 1. Vitals refresh (`readLatestHitsplat`, `refreshPvpVitals`, `noteLocalHpDrop`)
 2. **`TickBusHooks.evaluateEarly`** — orchestrator evaluates on **pre-legacy** state
 3. Legacy monolith (auto-prayer, NH, spec dumps, …) when `-Droatz.tickbus.shadow=true`
-4. **`publishState`** → `TickBusHooks.recordShadowLegacy` pairs legacy `lastAction` with the orch NDJSON line
+4. **`publishState`** → **`TickBusHooks.recordShadowLegacy`** pairs legacy `lastAction` with the orch NDJSON line
 
 If the orchestrator ran after legacy dispatch, golden diffs would show ordering artifacts (HP/prayer already mutated), not logic bugs.
 
@@ -19,7 +19,7 @@ Double-buffer rules (tick thread): **fill completely, then** assign {@code visib
 
 ## Shadow acceptance (definition of done)
 
-**Project state (PR #21):** instrumentation landed (orchestrator, NDJSON recorder, overlay HUD/tiles, {@code goldenDiff}). **No shadow baseline capture has been run yet** — advisor vs legacy parity is the open question until an operator completes capture below.
+**Project state (PR #21 rev 2):** instrumentation and schema v2 **landed**. **No shadow baseline capture has been run yet** — advisor vs legacy parity is the open question until an operator completes capture below.
 
 **Capture (one full fight / session minimum for first read; two sessions before trusting counts):**
 
@@ -44,7 +44,7 @@ Attach agent as today ({@code launch.ps1} unchanged). Legacy monolith still disp
 ./gradlew goldenDiff -Psession=<path/to/session.ndjson>
 ```
 
-Paste category counts: **MATCH**, **RULE_DIFF**, **PRIORITY_DIFF**, **TIMING_DIFF**, **FEASIBILITY**, **UNCOMPARABLE** (legacy empty / no opinion / outside captured vocab — excluded from match rates, raw count reported).
+Paste category counts: **MATCH**, **RULE_DIFF**, **PRIORITY_DIFF**, **TIMING_DIFF**, **FEASIBILITY**, **UNCOMPARABLE** with subtypes **NO_OPINION** / **OUT_OF_VOCAB** (excluded from match rates).
 
 **Gate to flip production tickbus (drop shadow):**
 
@@ -86,71 +86,107 @@ Per-intent `precondHash` and `precondMask` (32-bit). Satisfied when:
 
 ### Fingerprint field registry
 
-| Field | Bit range | Source | Consulted by |
-|---|---|---|---|
-| Local HP | 0–7 (`FingerprintLayout.HP_MASK`) | {@code CombatTickState.localHp()} / adapter | SustainAdvisor, sidecar eat preconds |
-| Spec energy | 16–23 (`FingerprintLayout.SPEC_MASK`) | {@code specEnergyPercent()} | CombatAdvisor spec gate, sidecar |
+Authoritative table: `docs/fingerprint-registry.md` and `FingerprintRegistry`.
 
-**Rule:** any new state field consulted by a sidecar intent must be added to this table (or explicitly waived). {@code FingerprintRegistryTest} guards registered fields used in tests.
+| Field | Bit | Source | Consulted by |
+|---|---|---|---|
+| Local HP | 0–7 | {@code localHp()} | SustainAdvisor, sidecar eat preconds |
+| Food present | 8 | {@code foodSlotIndex >= 0} | SustainAdvisor ({@code findHpReducerSlotPublic}) |
+| Protect prayer active | 9 | {@code protectPrayerMaskForTelemetry()} | Suppression PRAYER early-release |
+| Spec energy | 16–23 | {@code specEnergyPercent()} | CombatAdvisor spec gate, sidecar |
+
+**Rule:** any new state field consulted by a sidecar intent must be added to the registry (or explicitly waived). {@code FingerprintCoverageTest} + {@code FingerprintLayoutTest} guard layout.
 
 ## TickBus overflow
 
-When the 32-slot bus is full, publish evicts the **lowest rank** only if the incoming intent **strictly outranks** it; otherwise the incoming intent is dropped. Per tick NDJSON records {@code droppedPublishes} and {@code maxRankDropped}. High-priority bursts that still overflow indicate advisor logic bugs (counter spike), not a sort pass.
+When the 32-slot bus is full, publish evicts the **lowest rank** only if the incoming intent **strictly outranks** it; otherwise the incoming intent is dropped. Per tick NDJSON records {@code droppedPublishes} and {@code maxRankDropped} ({@code -1} if none). High-priority bursts that still overflow indicate advisor logic bugs (counter spike), not a sort pass.
 
 ## Suppression leases
 
-Default durations are applied on dispatch in {@code LiveTickOrchestrator}. Leases expire by tick deadline **or** early release on invalidating vitals:
+Default durations are applied on dispatch in {@code LiveTickOrchestrator}. Leases expire by tick deadline **or** early release from {@code replayProjection} (candidate-side; legacy has no equivalent lease table — expect some {@code RULE_DIFF} clusters):
 
 | Kind | Duration (ticks) | Early release |
 |---|---|---|
-| EAT / SIP | 3 | Local HP **increases** vs previous observed tick ({@code SuppressionTable.onVitals}) |
-| EQUIP | 1 | — |
-| PRAYER | 1 | Prayer inactive (fingerprint bit TBD — {@code onPrayerInactive}) |
-| SPECIAL | until {@code specAvailableFromTick} | — |
+| EAT / SIP | 3 | {@code localHp > eatThreshold} where {@code eatThreshold = CombatScript.comboEatHpThreshold}. **Transcription:** {@code SustainAdvisor} eats when {@code hp >= 0 && hp <= comboEatHpThreshold}; lease purpose invalidates when HP leaves the eat band (strictly above threshold). Legacy reference field: {@code CombatScript.comboEatHpThreshold} (default 32). **Not** “any HP increase tick-over-tick” — sub-threshold regen must not release early. |
+| EQUIP | 1 | Timeout only |
+| PRAYER | 1 | {@code protectPrayerMask == 0} (overhead protect off). Registry bit 9 ({@code FingerprintRegistry.PROTECT_PRAYER_MASK}) / {@code CombatScript.protectPrayerMaskForTelemetry()}. |
+| SPECIAL | until {@code specAvailableFromTick} | Timeout only ({@code specCooldown} in projection) |
 
-Lease-holding despite invalidated state is a bug class — extend this table when adding kinds.
+**Task 5 expected delta:** Eat/prayer early-release on the candidate has **no legacy lease baseline**. {@code RULE_DIFF} clusters attributable to released-eat-early or released-prayer-early ticks are **expected and documented**, not defects.
 
 ## Dispatch order (orchestrator)
 
 After {@code ChannelRules}: **DEFENSIVE → SUSTAIN → OFFENSIVE** (prayer/gear before food before attack). Source: {@code LiveTickOrchestrator.onTick}.
 
-## NDJSON recorder schema v2 ({@code schemaVersion: 2}) — **frozen pre-shadow**
+## NDJSON recorder schema v2 ({@code schemaVersion: 2}) — **frozen (PR #21 rev 2)**
 
-Orchestrator lines ({@code recordKind: "orch"}) include:
+**Replay rule:** replay must read projection fields from NDJSON; never recompute client randomness or re-derive vitals from the live client.
 
-- {@code replayProjection}: **fingerprint registry ∪ vitals ∪ suppression-release inputs only** — {@code fingerprint}, {@code localHp}, {@code specEnergy}, {@code specAvailableFromTick}. Single-source with {@code FingerprintLayout} + sidecar preconds. **Replay reads; never recomputes client randomness.**
-- {@code busIntents[]}: per-intent {@code kind}, {@code priority}, {@code advisor}, {@code rank}, ids/slots, {@code bornTick}, {@code ttlTicks}
-- {@code droppedPublishes}, {@code maxRankDropped}
-- {@code sidecarWireFrameRejects} (increment on wire decode/version reject — log + count, never silent close)
+### {@code recordKind: "orch"}
 
-Legacy tail lines: {@code recordKind: "legacy"}, {@code legacyAction}, optional {@code uncomparableSubtype} ({@code NO_OPINION} | {@code OUT_OF_VOCAB}) **classified at record time** ({@code LegacyComparability}).
+**{@code replayProjection}** — union computed once per tick (must match {@code OffThreadNDJSONRecorder}):
 
-{@code goldenDiff} reports {@code UNCOMPARABLE} with subtype counts; excluded from match rates.
+| Field | Role |
+|---|---|
+| {@code fingerprint} | Composite 32-bit {@code FingerprintRegistry.compose(...)} |
+| {@code localHp} | Raw HP (registry bits 0–7) |
+| {@code specEnergy} | Raw spec % (registry bits 16–23) |
+| {@code foodSlotIndex} | {@code findHpReducerSlotPublic()} (−1 if none); registry bit 8 derived as {@code foodSlotIndex >= 0} |
+| {@code protectPrayerMask} | 0/1 overhead protect; registry bit 9 |
+| {@code eatThreshold} | {@code comboEatHpThreshold} — suppression EAT early-release input |
+| {@code specAvailableFromTick} | Spec cooldown / SPECIAL lease input ({@code specCooldown}) |
+| {@code damageTaken} | HP drop this tick from adapter ({@code noteLocalHpDrop} / vitals path — hitsplat-aligned delta, 0 if none) |
+| {@code targetNpcIndex} | Reserved {@code -1} until advisor transcribes interacting target (rev 2) |
 
-### Tier 1 (frozen — ship before capture)
+**{@code busIntents[]}** (every intent on the bus, winners and losers):
 
-- {@code UNCOMPARABLE} subtypes {@code NO_OPINION} / {@code OUT_OF_VOCAB} on legacy NDJSON
-- Fingerprint registry seed (CombatAdvisor + SustainAdvisor fields)
-- Recorder schema v2 ({@code replayProjection}, bus intents, overflow counters)
-- Parity gate sentence (legacy oracle, transcription candidate)
-- Sidecar **wire reject logging + counter** ({@code SidecarWireRejectLog}) — independent of watchdog hysteresis deferral
+{@code kind}, {@code priority}, {@code advisorOrdinal}, {@code rank}, {@code itemId}, {@code npcIndex}, {@code slotIndex}, {@code bornTick}, {@code ttlTicks}, {@code byline} (interned id → label on writer thread only), {@code elimination} (enum name on non-winners / losers).
 
-### Tier 2 (hardening; may trail first capture)
+Also: {@code winners[]}, {@code channelDrops[]}, {@code dispatchState[]}, {@code busSize}, {@code droppedPublishes}, {@code maxRankDropped}, {@code recordsDropped} (queue drop counter snapshot), sidecar observe fields ({@code masklessIntents}, {@code sidecarAckLag}, {@code sidecarHealthy}, {@code staleTickDrops}, {@code staleStateDrops}, {@code wireRejects}, {@code sidecarWireFrameRejects}).
 
-- Lease early-release spec expansion + tests
-- Pool outstanding-count assertion
-- Dispatch order as data table
-- Fingerprint **coverage** enforcement test (registry vs builder)
+### {@code recordKind: "legacy"}
 
-### Operator gate (only remaining risk)
+{@code legacyAction}, optional {@code uncomparableSubtype}: {@code NO_OPINION} | {@code OUT_OF_VOCAB} (record-time {@code LegacyComparability}).
 
-- [ ] Shadow capture + paste MATCH / RULE_DIFF / PRIORITY_DIFF / TIMING_DIFF / FEASIBILITY / UNCOMPARABLE (subtype counts)
+### {@code recordKind: "periodic"} (every **50 ticks**, best-effort on session close)
+
+**Outcome counters** (projection transitions only — never from winners/dispatch): {@code eatsUsed}, {@code specsUsed}, {@code prayerUptimeTicks}, {@code damageTaken}.
+
+**{@code sidecarArrivalLagTicks}:** p50/p99 from fixed histogram ({@code arrivalTickIndex - targetTickIndex}), distinct from per-tick {@code sidecarAckLag}.
+
+{@code goldenDiff} uses {@code ParityInput} only; periodic/outcome/latency fields do not influence classification.
+
+### Landed (PR #21 rev 2)
+
+- {@code FingerprintRegistry} seed + coverage/layout tests; {@code docs/fingerprint-registry.md}
+- Schema v2 {@code replayProjection}, full {@code busIntents[]}, overflow + queue drop counters
+- {@code UNCOMPARABLE} subtypes on legacy lines; {@code ParityInput} structural parity gate
+- Sidecar wire reject logging ({@code SidecarWireRejectLog}) + {@code wireRejects}
+- Suppression EAT/PRAYER early-release (threshold + protect mask) + tests
+- Intent pool {@code checkedOut()} leak test; {@code TickBusTieTest} / {@code TickBusOverflowPressureTest}
+- Periodic NDJSON cadence (50 ticks); speculation trigger + replay-corpus rules (this doc)
+
+### Remaining (post-capture or polish)
+
+- [ ] **Operator:** first shadow capture + {@code goldenDiff} category paste
+- [ ] Dispatch order as generated data table ({@code ChannelRules} polish)
+- [ ] {@code targetNpcIndex} transcription when CombatAdvisor reads interacting target
+- [ ] Watchdog two-threshold hysteresis (sidecar publish path still observe-only)
+- [ ] Session-close {@code flushPeriodicBestEffort} wired from socket/shutdown hook (best-effort today)
 
 ## Sidecar frame (WIRE_V1 / WIRE_V2)
 
-Negotiation uses a leading **version byte** ({@code WIRE_V1} 32B / {@code WIRE_V2} 40B). On mismatch or truncated frame: **log, increment {@code sidecarWireFrameRejects}, discard frame** — do not silently close the session. Healthy flag resets on fresh valid payload (observe-only sidecar today).
+Negotiation uses a leading **version byte** ({@code WIRE_V1} 32B / {@code WIRE_V2} 40B). On version-negotiation mismatch or malformed frame: **never close silently** — increment {@code wireRejects}, log once per rejection burst ({@code SidecarWireRejectLog}), keep the socket reader alive with backoff. Observe-only sidecar still exercises this path; reject metrics are the first wire-contract violation signal. Healthy flag resets on fresh valid payload.
 
 40-byte big-endian intent body — see `SidecarFrameCodec` ({@code WIRE_V2}).
+
+## Known future extensions
+
+**Trigger to build tick-ahead speculative evaluation:** p99 ({@code sidecarArrivalLagTicks}) ≥ 1 across ≥ 3 consecutive publishing sessions, OR late-answer rate (arrivals where {@code evalTick + ttlTicks < arrivalTick}) > 10% of ticks with sidecar payloads. Below threshold, speculation is out of scope; the reactive protocol with TTL + fingerprint preconditions is the end state.
+
+**Replay-corpus rule:** High {@code OUT_OF_VOCAB} counts trigger a vocabulary-capture event; new captures are appended to the offline replay corpus. Replay regression shrinks capture frequency, never to zero.
+
+**Periodic NDJSON:** Outcome counters are derived exclusively from projected {@code GameState} transitions — never from arbitration winners or dispatch. Periodic lines every **50 ticks** are the source of truth; session-close flush is **best-effort** (killed JVM may lose the final partial period).
 
 ### TODO (post-shadow / when sidecar socket lands)
 

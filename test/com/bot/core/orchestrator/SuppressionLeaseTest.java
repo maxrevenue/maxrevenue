@@ -42,6 +42,23 @@ class SuppressionLeaseTest {
     }
 
     @Test
+    void subThresholdHpRegenDoesNotReleaseEatLeaseEarly() {
+        StubCombatState state = new StubCombatState(0L);
+        state.hp = 28;
+        state.eatThreshold = 32;
+        EatAdvisor eatAdvisor = new EatAdvisor();
+        LoggingReflectionDispatcher dispatcher = new LoggingReflectionDispatcher();
+        LiveTickOrchestrator orchestrator = new LiveTickOrchestrator(
+                new Advisor[]{eatAdvisor}, dispatcher, null, null);
+        orchestrator.onTick(state);
+        assertEquals(1, dispatcher.dispatchCount);
+        state.hp = 29;
+        state.tick = 1L;
+        orchestrator.onTick(state);
+        assertEquals(1, dispatcher.dispatchCount);
+    }
+
+    @Test
     void eatLeaseBlocksReEatForThreeTicks() {
         StubCombatState state = new StubCombatState(0L);
         EatAdvisor eatAdvisor = new EatAdvisor();

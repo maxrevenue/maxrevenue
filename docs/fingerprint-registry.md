@@ -6,7 +6,7 @@ Any sidecar intent or advisor decision consulting a new state field must add it 
 |---|---|---|---|
 | Local HP | 0–7 | `CombatTickState.localHp()` | SustainAdvisor, eat preconds |
 | Food present | 8 | food slot ≥ 0 | SustainAdvisor |
-| Protect prayer active | 9 | `activeProtectPrayer()` | Suppression early-release |
+| Protect prayer active | 9 | `CombatScript.protectPrayerMaskForTelemetry()` | Suppression PRAYER early-release |
 | Spec energy | 16–23 | `specEnergyPercent()` | CombatAdvisor |
 
 Implementation: `com.bot.core.orchestrator.FingerprintRegistry`.
