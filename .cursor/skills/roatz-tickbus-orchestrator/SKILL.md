@@ -27,7 +27,7 @@ Read and follow the full implementation spec verbatim:
 1. Wire `ttlTicks` is inclusive through `evalTick + ttlTicks` — no local `+1` conversion (`docs/tickbus-wire-contract.md`).
 2. Bus eviction uses strict `rank > lowestRank` on ties; test `fullBusRejectsIncomingOnEqualRank`.
 3. Sidecar `precondMask == 0` increments `masklessIntents` in NDJSON for golden review.
-4. Overlay: fill-then-set double buffer (documented one-frame tear); `TickResolutionSnapshot` shared with NDJSON drops; lease/lag/strings on tick thread only; `tickIndex`/`seq` + `STALE` + sidecar `†` when `bornTick != tickIndex`.
+4. Overlay: fill-then-set double buffer (debug HUD only; documented one-frame tear — **no logic may assume frame consistency**); `TickResolutionSnapshot` shared with NDJSON drops; lease/lag/strings on tick thread only; `tickIndex`/`seq` + `STALE` + sidecar `†` when `bornTick != tickIndex`.
 
 ## Flags
 
@@ -42,11 +42,15 @@ Read and follow the full implementation spec verbatim:
 
 ## Shadow acceptance
 
-Hook order documented in `docs/tickbus-wire-contract.md` (orchestrator-first after vitals).
+Hook order and **definition of done** are in `docs/tickbus-wire-contract.md` (section **Shadow acceptance**).
 
-Verdict tool: `./gradlew goldenDiff -Psession=/path/session.ndjson` (ignores `LABEL_ONLY` / `FEASIBILITY` stubs in classification).
+**Frontier:** PR #21 instrumentation is ready; **no operator shadow NDJSON capture yet** — parity is unproven until capture + `goldenDiff`.
 
-Definition of done: two shadow sessions, stable category counts, `FEASIBILITY=0`, `NoAllocationTest` green, then `-Droatz.tickbus=true` without shadow.
+Capture flags: `-Droatz.tickbus=true -Droatz.tickbus.shadow=true -Droatz.tickbus.rec=<path> -Droatz.overlay=true`
+
+Verdict: `./gradlew goldenDiff -Psession=<path>` → paste MATCH / RULE_DIFF / PRIORITY_DIFF / TIMING_DIFF / FEASIBILITY.
+
+Gate: two stable sessions, `FEASIBILITY=0`, `NoAllocationTest` green, then `-Droatz.tickbus=true` without shadow. RULE_DIFF must match HUD `drop=` lines.
 
 ## Related
 
