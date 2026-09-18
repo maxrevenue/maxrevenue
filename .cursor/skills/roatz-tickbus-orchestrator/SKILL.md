@@ -36,6 +36,15 @@ Read and follow the full implementation spec verbatim:
 | `-Droatz.tickbus.shadow=true` | Orchestrator logs only; legacy still runs |
 | `-Droatz.tickbus.rec=<path>` | NDJSON telemetry output |
 | `-Droatz.sidecar=<host>` | Enables sidecar advisor (socket reader TBD) |
+| `-Droatz.sidecar.observe=true` | Sidecar frames observed only — never published to bus |
+
+## Shadow acceptance
+
+Hook order documented in `docs/tickbus-wire-contract.md` (orchestrator-first after vitals).
+
+Verdict tool: `./gradlew goldenDiff -Psession=/path/session.ndjson` (ignores `LABEL_ONLY` / `FEASIBILITY` stubs in classification).
+
+Definition of done: two shadow sessions, stable category counts, `FEASIBILITY=0`, `NoAllocationTest` green, then `-Droatz.tickbus=true` without shadow.
 
 ## Related
 

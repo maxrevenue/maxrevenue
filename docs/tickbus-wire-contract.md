@@ -1,5 +1,16 @@
 # TickBus / EchoForge sidecar wire contract
 
+## Tick hook order (shadow baseline)
+
+In `CombatScript.onTick`, ordering is fixed:
+
+1. Vitals refresh (`readLatestHitsplat`, `refreshPvpVitals`, `noteLocalHpDrop`)
+2. **`TickBusHooks.evaluateEarly`** — orchestrator evaluates on **pre-legacy** state
+3. Legacy monolith (auto-prayer, NH, spec dumps, …) when `-Droatz.tickbus.shadow=true`
+4. **`publishState`** → `TickBusHooks.recordShadowLegacy` pairs legacy `lastAction` with the orch NDJSON line
+
+If the orchestrator ran after legacy dispatch, golden diffs would show ordering artifacts (HP/prayer already mutated), not logic bugs.
+
 Cross-JVM contract between the Java 11 RoatzBot agent and the Java 17 EchoForge sidecar.
 
 ## Intent freshness (TTL)

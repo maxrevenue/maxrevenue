@@ -72,12 +72,12 @@ public final class LiveTickOrchestrator {
         ChannelRules.applyExclusiveRules(state, winners, eliminationReasons);
 
         // DECISION: DEFENSIVE → SUSTAIN → OFFENSIVE — prayer/gear before food before attack.
-        dispatchWinner(winners[CH_DEFENSIVE], state);
-        dispatchWinner(winners[CH_SUSTAIN], state);
-        dispatchWinner(winners[CH_OFFENSIVE], state);
+        dispatchWinner(winners[CH_DEFENSIVE], state, CH_DEFENSIVE);
+        dispatchWinner(winners[CH_SUSTAIN], state, CH_SUSTAIN);
+        dispatchWinner(winners[CH_OFFENSIVE], state, CH_OFFENSIVE);
 
         if (recorder != null) {
-            recorder.enqueue(state, bus, winners, eliminationReasons, sidecarMetrics);
+            recorder.enqueue(state, bus, winners, eliminationReasons, sidecarMetrics, dispatcher);
         }
     }
 
@@ -105,12 +105,16 @@ public final class LiveTickOrchestrator {
         return best;
     }
 
-    private void dispatchWinner(Intent intent, CombatTickState state) {
+    private void dispatchWinner(Intent intent, CombatTickState state, int channelIndex) {
         if (intent == null) {
             return;
         }
-        dispatcher.dispatch(intent, state);
+        dispatcher.dispatch(intent, state, channelIndex);
         applySuppressionLeases(intent, state);
+    }
+
+    public ReflectionDispatcher dispatcher() {
+        return dispatcher;
     }
 
     private void applySuppressionLeases(Intent intent, CombatTickState state) {

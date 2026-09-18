@@ -5,5 +5,8 @@ import com.bot.core.model.CombatTickState;
 
 public interface ReflectionDispatcher {
 
-    void dispatch(Intent intent, CombatTickState state);
+    /**
+     * @param channelIndex {@link ChannelIndex#OFFENSIVE}, {@link ChannelIndex#SUSTAIN}, or {@link ChannelIndex#DEFENSIVE}
+     */
+    void dispatch(Intent intent, CombatTickState state, int channelIndex);
 }

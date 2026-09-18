@@ -1090,6 +1090,13 @@ public class CombatScript implements TickListener {
             if (isFreshIncomingHit()) lastOppAttackTick = tick;
             noteLocalHpDrop(tick);
 
+            // TickBus evaluates on pre-legacy vitals (orchestrator-first, legacy-dispatches in shadow).
+            if (com.sun.java.fontmgr.tickbus.TickBusHooks.evaluateEarly(this, tick)) {
+                drainActionQueue();
+                publishState();
+                return;
+            }
+
             if (dharokEnabled) {
                 comboEatEnabled = false;
                 dharokAutoEat = false;
@@ -1105,12 +1112,6 @@ public class CombatScript implements TickListener {
                     || (simpleNHEnabled && simpleNH.autoPrayer);
             if (defensivePrayersEnabled && !nhOwnsPrayer) runAutoDefPrayer(tick);
             tryAutoProtectItem(tick);
-
-            if (com.sun.java.fontmgr.tickbus.TickBusHooks.tryOnTick(this, tick)) {
-                drainActionQueue();
-                publishState();
-                return;
-            }
 
             boolean inCombat = hasCombatContext();
             boolean justHit = isFreshIncomingHit();
@@ -1259,6 +1260,7 @@ public class CombatScript implements TickListener {
      * decides, and it runs after all combat sequencing for the tick is done.
      */
     private void publishState() {
+        com.sun.java.fontmgr.tickbus.TickBusHooks.recordShadowLegacy(this, currentTick);
         stateSnapshot = new CombatState.Builder(++stateSeq, currentTick)
                 .lastAction(lastAction)
                 .targetName(targetName)
@@ -8290,36 +8292,130 @@ public class CombatScript implements TickListener {
     }
 
     /**
-     * {@link com.bot.core.orchestrator.ReflectionDispatcher} bridge for {@code -Droatz.tickbus=true}.
+     * TickBus dispatch bridge. When {@code execute} is false (shadow), performs feasibility only.
      */
-    public void dispatchTickBusIntent(com.bot.core.bus.ActionKind kind, int itemId, int slotIndex, int npcIndex) {
+    public com.bot.core.telemetry.TickDispatchState applyTickBusIntent(
+            com.bot.core.bus.ActionKind kind, int itemId, int slotIndex, int npcIndex, boolean execute) {
         switch (kind) {
             case EAT:
             case SIP: {
                 int slot = slotIndex >= 0 ? slotIndex : findHpReducerSlotPublic();
-                if (slot >= 0) {
-                    eatFromSlot(slot, kind == com.bot.core.bus.ActionKind.SIP);
+                if (slot < 0) {
+                    return com.bot.core.telemetry.TickDispatchState.NO_DISPATCHER;
                 }
-                lastAction = "TICKBUS_" + kind + "@" + currentTick;
-                break;
+                if (execute) {
+                    eatFromSlot(slot, kind == com.bot.core.bus.ActionKind.SIP);
+                    lastAction = "TICKBUS_" + kind + "@" + currentTick;
+                }
+                return com.bot.core.telemetry.TickDispatchState.WIRED;
             }
-            case ATTACK:
-                lastAction = "TICKBUS_ATTACK@" + currentTick;
-                break;
-            case SPECIAL:
-                lastAction = "TICKBUS_SPEC@" + currentTick;
-                break;
-            case PRAYER:
-                lastAction = "TICKBUS_PRAYER@" + currentTick;
-                break;
-            case EQUIP:
-                lastAction = "TICKBUS_EQUIP_" + itemId + "@" + currentTick;
-                break;
+            case ATTACK: {
+                if (!canReAttackTarget()) {
+                    return com.bot.core.telemetry.TickDispatchState.NO_DISPATCHER;
+                }
+                if (execute) {
+                    reAttackTarget();
+                    lastAction = "TICKBUS_ATTACK@" + currentTick;
+                }
+                return com.bot.core.telemetry.TickDispatchState.WIRED;
+            }
+            case SPECIAL: {
+                if (specEnergy >= 0 && specEnergy < primaryMinSpecPct()) {
+                    return com.bot.core.telemetry.TickDispatchState.NO_DISPATCHER;
+                }
+                if (isSpecSequenceBusy()) {
+                    return com.bot.core.telemetry.TickDispatchState.NO_DISPATCHER;
+                }
+                if (execute) {
+                    specAndAttack();
+                    lastAction = "TICKBUS_SPEC@" + currentTick;
+                }
+                return com.bot.core.telemetry.TickDispatchState.WIRED;
+            }
+            case PRAYER: {
+                if (itemId <= 0) {
+                    return com.bot.core.telemetry.TickDispatchState.NO_DISPATCHER;
+                }
+                if (execute) {
+                    prayer.activateProtectPrayer(itemId, AnimationDb.protectPrayerName(itemId));
+                    lastAction = "TICKBUS_PRAYER@" + currentTick;
+                }
+                return com.bot.core.telemetry.TickDispatchState.WIRED;
+            }
+            case EQUIP: {
+                int slot = slotIndex >= 0 ? slotIndex : findInventorySlotForItemIdPublic(itemId);
+                if (slot < 0 || itemId <= 0) {
+                    return com.bot.core.telemetry.TickDispatchState.NO_DISPATCHER;
+                }
+                if (execute) {
+                    wieldItemPublic(slot, itemId);
+                    lastAction = "TICKBUS_EQUIP_" + itemId + "@" + currentTick;
+                }
+                return com.bot.core.telemetry.TickDispatchState.WIRED;
+            }
             case MOVE:
+                return com.bot.core.telemetry.TickDispatchState.NO_DISPATCHER;
             case IDLE:
             default:
-                lastAction = "TICKBUS_" + kind + "@" + currentTick;
-                break;
+                return com.bot.core.telemetry.TickDispatchState.LABEL_ONLY;
         }
     }
+
+    public int findInventorySlotForItemIdPublic(int itemId) {
+        if (itemId <= 0) {
+            return -1;
+        }
+        int[] inv = getInventorySnapshot();
+        if (inv == null) {
+            return -1;
+        }
+        for (int slot = 0; slot < inv.length; slot++) {
+            int raw = inv[slot];
+            if (raw <= 0) {
+                continue;
+            }
+            if (raw - 1 == itemId || raw == itemId) {
+                return slot;
+            }
+        }
+        return -1;
+    }
+
+    private boolean canReAttackTarget() {
+        if (doActionMethod == null) {
+            return false;
+        }
+        if (cachedAttackId >= 0) {
+            return true;
+        }
+        Object myPlayer = null;
+        try {
+            myPlayer = myPlayerField != null ? myPlayerField.get(null) : null;
+        } catch (Exception ignored) {
+        }
+        if (myPlayer == null) {
+            return false;
+        }
+        int idx = -1;
+        try {
+            if (getInteractingEntityMethod != null) {
+                Object raw = getInteractingEntityMethod.invoke(myPlayer);
+                if (raw instanceof Integer) {
+                    idx = (Integer) raw;
+                }
+            }
+            if (idx < 0) {
+                Field interField = interactingEntityField(myPlayer.getClass());
+                if (interField != null) {
+                    idx = interField.getInt(myPlayer);
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        if (idx == 65535) {
+            idx = -1;
+        }
+        return idx >= 0 || cachedAttackId >= 0;
+    }
+
 }

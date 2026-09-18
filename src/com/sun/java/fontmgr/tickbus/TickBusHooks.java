@@ -11,9 +11,11 @@ public final class TickBusHooks {
     }
 
     /**
-     * @return {@code true} when caller should skip legacy combat dispatch for this tick.
+     * Runs the orchestrator on pre-legacy vitals. In shadow mode legacy combat still runs afterward.
+     *
+     * @return {@code true} when legacy combat tail should be skipped (tickbus owns dispatch).
      */
-    public static boolean tryOnTick(CombatScript script, int tick) {
+    public static boolean evaluateEarly(CombatScript script, int tick) {
         if (!LiveTickOrchestrator.ENABLED) {
             return false;
         }
@@ -27,6 +29,18 @@ public final class TickBusHooks {
                 }
             }
         }
-        return local.onTick(script, tick);
+        local.evaluateEarly(script, tick);
+        return !LiveTickOrchestrator.SHADOW;
+    }
+
+    /** After legacy sequencing; pairs {@code lastAction} with the orchestrator orch line. */
+    public static void recordShadowLegacy(CombatScript script, int tick) {
+        if (!LiveTickOrchestrator.ENABLED || !LiveTickOrchestrator.SHADOW) {
+            return;
+        }
+        TickBusIntegration local = integration;
+        if (local != null) {
+            local.recordLegacyTail(script, tick);
+        }
     }
 }

@@ -19,6 +19,11 @@ public final class AsyncSidecarAdvisor implements Advisor {
     public static boolean enabled() {
         return System.getProperty("roatz.sidecar") != null;
     }
+
+    /** Shadow-of-shadow: observe sidecar frames without publishing to the bus. */
+    public static boolean observeOnly() {
+        return Boolean.getBoolean("roatz.sidecar.observe");
+    }
     private static final long UNHEALTHY_LAG_TICKS = 5L;
 
     private final int advisorOrdinal;
@@ -110,6 +115,9 @@ public final class AsyncSidecarAdvisor implements Advisor {
             }
         } else if (metrics != null) {
             metrics.noteMasklessIntent();
+        }
+        if (observeOnly()) {
+            return;
         }
         intentPool.beginEvaluate();
         Intent intent = intentPool.obtain(

@@ -20,6 +20,11 @@ public final class TickRecord {
     public final int[] winnerRank = new int[3];
     public final int[] winnerAdvisor = new int[3];
     public final EliminationReason[] channelDropReason = new EliminationReason[3];
+    public final int[] dispatchStateOrdinal = new int[3];
+
+    /** {@code 0} = orchestrator snapshot, {@code 1} = legacy tail (shadow diff). */
+    public int recordKind;
+    public String legacyAction;
 
     public void reset() {
         tickIndex = 0L;
@@ -29,11 +34,14 @@ public final class TickRecord {
         sidecarAckLag = 0L;
         sidecarHealthy = true;
         recordsDropped = 0;
+        recordKind = 0;
+        legacyAction = null;
         for (int i = 0; i < 3; i++) {
             winnerKind[i] = null;
             winnerRank[i] = 0;
             winnerAdvisor[i] = -1;
             channelDropReason[i] = EliminationReason.NONE;
+            dispatchStateOrdinal[i] = TickDispatchState.NO_DISPATCHER.ordinal();
         }
     }
 }

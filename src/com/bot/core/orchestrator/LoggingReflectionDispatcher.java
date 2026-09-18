@@ -9,7 +9,7 @@ public final class LoggingReflectionDispatcher implements ReflectionDispatcher {
     public int dispatchCount;
 
     @Override
-    public void dispatch(Intent intent, CombatTickState state) {
+    public void dispatch(Intent intent, CombatTickState state, int channelIndex) {
         if (intent != null) {
             dispatchCount++;
         }

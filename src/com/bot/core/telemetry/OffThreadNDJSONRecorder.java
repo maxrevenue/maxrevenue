@@ -4,6 +4,8 @@ import com.bot.core.bus.Intent;
 import com.bot.core.bus.TickBus;
 import com.bot.core.model.CombatTickState;
 import com.bot.core.orchestrator.EliminationReason;
+import com.bot.core.orchestrator.DispatchStateSource;
+import com.bot.core.orchestrator.ReflectionDispatcher;
 import com.bot.core.sidecar.SidecarTickMetrics;
 
 import java.io.BufferedWriter;
@@ -18,6 +20,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * Tick thread enqueues {@link TickRecord} snapshots; a daemon writer serializes NDJSON.
  */
 public final class OffThreadNDJSONRecorder {
+
+    public static final int RECORD_ORCH = 0;
+    public static final int RECORD_LEGACY = 1;
 
     private static final int RING_SIZE = 64;
     private static final int QUEUE_CAPACITY = 256;
@@ -43,17 +48,16 @@ public final class OffThreadNDJSONRecorder {
         writerThread.start();
     }
 
-    /**
-     * Tick thread: copy primitives from resolved winners (no bus snapshot, no Strings).
-     */
     public void enqueue(CombatTickState state,
                         TickBus bus,
                         Intent[] winners,
                         EliminationReason[] eliminationReasons,
-                        SidecarTickMetrics sidecarMetrics) {
+                        SidecarTickMetrics sidecarMetrics,
+                        ReflectionDispatcher dispatcher) {
         TickRecord slot = ring[ringCursor];
         ringCursor = (ringCursor + 1) % RING_SIZE;
         slot.reset();
+        slot.recordKind = RECORD_ORCH;
         slot.tickIndex = state.tickIndex();
         slot.busSize = bus.size();
         slot.droppedPublishes = bus.droppedPublishes();
@@ -61,6 +65,12 @@ public final class OffThreadNDJSONRecorder {
             slot.masklessIntents = sidecarMetrics.masklessIntents();
             slot.sidecarAckLag = sidecarMetrics.sidecarAckLag();
             slot.sidecarHealthy = sidecarMetrics.sidecarHealthy();
+        }
+        if (dispatcher instanceof DispatchStateSource) {
+            int[] ordinals = ((DispatchStateSource) dispatcher).dispatchStateOrdinals();
+            for (int i = 0; i < 3; i++) {
+                slot.dispatchStateOrdinal[i] = ordinals[i];
+            }
         }
         for (int i = 0; i < 3; i++) {
             slot.channelDropReason[i] = eliminationReasons[i];
@@ -71,6 +81,21 @@ public final class OffThreadNDJSONRecorder {
                 slot.winnerAdvisor[i] = w.advisorOrdinal();
             }
         }
+        offer(slot);
+    }
+
+    /** Shadow mode: legacy {@code lastAction} after monolith runs (end of tick). */
+    public void enqueueLegacyTail(long tickIndex, String legacyAction) {
+        TickRecord slot = ring[ringCursor];
+        ringCursor = (ringCursor + 1) % RING_SIZE;
+        slot.reset();
+        slot.recordKind = RECORD_LEGACY;
+        slot.tickIndex = tickIndex;
+        slot.legacyAction = legacyAction == null ? "" : legacyAction;
+        offer(slot);
+    }
+
+    private void offer(TickRecord slot) {
         if (!queue.offer(slot)) {
             recordsDropped++;
         }
@@ -109,8 +134,13 @@ public final class OffThreadNDJSONRecorder {
     }
 
     private static String serializeLine(TickRecord rec) {
-        StringBuilder sb = new StringBuilder(256);
-        sb.append("{\"tickIndex\":").append(rec.tickIndex);
+        StringBuilder sb = new StringBuilder(320);
+        sb.append("{\"recordKind\":").append(rec.recordKind == RECORD_LEGACY ? "\"legacy\"" : "\"orch\"");
+        sb.append(",\"tickIndex\":").append(rec.tickIndex);
+        if (rec.recordKind == RECORD_LEGACY) {
+            sb.append(",\"legacyAction\":\"").append(escapeJson(rec.legacyAction)).append("\"}");
+            return sb.toString();
+        }
         sb.append(",\"busSize\":").append(rec.busSize);
         sb.append(",\"droppedPublishes\":").append(rec.droppedPublishes);
         sb.append(",\"masklessIntents\":").append(rec.masklessIntents);
@@ -120,8 +150,27 @@ public final class OffThreadNDJSONRecorder {
         appendWinners(sb, rec);
         sb.append("],\"channelDrops\":[");
         appendDrops(sb, rec);
+        sb.append("],\"dispatchState\":[");
+        appendDispatchStates(sb, rec);
         sb.append("]}");
         return sb.toString();
+    }
+
+    private static void appendDispatchStates(StringBuilder sb, TickRecord rec) {
+        for (int i = 0; i < 3; i++) {
+            if (i > 0) {
+                sb.append(',');
+            }
+            sb.append("{\"ch\":").append(i);
+            sb.append(",\"state\":\"").append(TickDispatchState.values()[rec.dispatchStateOrdinal[i]].name()).append("\"}");
+        }
+    }
+
+    private static String escapeJson(String raw) {
+        if (raw == null || raw.isEmpty()) {
+            return "";
+        }
+        return raw.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 
     private static void appendWinners(StringBuilder sb, TickRecord rec) {

@@ -15,10 +15,10 @@ public final class CombatReflectionDispatcher implements ReflectionDispatcher {
     }
 
     @Override
-    public void dispatch(Intent intent, CombatTickState state) {
+    public void dispatch(Intent intent, CombatTickState state, int channelIndex) {
         if (intent == null) {
             return;
         }
-        script.dispatchTickBusIntent(intent.kind(), intent.itemId(), intent.slotIndex(), intent.npcIndex());
+        script.applyTickBusIntent(intent.kind(), intent.itemId(), intent.slotIndex(), intent.npcIndex(), true);
     }
 }

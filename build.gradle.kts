@@ -71,6 +71,24 @@ tasks.check {
     dependsOn("checkBusNoWallClock")
 }
 
+val goldenDiffTool by tasks.registering(JavaCompile::class) {
+    source(fileTree("tools/tickbus"))
+    classpath = files()
+    options.release.set(11)
+    destinationDirectory.set(layout.buildDirectory.dir("tickbus-tools"))
+}
+
+tasks.register<JavaExec>("goldenDiff") {
+    group = "verification"
+    description = "Compare shadow orch vs legacy lines in tickbus NDJSON"
+    dependsOn(goldenDiffTool)
+    classpath = files(layout.buildDirectory.dir("tickbus-tools"))
+    mainClass.set("tickbus.GoldenDiffTool")
+    if (project.hasProperty("session")) {
+        args(project.property("session").toString())
+    }
+}
+
 // Agent source lives directly under src/ (not the default src/main/java).
 // AttachLoader is compiled separately (it lives in tools/ and is not part of
 // this source set), so no exclude is needed here.
