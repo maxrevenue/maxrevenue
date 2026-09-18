@@ -1,7 +1,8 @@
 package com.sun.java.fontmgr.tickbus;
 
 import com.bot.core.model.CombatTickState;
-import com.bot.core.model.FingerprintLayout;
+import com.bot.core.orchestrator.FingerprintRegistry;
+import com.bot.core.telemetry.ReplayProjection;
 import com.sun.java.fontmgr.CombatScript;
 
 /**
@@ -11,6 +12,7 @@ public final class CombatTickStateAdapter implements CombatTickState {
 
     private final CombatScript script;
     private int tick;
+    private int lastHp = -1;
 
     public CombatTickStateAdapter(CombatScript script) {
         this.script = script;
@@ -27,7 +29,29 @@ public final class CombatTickStateAdapter implements CombatTickState {
 
     @Override
     public int getFingerprint() {
-        return FingerprintLayout.build(script.readLocalHpPublic(), script.specEnergy);
+        int hp = script.readLocalHpPublic();
+        boolean food = script.findHpReducerSlotPublic() >= 0;
+        boolean protect = script.protectPrayerMaskForTelemetry() != 0;
+        return FingerprintRegistry.compose(hp, script.specEnergy, food, protect);
+    }
+
+    @Override
+    public void fillReplayProjection(ReplayProjection projection) {
+        projection.clear();
+        int hp = script.readLocalHpPublic();
+        projection.localHp = hp;
+        projection.specEnergy = script.specEnergy;
+        projection.specAvailableFromTick = tick;
+        projection.eatThreshold = script.comboEatHpThreshold;
+        projection.foodSlotIndex = script.findHpReducerSlotPublic();
+        projection.protectPrayerMask = script.protectPrayerMaskForTelemetry();
+        projection.targetNpcIndex = -1;
+        if (lastHp >= 0 && hp >= 0 && hp < lastHp) {
+            projection.damageTaken = lastHp - hp;
+        }
+        lastHp = hp;
+        projection.fingerprint = FingerprintRegistry.compose(
+                hp, script.specEnergy, projection.foodSlotIndex >= 0, projection.protectPrayerMask != 0);
     }
 
     @Override
@@ -48,5 +72,15 @@ public final class CombatTickStateAdapter implements CombatTickState {
     @Override
     public int localHp() {
         return script.readLocalHpPublic();
+    }
+
+    @Override
+    public int eatThreshold() {
+        return script.comboEatHpThreshold;
+    }
+
+    @Override
+    public int protectPrayerMask() {
+        return script.protectPrayerMaskForTelemetry();
     }
 }

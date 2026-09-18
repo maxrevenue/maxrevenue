@@ -8234,6 +8234,11 @@ public class CombatScript implements TickListener {
     int activeProtectPrayer() { return activeProtectPrayer; }
     void activeProtectPrayer(int v) { activeProtectPrayer = v; }
 
+    /** TickBus replay projection — overhead protect active (not offensive prayers). */
+    public int protectPrayerMaskForTelemetry() {
+        return activeProtectPrayer >= 0 ? 1 : 0;
+    }
+
     int lastProtectSendTick() { return lastProtectSendTick; }
     void lastProtectSendTick(int v) { lastProtectSendTick = v; }
 

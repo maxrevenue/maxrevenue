@@ -30,14 +30,14 @@ public final class CombatAdvisor implements Advisor {
         }
         if (script.specEnergy >= script.primaryMinSpecPct()) {
             Intent spec = pool.obtain(ActionKind.SPECIAL, ActionPriority.OFFENSIVE, 0, 0, 0,
-                    state.tickIndex(), 1, 0, 0);
+                    state.tickIndex(), 1, 0, 0, com.bot.core.bus.IntentBylines.COMBAT_SPEC_LEGACY);
             if (spec != null) {
                 bus.publish(spec);
                 pool.release();
             }
         }
         Intent attack = pool.obtain(ActionKind.ATTACK, ActionPriority.BACKGROUND, 0, 0, 0,
-                state.tickIndex(), 1, 0, 0);
+                state.tickIndex(), 1, 0, 0, com.bot.core.bus.IntentBylines.COMBAT_ATTACK_LEGACY);
         if (attack != null) {
             bus.publish(attack);
             pool.release();

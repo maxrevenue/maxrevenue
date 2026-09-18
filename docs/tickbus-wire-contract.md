@@ -32,7 +32,9 @@ Double-buffer rules (tick thread): **fill completely, then** assign {@code visib
 
 Attach agent as today ({@code launch.ps1} unchanged). Legacy monolith still dispatches; orchestrator records {@code orch} lines and pairs legacy via hook order above.
 
-**Parity gate:** {@code goldenDiff} compares orchestrator output (transcribed advisors = **candidate**) against **legacy monolith actual dispatch** ({@code legacyAction} from {@code recordShadowLegacy} at {@code publishState}). Legacy is the oracle; nothing in the diff re-runs advisors in isolation.
+**Parity gate definition:** {@code goldenDiff} classifications are computed solely from resolved channel winners vs the recorded {@code legacyAction} per tick. {@code UNCOMPARABLE} ticks ({@code NO_OPINION}, {@code OUT_OF_VOCAB}) are excluded from all rates and reported as raw counts only. Outcome counters and sidecar latency metrics exist in the telemetry schema for post-parity analysis and may not appear in, influence, or gate any classification category. The oracle is the legacy monolith's actual dispatch; transcribed advisors are the candidate under test, never a reference.
+
+**Oracle clarification:** The parity oracle is the legacy monolith's actual dispatch ({@code recordShadowLegacy} at {@code publishState}); transcribed advisors are the candidate under test and are never used as a reference. Structural enforcement: {@code com.bot.core.golden.ParityInput} — the classifier entry point accepts nothing else.
 
 **Strategic risk:** the architecture is not the open question — the harness must distinguish *“advisors match the monolith”* from *“the harness cannot see clearly enough to know.”* NDJSON schema v2 fields (state projection, bus intent inputs, overflow counters, {@code UNCOMPARABLE}) exist to buy that discrimination. **First shadow capture freezes the telemetry schema** — land schema changes before capture or recapture.
 

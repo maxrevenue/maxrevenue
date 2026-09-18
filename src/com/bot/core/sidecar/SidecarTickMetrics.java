@@ -9,12 +9,16 @@ public final class SidecarTickMetrics {
     private long sidecarAckLag;
     private boolean sidecarHealthy;
     private int wireFrameRejects;
+    private int staleTickDrops;
+    private int staleStateDrops;
 
     public void beginTick() {
         masklessIntents = 0;
         sidecarAckLag = 0L;
         sidecarHealthy = true;
         wireFrameRejects = 0;
+        staleTickDrops = 0;
+        staleStateDrops = 0;
     }
 
     public void noteMasklessIntent() {
@@ -48,5 +52,25 @@ public final class SidecarTickMetrics {
 
     public int wireFrameRejects() {
         return wireFrameRejects;
+    }
+
+    public int wireRejects() {
+        return wireFrameRejects;
+    }
+
+    public void noteStaleTickDrop() {
+        staleTickDrops++;
+    }
+
+    public int staleTickDrops() {
+        return staleTickDrops;
+    }
+
+    public void noteStaleStateDrop() {
+        staleStateDrops++;
+    }
+
+    public int staleStateDrops() {
+        return staleStateDrops;
     }
 }

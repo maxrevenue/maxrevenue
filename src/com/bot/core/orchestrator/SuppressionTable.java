@@ -67,6 +67,20 @@ public final class SuppressionTable {
         }
     }
 
+    /**
+     * Early-release inputs from {@link com.bot.core.telemetry.ReplayProjection} (legacy eat threshold transcription).
+     */
+    public void onReleaseInputs(int localHp, int eatThreshold, int protectPrayerMask, long tickIndex) {
+        onVitals(localHp, tickIndex);
+        if (localHp >= 0 && eatThreshold >= 0 && localHp > eatThreshold) {
+            expireNow(ActionKind.EAT, tickIndex);
+            expireNow(ActionKind.SIP, tickIndex);
+        }
+        if (protectPrayerMask == 0) {
+            onPrayerInactive(tickIndex);
+        }
+    }
+
     /** PRAYER flick lease: release when prayer no longer active (fingerprint bit TBD). */
     public void onPrayerInactive(long tickIndex) {
         expireNow(ActionKind.PRAYER, tickIndex);

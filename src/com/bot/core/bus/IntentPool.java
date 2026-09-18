@@ -36,13 +36,27 @@ public final class IntentPool {
                          int ttlTicks,
                          int precondHash,
                          int precondMask) {
+        return obtain(kind, priority, itemId, npcIndex, slotIndex, bornTick, ttlTicks,
+                precondHash, precondMask, IntentBylines.NONE);
+    }
+
+    public Intent obtain(ActionKind kind,
+                         ActionPriority priority,
+                         int itemId,
+                         int npcIndex,
+                         int slotIndex,
+                         long bornTick,
+                         int ttlTicks,
+                         int precondHash,
+                         int precondMask,
+                         int bylineId) {
         if (cursor >= pool.length) {
             return null;
         }
         Intent intent = pool[cursor++];
         checkedOut++;
         return intent.configure(kind, priority, itemId, npcIndex, slotIndex, advisorOrdinal,
-                bornTick, ttlTicks, precondHash, precondMask);
+                bornTick, ttlTicks, precondHash, precondMask, bylineId);
     }
 
     /** Call at the start of each advisor evaluate pass (orchestrator clears bus, pool resets here). */

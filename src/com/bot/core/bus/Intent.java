@@ -16,6 +16,7 @@ public final class Intent {
     private int precondHash;
     private int precondMask;
     private int rank;
+    private int bylineId;
 
     Intent() {
         reset();
@@ -33,6 +34,7 @@ public final class Intent {
         precondHash = 0;
         precondMask = 0;
         rank = 0;
+        bylineId = IntentBylines.NONE;
     }
 
     Intent configure(ActionKind kind,
@@ -45,6 +47,21 @@ public final class Intent {
                      int ttlTicks,
                      int precondHash,
                      int precondMask) {
+        return configure(kind, priority, itemId, npcIndex, slotIndex, advisorOrdinal,
+                bornTick, ttlTicks, precondHash, precondMask, IntentBylines.NONE);
+    }
+
+    Intent configure(ActionKind kind,
+                     ActionPriority priority,
+                     int itemId,
+                     int npcIndex,
+                     int slotIndex,
+                     int advisorOrdinal,
+                     long bornTick,
+                     int ttlTicks,
+                     int precondHash,
+                     int precondMask,
+                     int bylineId) {
         this.kind = kind;
         this.priority = priority;
         this.itemId = itemId;
@@ -56,7 +73,12 @@ public final class Intent {
         this.precondHash = precondHash;
         this.precondMask = precondMask;
         this.rank = (priority.getWeight() << 8) | (128 - this.advisorOrdinal);
+        this.bylineId = bylineId;
         return this;
+    }
+
+    public int bylineId() {
+        return bylineId;
     }
 
     public int rank() {

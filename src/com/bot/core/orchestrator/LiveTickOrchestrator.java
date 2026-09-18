@@ -6,6 +6,7 @@ import com.bot.core.bus.Channel;
 import com.bot.core.bus.Intent;
 import com.bot.core.bus.TickBus;
 import com.bot.core.model.CombatTickState;
+import com.bot.core.telemetry.ReplayProjection;
 import com.bot.core.sidecar.SidecarTickMetrics;
 import com.bot.core.orchestrator.DispatchStateSource;
 import com.bot.core.telemetry.OffThreadNDJSONRecorder;
@@ -33,6 +34,7 @@ public final class LiveTickOrchestrator {
 
     private final Intent[] winners;
     private final EliminationReason[] eliminationReasons;
+    private final ReplayProjection replayScratch;
 
     public LiveTickOrchestrator(Advisor[] advisors,
                                   ReflectionDispatcher dispatcher,
@@ -46,6 +48,7 @@ public final class LiveTickOrchestrator {
         this.suppression = new SuppressionTable();
         this.winners = new Intent[3];
         this.eliminationReasons = new EliminationReason[3];
+        this.replayScratch = new ReplayProjection();
     }
 
     public TickBus bus() {
@@ -57,7 +60,9 @@ public final class LiveTickOrchestrator {
     }
 
     public void onTick(CombatTickState state) {
-        suppression.onVitals(state.localHp(), state.tickIndex());
+        state.fillReplayProjection(replayScratch);
+        suppression.onReleaseInputs(replayScratch.localHp, replayScratch.eatThreshold,
+                replayScratch.protectPrayerMask, state.tickIndex());
         bus.beginTick(state.tickIndex());
         bus.clear();
         if (sidecarMetrics != null) {
@@ -88,7 +93,10 @@ public final class LiveTickOrchestrator {
         OverlayPublisher.publish(state, resolution, suppression, sidecarMetrics);
 
         if (recorder != null) {
-            recorder.enqueue(state, bus, winners, eliminationReasons, sidecarMetrics, dispatcher);
+            recorder.enqueue(state, replayScratch, bus, winners, eliminationReasons, sidecarMetrics, dispatcher);
+            if (state.tickIndex() % 50L == 0L) {
+                recorder.enqueuePeriodic(state.tickIndex());
+            }
         }
     }
 

@@ -30,6 +30,7 @@ public final class AsyncSidecarAdvisor implements Advisor {
     private final IntentPool intentPool;
     private final SidecarTickMetrics metrics;
     private final SidecarFrameCodec codec;
+    private SidecarArrivalLagHistogram arrivalLagHistogram;
     private final SidecarPayload[] payloadRing;
     private int payloadRingCursor;
 
@@ -54,9 +55,16 @@ public final class AsyncSidecarAdvisor implements Advisor {
     /**
      * Reader thread: version-prefixed frame. Rejects log + increment {@link SidecarTickMetrics} (watchdog separate).
      */
-    public void ingestWireFrame(byte[] source, int offset, int length) {
+    public void setArrivalLagHistogram(SidecarArrivalLagHistogram histogram) {
+        this.arrivalLagHistogram = histogram;
+    }
+
+    public void ingestWireFrame(byte[] source, int offset, int length, long readerTickIndex) {
         SidecarPayload parsed = payloadRing[payloadRingCursor];
         if (codec.tryDecodeWireFrame(source, offset, length, parsed, metrics)) {
+            if (arrivalLagHistogram != null) {
+                arrivalLagHistogram.record(readerTickIndex, parsed.evalTick);
+            }
             offerPayload(parsed);
         }
     }
@@ -139,7 +147,8 @@ public final class AsyncSidecarAdvisor implements Advisor {
                 payload.evalTick,
                 payload.ttlTicks,
                 payload.precondHash,
-                payload.precondMask);
+                payload.precondMask,
+                com.bot.core.bus.IntentBylines.SIDECAR_WIRE);
         if (intent != null) {
             bus.publish(intent);
             intentPool.release();

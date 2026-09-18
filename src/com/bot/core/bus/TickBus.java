@@ -11,14 +11,14 @@ public final class TickBus {
     private int count;
     private long currentTick;
     private int droppedPublishes;
-    private int maxRankDropped;
+    private int maxRankDropped = -1;
 
     public TickBus() {
         intents = new Intent[CAPACITY];
         count = 0;
         currentTick = 0L;
         droppedPublishes = 0;
-        maxRankDropped = 0;
+        maxRankDropped = -1;
     }
 
     public void beginTick(long tickIndex) {
@@ -28,7 +28,7 @@ public final class TickBus {
     public void clear() {
         count = 0;
         droppedPublishes = 0;
-        maxRankDropped = 0;
+        maxRankDropped = -1;
     }
 
     public long currentTick() {

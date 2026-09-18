@@ -73,7 +73,7 @@ tasks.check {
 
 val goldenDiffTool by tasks.registering(JavaCompile::class) {
     source(fileTree("tools/tickbus"))
-    classpath = files()
+    classpath = sourceSets.main.get().compileClasspath
     options.release.set(11)
     destinationDirectory.set(layout.buildDirectory.dir("tickbus-tools"))
 }
@@ -81,8 +81,8 @@ val goldenDiffTool by tasks.registering(JavaCompile::class) {
 tasks.register<JavaExec>("goldenDiff") {
     group = "verification"
     description = "Compare shadow orch vs legacy lines in tickbus NDJSON"
-    dependsOn(goldenDiffTool)
-    classpath = files(layout.buildDirectory.dir("tickbus-tools"))
+    dependsOn(goldenDiffTool, "classes")
+    classpath = files(layout.buildDirectory.dir("tickbus-tools")) + sourceSets.main.get().runtimeClasspath
     mainClass.set("tickbus.GoldenDiffTool")
     if (project.hasProperty("session")) {
         args(project.property("session").toString())

@@ -3,6 +3,7 @@ package com.sun.java.fontmgr.tickbus;
 import com.bot.core.bus.Advisor;
 import com.bot.core.orchestrator.LiveTickOrchestrator;
 import com.bot.core.sidecar.AsyncSidecarAdvisor;
+import com.bot.core.sidecar.SidecarArrivalLagHistogram;
 import com.bot.core.sidecar.SidecarTickMetrics;
 import com.bot.core.telemetry.OffThreadNDJSONRecorder;
 import com.sun.java.fontmgr.CombatScript;
@@ -25,18 +26,24 @@ public final class TickBusIntegration {
     private final CombatTickStateAdapter stateAdapter;
     private final OffThreadNDJSONRecorder recorder;
     private final int[] dispatchStateOrdinals;
+    private final SidecarArrivalLagHistogram arrivalLagHistogram;
 
     public TickBusIntegration(CombatScript script) {
         SidecarTickMetrics metrics = new SidecarTickMetrics();
+        arrivalLagHistogram = new SidecarArrivalLagHistogram();
         dispatchStateOrdinals = FeasibilityRecordingDispatcher.newDispatchStateBuffer();
         boolean execute = !LiveTickOrchestrator.SHADOW;
         FeasibilityRecordingDispatcher dispatcher =
                 new FeasibilityRecordingDispatcher(script, execute, dispatchStateOrdinals);
-        Advisor sidecar = new AsyncSidecarAdvisor(0, metrics);
+        AsyncSidecarAdvisor sidecar = new AsyncSidecarAdvisor(0, metrics);
+        sidecar.setArrivalLagHistogram(arrivalLagHistogram);
         Advisor sustain = new SustainAdvisor(script, 1);
         Advisor combat = new CombatAdvisor(script, 2);
         Advisor[] advisors = new Advisor[]{sidecar, sustain, combat};
         recorder = createRecorder();
+        if (recorder != null) {
+            recorder.setArrivalLagHistogram(arrivalLagHistogram);
+        }
         stateAdapter = new CombatTickStateAdapter(script);
         orchestrator = new LiveTickOrchestrator(advisors, dispatcher, recorder, metrics);
     }

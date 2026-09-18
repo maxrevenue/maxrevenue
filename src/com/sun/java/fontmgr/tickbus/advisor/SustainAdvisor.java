@@ -32,7 +32,7 @@ public final class SustainAdvisor implements Advisor {
         int hp = script.readLocalHpPublic();
         if (hp >= 0 && hp <= script.comboEatHpThreshold) {
             Intent eat = pool.obtain(ActionKind.EAT, ActionPriority.CRITICAL, 0, 0, slot,
-                    state.tickIndex(), 1, 0, 0);
+                    state.tickIndex(), 1, 0, 0, com.bot.core.bus.IntentBylines.SUSTAIN_EAT_LEGACY);
             if (eat != null) {
                 bus.publish(eat);
                 pool.release();
