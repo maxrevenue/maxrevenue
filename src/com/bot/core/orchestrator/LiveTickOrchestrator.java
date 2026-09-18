@@ -57,6 +57,7 @@ public final class LiveTickOrchestrator {
     }
 
     public void onTick(CombatTickState state) {
+        suppression.onVitals(state.localHp(), state.tickIndex());
         bus.beginTick(state.tickIndex());
         bus.clear();
         if (sidecarMetrics != null) {

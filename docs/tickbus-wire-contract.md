@@ -32,13 +32,17 @@ Double-buffer rules (tick thread): **fill completely, then** assign {@code visib
 
 Attach agent as today ({@code launch.ps1} unchanged). Legacy monolith still dispatches; orchestrator records {@code orch} lines and pairs legacy via hook order above.
 
+**Parity gate:** {@code goldenDiff} compares orchestrator output (transcribed advisors = **candidate**) against **legacy monolith actual dispatch** ({@code legacyAction} from {@code recordShadowLegacy} at {@code publishState}). Legacy is the oracle; nothing in the diff re-runs advisors in isolation.
+
+**Strategic risk:** the architecture is not the open question — the harness must distinguish *“advisors match the monolith”* from *“the harness cannot see clearly enough to know.”* NDJSON schema v2 fields (state projection, bus intent inputs, overflow counters, {@code UNCOMPARABLE}) exist to buy that discrimination. **First shadow capture freezes the telemetry schema** — land schema changes before capture or recapture.
+
 **Verdict:**
 
 ```text
 ./gradlew goldenDiff -Psession=<path/to/session.ndjson>
 ```
 
-Paste category counts: **MATCH**, **RULE_DIFF**, **PRIORITY_DIFF**, **TIMING_DIFF**, **FEASIBILITY** (tool may ignore {@code LABEL_ONLY} / stub {@code FEASIBILITY} in classification — still report raw counts).
+Paste category counts: **MATCH**, **RULE_DIFF**, **PRIORITY_DIFF**, **TIMING_DIFF**, **FEASIBILITY**, **UNCOMPARABLE** (legacy empty / no opinion / outside captured vocab — excluded from match rates, raw count reported).
 
 **Gate to flip production tickbus (drop shadow):**
 
@@ -78,6 +82,64 @@ Per-intent `precondHash` and `precondMask` (32-bit). Satisfied when:
 
 `precondMask == 0` is unconditional (always satisfied). Unconditional sidecar intents increment `masklessIntents` in telemetry for golden-review scrutiny.
 
-## Sidecar frame (WIRE_V2)
+### Fingerprint field registry
 
-40 bytes big-endian per intent — see `SidecarFrameCodec`.
+| Field | Bit range | Source | Consulted by |
+|---|---|---|---|
+| Local HP | 0–7 (`FingerprintLayout.HP_MASK`) | {@code CombatTickState.localHp()} / adapter | SustainAdvisor, sidecar eat preconds |
+| Spec energy | 16–23 (`FingerprintLayout.SPEC_MASK`) | {@code specEnergyPercent()} | CombatAdvisor spec gate, sidecar |
+
+**Rule:** any new state field consulted by a sidecar intent must be added to this table (or explicitly waived). {@code FingerprintRegistryTest} guards registered fields used in tests.
+
+## TickBus overflow
+
+When the 32-slot bus is full, publish evicts the **lowest rank** only if the incoming intent **strictly outranks** it; otherwise the incoming intent is dropped. Per tick NDJSON records {@code droppedPublishes} and {@code maxRankDropped}. High-priority bursts that still overflow indicate advisor logic bugs (counter spike), not a sort pass.
+
+## Suppression leases
+
+Default durations are applied on dispatch in {@code LiveTickOrchestrator}. Leases expire by tick deadline **or** early release on invalidating vitals:
+
+| Kind | Duration (ticks) | Early release |
+|---|---|---|
+| EAT / SIP | 3 | Local HP **increases** vs previous observed tick ({@code SuppressionTable.onVitals}) |
+| EQUIP | 1 | — |
+| PRAYER | 1 | Prayer inactive (fingerprint bit TBD — {@code onPrayerInactive}) |
+| SPECIAL | until {@code specAvailableFromTick} | — |
+
+Lease-holding despite invalidated state is a bug class — extend this table when adding kinds.
+
+## Dispatch order (orchestrator)
+
+After {@code ChannelRules}: **DEFENSIVE → SUSTAIN → OFFENSIVE** (prayer/gear before food before attack). Source: {@code LiveTickOrchestrator.onTick}.
+
+## NDJSON recorder schema v2 ({@code schemaVersion: 2})
+
+Orchestrator lines ({@code recordKind: "orch"}) include:
+
+- {@code state}: {@code fingerprint}, {@code localHp}, {@code specEnergy}, {@code specAvailableFromTick} — **replay reads, never recomputes client randomness**
+- {@code busIntents[]}: per-intent {@code kind}, {@code priority}, {@code advisor}, {@code rank}, ids/slots, {@code bornTick}, {@code ttlTicks}
+- {@code droppedPublishes}, {@code maxRankDropped}
+- {@code sidecarWireFrameRejects} (increment on wire decode/version reject — log + count, never silent close)
+
+Legacy tail lines unchanged: {@code recordKind: "legacy"}, {@code legacyAction}.
+
+### Pre-shadow checklist (PR #21)
+
+- [x] {@code goldenDiff}: {@code UNCOMPARABLE} bucket
+- [x] Recorder schema v2 (state projection, bus intents, overflow counters, wire reject counter field)
+- [x] Parity gate documented (legacy = oracle)
+- [x] Fingerprint registry table + test
+- [x] Lease early-release (HP recover) + test
+- [x] Intent pool {@code checkedOut()} test after N ticks
+- [ ] **Operator:** shadow capture + paste category counts
+
+## Sidecar frame (WIRE_V1 / WIRE_V2)
+
+Negotiation uses a leading **version byte** ({@code WIRE_V1} 32B / {@code WIRE_V2} 40B). On mismatch or truncated frame: **log, increment {@code sidecarWireFrameRejects}, discard frame** — do not silently close the session. Healthy flag resets on fresh valid payload (observe-only sidecar today).
+
+40-byte big-endian intent body — see `SidecarFrameCodec` ({@code WIRE_V2}).
+
+### TODO (post-shadow / when sidecar socket lands)
+
+- Watchdog **two-threshold** degrade (hysteresis) — sidecar is observe-only during shadow; policy does not affect parity gate yet.
+- Generate {@code ChannelRules} exclusivity doc from a data table (polish).

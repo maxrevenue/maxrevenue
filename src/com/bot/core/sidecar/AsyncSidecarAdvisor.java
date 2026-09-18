@@ -132,6 +132,7 @@ public final class AsyncSidecarAdvisor implements Advisor {
                 payload.precondMask);
         if (intent != null) {
             bus.publish(intent);
+            intentPool.release();
         }
     }
 }

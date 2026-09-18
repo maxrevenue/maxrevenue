@@ -11,12 +11,14 @@ public final class TickBus {
     private int count;
     private long currentTick;
     private int droppedPublishes;
+    private int maxRankDropped;
 
     public TickBus() {
         intents = new Intent[CAPACITY];
         count = 0;
         currentTick = 0L;
         droppedPublishes = 0;
+        maxRankDropped = 0;
     }
 
     public void beginTick(long tickIndex) {
@@ -25,6 +27,8 @@ public final class TickBus {
 
     public void clear() {
         count = 0;
+        droppedPublishes = 0;
+        maxRankDropped = 0;
     }
 
     public long currentTick() {
@@ -33,6 +37,11 @@ public final class TickBus {
 
     public int droppedPublishes() {
         return droppedPublishes;
+    }
+
+    /** Max {@link Intent#rank()} among intents dropped due to bus overflow this tick. */
+    public int maxRankDropped() {
+        return maxRankDropped;
     }
 
     public int size() {
@@ -70,10 +79,17 @@ public final class TickBus {
         }
         // Strictly greater: equal rank keeps the incumbent (advisor registration order).
         if (intent.rank() > lowestRank) {
+            noteDrop(lowestRank);
             intents[lowestIndex] = intent;
-            droppedPublishes++;
         } else {
-            droppedPublishes++;
+            noteDrop(intent.rank());
+        }
+    }
+
+    private void noteDrop(int droppedRank) {
+        droppedPublishes++;
+        if (droppedRank > maxRankDropped) {
+            maxRankDropped = droppedRank;
         }
     }
 

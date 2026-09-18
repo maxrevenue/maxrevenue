@@ -25,6 +25,23 @@ class SuppressionLeaseTest {
     }
 
     @Test
+    void eatLeaseReleasesEarlyWhenHpRecovers() {
+        StubCombatState state = new StubCombatState(0L);
+        state.hp = 35;
+        EatAdvisor eatAdvisor = new EatAdvisor();
+        LoggingReflectionDispatcher dispatcher = new LoggingReflectionDispatcher();
+        LiveTickOrchestrator orchestrator = new LiveTickOrchestrator(
+                new Advisor[]{eatAdvisor}, dispatcher, null, null);
+        orchestrator.onTick(state);
+        assertEquals(1, dispatcher.dispatchCount);
+        assertEquals(3L, orchestrator.suppression().deadlineFor(ActionKind.EAT));
+        state.hp = 60;
+        state.tick = 1L;
+        orchestrator.onTick(state);
+        assertEquals(2, dispatcher.dispatchCount);
+    }
+
+    @Test
     void eatLeaseBlocksReEatForThreeTicks() {
         StubCombatState state = new StubCombatState(0L);
         EatAdvisor eatAdvisor = new EatAdvisor();
@@ -47,8 +64,12 @@ class SuppressionLeaseTest {
         @Override
         public void evaluate(GameState state, TickBus bus) {
             pool.beginEvaluate();
-            bus.publish(pool.obtain(ActionKind.EAT, ActionPriority.CRITICAL, 385, 0, 0,
-                    state.tickIndex(), 2, 0, 0));
+            com.bot.core.bus.Intent eat = pool.obtain(ActionKind.EAT, ActionPriority.CRITICAL, 385, 0, 0,
+                    state.tickIndex(), 2, 0, 0);
+            if (eat != null) {
+                bus.publish(eat);
+                pool.release();
+            }
         }
     }
 
@@ -58,10 +79,14 @@ class SuppressionLeaseTest {
         @Override
         public void evaluate(GameState state, TickBus bus) {
             pool.beginEvaluate();
-            bus.publish(pool.obtain(ActionKind.EAT, ActionPriority.CRITICAL, 385, 0, 0,
-                    state.tickIndex(), 2, 0, 0));
-            bus.publish(pool.obtain(ActionKind.ATTACK, ActionPriority.OFFENSIVE, 0, 0, 0,
-                    state.tickIndex(), 2, 0, 0));
+            com.bot.core.bus.Intent eat = pool.obtain(ActionKind.EAT, ActionPriority.CRITICAL, 385, 0, 0,
+                    state.tickIndex(), 2, 0, 0);
+            bus.publish(eat);
+            pool.release();
+            com.bot.core.bus.Intent atk = pool.obtain(ActionKind.ATTACK, ActionPriority.OFFENSIVE, 0, 0, 0,
+                    state.tickIndex(), 2, 0, 0);
+            bus.publish(atk);
+            pool.release();
         }
     }
 

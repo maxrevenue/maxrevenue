@@ -1,6 +1,7 @@
 package com.sun.java.fontmgr.tickbus;
 
 import com.bot.core.model.CombatTickState;
+import com.bot.core.model.FingerprintLayout;
 import com.sun.java.fontmgr.CombatScript;
 
 /**
@@ -26,16 +27,7 @@ public final class CombatTickStateAdapter implements CombatTickState {
 
     @Override
     public int getFingerprint() {
-        int fp = 0;
-        int hp = script.readLocalHpPublic();
-        if (hp >= 0) {
-            fp |= (hp & 0xFF);
-        }
-        int spec = script.specEnergy;
-        if (spec >= 0) {
-            fp |= (spec & 0xFF) << 16;
-        }
-        return fp;
+        return FingerprintLayout.build(script.readLocalHpPublic(), script.specEnergy);
     }
 
     @Override

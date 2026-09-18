@@ -1,5 +1,6 @@
 package com.bot.core.telemetry;
 
+import com.bot.core.bus.ActionKind;
 import com.bot.core.bus.Intent;
 import com.bot.core.bus.TickBus;
 import com.bot.core.model.CombatTickState;
@@ -61,10 +62,17 @@ public final class OffThreadNDJSONRecorder {
         slot.tickIndex = state.tickIndex();
         slot.busSize = bus.size();
         slot.droppedPublishes = bus.droppedPublishes();
+        slot.maxRankDropped = bus.maxRankDropped();
+        slot.stateFingerprint = state.getFingerprint();
+        slot.localHp = state.localHp();
+        slot.specEnergyPercent = state.specEnergyPercent();
+        slot.specAvailableFromTick = state.specAvailableFromTick();
+        fillBusIntents(slot, bus);
         if (sidecarMetrics != null) {
             slot.masklessIntents = sidecarMetrics.masklessIntents();
             slot.sidecarAckLag = sidecarMetrics.sidecarAckLag();
             slot.sidecarHealthy = sidecarMetrics.sidecarHealthy();
+            slot.sidecarWireFrameRejects = sidecarMetrics.wireFrameRejects();
         }
         if (dispatcher instanceof DispatchStateSource) {
             int[] ordinals = ((DispatchStateSource) dispatcher).dispatchStateOrdinals();
@@ -93,6 +101,26 @@ public final class OffThreadNDJSONRecorder {
         slot.tickIndex = tickIndex;
         slot.legacyAction = legacyAction == null ? "" : legacyAction;
         offer(slot);
+    }
+
+    private static void fillBusIntents(TickRecord slot, TickBus bus) {
+        int n = Math.min(bus.size(), TickRecord.MAX_BUS_INTENTS);
+        slot.busIntentCount = n;
+        for (int i = 0; i < n; i++) {
+            Intent intent = bus.get(i);
+            if (intent == null) {
+                continue;
+            }
+            slot.intentKindOrd[i] = (byte) intent.kind().ordinal();
+            slot.intentPriorityOrd[i] = (byte) intent.priority().ordinal();
+            slot.intentAdvisorOrd[i] = (byte) intent.advisorOrdinal();
+            slot.intentRank[i] = intent.rank();
+            slot.intentItemId[i] = intent.itemId();
+            slot.intentNpcIndex[i] = intent.npcIndex();
+            slot.intentSlotIndex[i] = intent.slotIndex();
+            slot.intentBornTick[i] = intent.bornTick();
+            slot.intentTtlTicks[i] = intent.ttlTicks();
+        }
     }
 
     private void offer(TickRecord slot) {
@@ -134,19 +162,30 @@ public final class OffThreadNDJSONRecorder {
     }
 
     private static String serializeLine(TickRecord rec) {
-        StringBuilder sb = new StringBuilder(320);
-        sb.append("{\"recordKind\":").append(rec.recordKind == RECORD_LEGACY ? "\"legacy\"" : "\"orch\"");
+        StringBuilder sb = new StringBuilder(1024);
+        sb.append("{\"schemaVersion\":").append(rec.schemaVersion);
+        sb.append(",\"recordKind\":").append(rec.recordKind == RECORD_LEGACY ? "\"legacy\"" : "\"orch\"");
         sb.append(",\"tickIndex\":").append(rec.tickIndex);
         if (rec.recordKind == RECORD_LEGACY) {
             sb.append(",\"legacyAction\":\"").append(escapeJson(rec.legacyAction)).append("\"}");
             return sb.toString();
         }
+        sb.append(",\"state\":{");
+        sb.append("\"fingerprint\":").append(rec.stateFingerprint);
+        sb.append(",\"localHp\":").append(rec.localHp);
+        sb.append(",\"specEnergy\":").append(rec.specEnergyPercent);
+        sb.append(",\"specAvailableFromTick\":").append(rec.specAvailableFromTick);
+        sb.append('}');
         sb.append(",\"busSize\":").append(rec.busSize);
         sb.append(",\"droppedPublishes\":").append(rec.droppedPublishes);
+        sb.append(",\"maxRankDropped\":").append(rec.maxRankDropped);
         sb.append(",\"masklessIntents\":").append(rec.masklessIntents);
         sb.append(",\"sidecarHealthy\":").append(rec.sidecarHealthy);
         sb.append(",\"sidecarAckLag\":").append(rec.sidecarAckLag);
-        sb.append(",\"winners\":[");
+        sb.append(",\"sidecarWireFrameRejects\":").append(rec.sidecarWireFrameRejects);
+        sb.append(",\"busIntents\":[");
+        appendBusIntents(sb, rec);
+        sb.append("],\"winners\":[");
         appendWinners(sb, rec);
         sb.append("],\"channelDrops\":[");
         appendDrops(sb, rec);
@@ -154,6 +193,27 @@ public final class OffThreadNDJSONRecorder {
         appendDispatchStates(sb, rec);
         sb.append("]}");
         return sb.toString();
+    }
+
+    private static void appendBusIntents(StringBuilder sb, TickRecord rec) {
+        ActionKind[] kinds = ActionKind.values();
+        for (int i = 0; i < rec.busIntentCount; i++) {
+            if (i > 0) {
+                sb.append(',');
+            }
+            int kindOrd = rec.intentKindOrd[i] & 0xFF;
+            String kindName = kindOrd < kinds.length ? kinds[kindOrd].name() : "IDLE";
+            sb.append("{\"kind\":\"").append(kindName).append('"');
+            sb.append(",\"priority\":").append(rec.intentPriorityOrd[i] & 0xFF);
+            sb.append(",\"advisor\":").append(rec.intentAdvisorOrd[i] & 0xFF);
+            sb.append(",\"rank\":").append(rec.intentRank[i]);
+            sb.append(",\"itemId\":").append(rec.intentItemId[i]);
+            sb.append(",\"npcIndex\":").append(rec.intentNpcIndex[i]);
+            sb.append(",\"slotIndex\":").append(rec.intentSlotIndex[i]);
+            sb.append(",\"bornTick\":").append(rec.intentBornTick[i]);
+            sb.append(",\"ttlTicks\":").append(rec.intentTtlTicks[i]);
+            sb.append('}');
+        }
     }
 
     private static void appendDispatchStates(StringBuilder sb, TickRecord rec) {

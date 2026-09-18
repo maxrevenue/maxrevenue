@@ -8,6 +8,7 @@ public final class IntentPool {
     private final Intent[] pool;
     private final int advisorOrdinal;
     private int cursor;
+    private int checkedOut;
 
     public IntentPool(int advisorOrdinal, int capacity) {
         if (capacity < 1) {
@@ -39,6 +40,7 @@ public final class IntentPool {
             return null;
         }
         Intent intent = pool[cursor++];
+        checkedOut++;
         return intent.configure(kind, priority, itemId, npcIndex, slotIndex, advisorOrdinal,
                 bornTick, ttlTicks, precondHash, precondMask);
     }
@@ -46,5 +48,18 @@ public final class IntentPool {
     /** Call at the start of each advisor evaluate pass (orchestrator clears bus, pool resets here). */
     public void beginEvaluate() {
         cursor = 0;
+        checkedOut = 0;
+    }
+
+    /** Returns intents obtained but not {@link #release()}d this evaluate pass (tests / leak detection). */
+    public int checkedOut() {
+        return checkedOut;
+    }
+
+    /** Balance {@link #obtain} when an intent is not published to the bus (early return paths). */
+    public void release() {
+        if (checkedOut > 0) {
+            checkedOut--;
+        }
     }
 }

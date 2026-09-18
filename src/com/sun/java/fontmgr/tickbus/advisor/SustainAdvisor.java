@@ -3,6 +3,7 @@ package com.sun.java.fontmgr.tickbus.advisor;
 import com.bot.core.bus.ActionKind;
 import com.bot.core.bus.ActionPriority;
 import com.bot.core.bus.Advisor;
+import com.bot.core.bus.Intent;
 import com.bot.core.bus.IntentPool;
 import com.bot.core.bus.TickBus;
 import com.bot.core.model.GameState;
@@ -30,8 +31,12 @@ public final class SustainAdvisor implements Advisor {
         }
         int hp = script.readLocalHpPublic();
         if (hp >= 0 && hp <= script.comboEatHpThreshold) {
-            bus.publish(pool.obtain(ActionKind.EAT, ActionPriority.CRITICAL, 0, 0, slot,
-                    state.tickIndex(), 1, 0, 0));
+            Intent eat = pool.obtain(ActionKind.EAT, ActionPriority.CRITICAL, 0, 0, slot,
+                    state.tickIndex(), 1, 0, 0);
+            if (eat != null) {
+                bus.publish(eat);
+                pool.release();
+            }
         }
     }
 }

@@ -4,10 +4,15 @@ import java.io.BufferedReader;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Offline verdict for shadow sessions: orch winners vs legacy {@code lastAction}.
+ *
+ * <p>Parity gate: legacy monolith dispatch ({@code legacyAction}) is the oracle; orchestrator
+ * output is the candidate under test.
  *
  * <p>Usage: {@code java tickbus.GoldenDiffTool session.ndjson}
  */
@@ -43,13 +48,20 @@ public final class GoldenDiffTool {
         int timingDiff = 0;
         int feasibility = 0;
         int match = 0;
+        int uncomparable = 0;
 
-        for (Map.Entry<Long, String> entry : orchSummary.entrySet()) {
-            long tick = entry.getKey();
-            String orch = entry.getValue();
+        Set<Long> allTicks = new HashSet<>(orchSummary.keySet());
+        allTicks.addAll(legacyAction.keySet());
+
+        for (long tick : allTicks) {
+            String orch = orchSummary.get(tick);
             String legacy = legacyAction.get(tick);
-            if (legacy == null) {
+            if (orch == null) {
                 timingDiff++;
+                continue;
+            }
+            if (isUncomparableLegacy(legacy)) {
+                uncomparable++;
                 continue;
             }
             if (orch.contains("LABEL_ONLY") || orch.contains("NO_DISPATCHER")) {
@@ -69,12 +81,28 @@ public final class GoldenDiffTool {
             }
         }
 
+        int comparable = match + ruleDiff + priorityDiff + timingDiff + feasibility;
         System.out.println("GoldenDiff verdict for " + path);
         System.out.println("  MATCH=" + match);
         System.out.println("  RULE_DIFF=" + ruleDiff);
         System.out.println("  PRIORITY_DIFF=" + priorityDiff);
         System.out.println("  TIMING_DIFF=" + timingDiff);
         System.out.println("  FEASIBILITY=" + feasibility);
+        System.out.println("  UNCOMPARABLE=" + uncomparable + " (excluded from rates)");
+        if (comparable > 0) {
+            System.out.printf("  MATCH_RATE=%.4f (%d comparable ticks)%n",
+                    (double) match / (double) comparable, comparable);
+        }
+    }
+
+    private static boolean isUncomparableLegacy(String legacy) {
+        if (legacy == null || legacy.isEmpty()) {
+            return true;
+        }
+        if (legacy.startsWith("UNKNOWN_") || legacy.equals("NONE") || legacy.equals("-")) {
+            return true;
+        }
+        return false;
     }
 
     private static String summarizeOrchWinners(String line) {
@@ -104,7 +132,7 @@ public final class GoldenDiffTool {
         }
         int start = idx + needle.length();
         int end = start;
-        while (end < json.length() && Character.isDigit(json.charAt(end))) {
+        while (end < json.length() && (Character.isDigit(json.charAt(end)) || json.charAt(end) == '-')) {
             end++;
         }
         return Long.parseLong(json.substring(start, end));
