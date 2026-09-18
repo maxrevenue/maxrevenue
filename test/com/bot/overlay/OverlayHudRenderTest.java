@@ -5,6 +5,7 @@ import com.bot.core.bus.ActionKind;
 import com.bot.core.bus.ActionPriority;
 import com.bot.core.bus.IntentPool;
 import com.bot.core.orchestrator.EliminationReason;
+import com.bot.core.orchestrator.TickResolutionSnapshot;
 import com.bot.core.telemetry.TickDispatchState;
 import com.sun.java.fontmgr.overlay.OverlayContext;
 import org.junit.jupiter.api.Test;
@@ -44,7 +45,7 @@ class OverlayHudRenderTest {
                 EliminationReason.NONE,
                 EliminationReason.NONE
         };
-        OverlayPublisher.publish(state, winners, dispatch, drops, null, null);
+        OverlayPublisher.publish(state, new TickResolutionSnapshot(winners, drops, dispatch), null, null);
 
         BufferedImage img = new BufferedImage(400, 140, BufferedImage.TYPE_INT_ARGB);
         TickBusHudOverlay overlay = new TickBusHudOverlay();

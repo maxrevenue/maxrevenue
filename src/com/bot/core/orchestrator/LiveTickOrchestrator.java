@@ -82,7 +82,9 @@ public final class LiveTickOrchestrator {
         if (dispatcher instanceof DispatchStateSource) {
             dispatchOrdinals = ((DispatchStateSource) dispatcher).dispatchStateOrdinals();
         }
-        OverlayPublisher.publish(state, winners, dispatchOrdinals, eliminationReasons, suppression, sidecarMetrics);
+        TickResolutionSnapshot resolution = new TickResolutionSnapshot(
+                winners, eliminationReasons, dispatchOrdinals);
+        OverlayPublisher.publish(state, resolution, suppression, sidecarMetrics);
 
         if (recorder != null) {
             recorder.enqueue(state, bus, winners, eliminationReasons, sidecarMetrics, dispatcher);

@@ -27,6 +27,7 @@ Read and follow the full implementation spec verbatim:
 1. Wire `ttlTicks` is inclusive through `evalTick + ttlTicks` — no local `+1` conversion (`docs/tickbus-wire-contract.md`).
 2. Bus eviction uses strict `rank > lowestRank` on ties; test `fullBusRejectsIncomingOnEqualRank`.
 3. Sidecar `precondMask == 0` increments `masklessIntents` in NDJSON for golden review.
+4. Overlay: fill-then-set double buffer (documented one-frame tear); `TickResolutionSnapshot` shared with NDJSON drops; lease/lag/strings on tick thread only; `tickIndex`/`seq` + `STALE` + sidecar `†` when `bornTick != tickIndex`.
 
 ## Flags
 
@@ -37,6 +38,7 @@ Read and follow the full implementation spec verbatim:
 | `-Droatz.tickbus.rec=<path>` | NDJSON telemetry output |
 | `-Droatz.sidecar=<host>` | Enables sidecar advisor (socket reader TBD) |
 | `-Droatz.sidecar.observe=true` | Sidecar frames observed only — never published to bus |
+| `-Droatz.overlay=true` | Paint-thread HUD reads `OverlayPublisher` handoff (not the bus) |
 
 ## Shadow acceptance
 
