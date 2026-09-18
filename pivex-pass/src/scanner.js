@@ -25,6 +25,7 @@ import {
   passWindow,
   sprintPlan,
   money,
+  isFreeMode,
 } from "../public/rules.js";
 import {
   DEFAULT_RR,
@@ -249,10 +250,72 @@ function scoreSetup(pair, m15, h1, rewardR = DEFAULT_RR) {
  * Returns { action: "wait" } or { action: "setup", setup }.
  * Does NOT size — caller runs calcTicket (Task 2).
  */
+
+/**
+ * Free-mode fallback: if no A pullback prints, still emit a directional
+ * ticket from H1 EMA bias + ATR stop so the operator can trade anytime.
+ * Not an alpha claim — just a typed ticket with floor-safe sizing upstream.
+ */
+function forceFallbackSetup(pair, m15, h1, rewardR = DEFAULT_RR) {
+  if (m15.length < 80 || h1.length < 60) {
+    return { ok: false, reason: "Not enough history yet" };
+  }
+  const hClose = h1.map((b) => b.c);
+  const hEma20 = ema(hClose, 20);
+  const hEma50 = ema(hClose, 50);
+  const iH = h1.length - 1;
+  if (hEma20[iH] == null || hEma50[iH] == null) {
+    return { ok: false, reason: "EMA not ready" };
+  }
+  const closes = m15.map((b) => b.c);
+  const highs = m15.map((b) => b.h);
+  const lows = m15.map((b) => b.l);
+  const atrArr = atr(highs, lows, closes, 14);
+  const i = m15.length - 2;
+  const live = m15[m15.length - 1];
+  const atrNow = atrArr[i];
+  if (atrNow == null) return { ok: false, reason: "ATR not ready" };
+
+  const sep = hEma20[iH] - hEma50[iH];
+  let action;
+  if (sep > 0 && hClose[iH] >= hEma20[iH]) action = "BUY";
+  else if (sep < 0 && hClose[iH] <= hEma20[iH]) action = "SELL";
+  else if (hClose[iH] >= hEma20[iH]) action = "BUY";
+  else action = "SELL";
+
+  const entry = live.c;
+  const minStopDist = pair.pip * (MIN_STOP_PIPS + 1); // ≥11 pips — avoids float undershoot of the 10-pip floor
+  const stopDist = Math.max(atrNow * 0.9, minStopDist);
+  const stop = action === "BUY" ? entry - stopDist : entry + stopDist;
+  const riskDist = Math.abs(entry - stop);
+  const tp = action === "BUY" ? entry + riskDist * rewardR : entry - riskDist * rewardR;
+  const score = 20 + Math.min(30, Math.abs(sep) / (atrNow || 1e-9) * 10);
+
+  return {
+    ok: true,
+    instrument: pair.instrument,
+    action,
+    direction: action === "BUY" ? "Long" : "Short",
+    entry,
+    stop,
+    tp,
+    rewardR,
+    atr: atrNow,
+    rsi: null,
+    score: Math.round(score * 10) / 10,
+    session: "Free mode — anytime ticket",
+    forced: true,
+    why:
+      (action === "BUY" ? "Free-mode H1 bias long" : "Free-mode H1 bias short") +
+      ` · ATR stop · R=${rewardR} (not an A-pullback)`,
+  };
+}
+
 export async function scanSetups({
   exclude = [],
   refresh = true,
   rewardR = DEFAULT_RR,
+  forceFallback = false,
 } = {}) {
   if (refresh) {
     for (const [k, v] of cache.bars) {
@@ -288,7 +351,27 @@ export async function scanSetups({
   }
 
   candidates.sort((a, b) => b.score - a.score);
-  const best = candidates[0] || null;
+  let best = candidates[0] || null;
+
+  if (!best && forceFallback) {
+    const forced = [];
+    for (const pair of PAIRS) {
+      if (excluded.has(pair.instrument)) continue;
+      try {
+        const m15data = await getBars(pair, "15m", "10d");
+        sources[pair.instrument] = sources[pair.instrument] || "yahoo";
+        const m15 = m15data.candles;
+        const h1 = aggregateToH1(m15);
+        const setup = forceFallbackSetup(pair, m15, h1, rewardR);
+        if (setup.ok) forced.push(setup);
+        else skipped.push({ instrument: pair.instrument, reason: "fallback: " + setup.reason });
+      } catch (e) {
+        skipped.push({ instrument: pair.instrument, reason: String(e.message || e) });
+      }
+    }
+    forced.sort((a, b) => b.score - a.score);
+    best = forced[0] || null;
+  }
 
   if (!best) {
     return {
@@ -402,7 +485,7 @@ export async function scanPicks({
   }
 
   // Task 4 — daily lock (explicit override only)
-  const lock = assertTradeUnlocked(now, { override, trades });
+  const lock = assertTradeUnlocked(now, { override, trades, settings });
   if (lock.action === "locked") {
     return {
       status: "locked",
@@ -448,10 +531,12 @@ export async function scanPicks({
     };
   }
 
+  const free = isFreeMode(settings);
   const scan = await scanSetups({
     exclude,
     refresh,
     rewardR: Number(settings?.rewardR) || DEFAULT_RR,
+    forceFallback: free,
   });
 
   if (!scan.setup) {

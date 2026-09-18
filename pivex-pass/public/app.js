@@ -142,7 +142,8 @@ function hydrateSettings() {
   $("setBuffer").value = state.settings.buffer;
   $("setReward").value = state.settings.rewardR;
   $("setSprint").value = state.settings.sprintDays;
-  $("setSessionMode").value = state.settings.sessionMode === "anytime" ? "anytime" : "strict";
+  const sm = state.settings.sessionMode || "free";
+  $("setSessionMode").value = sm === "strict" || sm === "anytime" || sm === "free" ? sm : "free";
 }
 
 function render() {
@@ -275,7 +276,7 @@ function renderCoach(snap, sized, plan, session) {
   title.textContent = "No good trade yet";
   text.textContent =
     "Keep Pivex open, but do not force a trade. Tap “Check for a trade” every 30–60 minutes. " +
-    (session.anytime ? "Anytime mode is on." : "Best window is 12:00–16:00 UTC.");
+    (session.free ? "Free mode — trade whenever." : session.anytime ? "Anytime mode is on." : "Best window is 12:00–16:00 UTC.");
   stats.innerHTML =
     statHtml("Still need", fmt(snap.toTarget)) +
     statHtml("Ready risk", sized.allowed ? fmt(sized.riskAmount) : "$0") +
@@ -751,7 +752,14 @@ $("saveSettings").addEventListener("click", async () => {
     buffer: parseFloat($("setBuffer").value),
     rewardR: parseFloat($("setReward").value) || DEFAULTS.rewardR,
     sprintDays: parseInt($("setSprint").value, 10) || DEFAULTS.sprintDays,
-    sessionMode: $("setSessionMode").value === "anytime" ? "anytime" : "strict",
+    sessionMode: (() => {
+      const v = $("setSessionMode").value;
+      return v === "strict" || v === "anytime" || v === "free" ? v : "free";
+    })(),
+    dailyLock: $("setSessionMode").value === "free" ? false : true,
+    maxTradesPerDay: $("setSessionMode").value === "free" ? 0 : 1,
+    maxConsecutiveLosses: $("setSessionMode").value === "free" ? 0 : 3,
+    lockMinutesBeforeReset: $("setSessionMode").value === "free" ? 0 : 90,
   };
   if (!isFinite(state.settings.buffer)) state.settings.buffer = DEFAULTS.buffer;
   await persist();

@@ -172,6 +172,9 @@ const server = http.createServer(async (req, res) => {
         exclude: body.exclude || [],
         refresh: body.refresh !== false,
         startBalance: settings.balance,
+        sessionMode: settings.sessionMode,
+        dailyLock: settings.dailyLock,
+        settings,
       });
       return send(res, 200, result);
     }

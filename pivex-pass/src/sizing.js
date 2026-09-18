@@ -63,7 +63,7 @@ export function calcTicket({
   if (!isFinite(stopPips)) {
     return { ok: false, ticket: null, reason: "Invalid stopPips" };
   }
-  if (stopPips < MIN_STOP_PIPS) {
+  if (stopPips + 1e-9 < MIN_STOP_PIPS) {
     return {
       ok: false,
       ticket: null,

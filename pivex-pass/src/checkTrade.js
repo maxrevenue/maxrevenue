@@ -35,6 +35,7 @@ import { calcTicket } from "./sizing.js";
 import { assertTradeUnlocked } from "./lock.js";
 import { consistencyFloatingWarning } from "./consistency.js";
 import { scanSetups } from "./scanner.js";
+import { isFreeMode } from "../public/rules.js";
 import { priceDistanceToPips } from "../public/fx.js";
 
 /**
@@ -62,7 +63,12 @@ export async function checkForTrade({
   exclude = [],
   refresh = true,
   startBalance = START_BALANCE,
+  sessionMode = "free",
+  dailyLock = false,
+  settings = null,
 } = {}) {
+  const modeSettings = settings || { sessionMode, dailyLock };
+  const free = isFreeMode(modeSettings);
   const utcDate = utcDateStr(now);
 
   // --- Task 1: SOD snapshot + rooms (floating included) ---
@@ -110,7 +116,7 @@ export async function checkForTrade({
   }
 
   // --- Task 4: daily lock ---
-  const lock = assertTradeUnlocked(utcDate, { override, trades });
+  const lock = assertTradeUnlocked(utcDate, { override, trades, settings: modeSettings });
   if (lock.action === "locked") {
     return {
       action: "locked",
@@ -123,7 +129,7 @@ export async function checkForTrade({
   }
 
   // --- Task 3: scanner ---
-  const scan = await scanSetups({ exclude, refresh, now });
+  const scan = await scanSetups({ exclude, refresh, rewardR: rr, forceFallback: free });
   if (!scan.setup) {
     return {
       action: "wait",

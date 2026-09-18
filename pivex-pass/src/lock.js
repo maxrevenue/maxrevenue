@@ -1,6 +1,7 @@
 /**
  * One UTC day → one logged fill → locked for new tickets.
  *
+ * In free mode (or dailyLock:false), the gate is skipped.
  * Override is NEVER the default path: callers must pass
  * `{ override: true }` (CLI `--override`) or an explicit UI confirm.
  */
@@ -53,13 +54,20 @@ export function unlockDay(utcDate) {
  * Gate for "check for a trade".
  *
  * @param {string|Date} [utcDateOrNow]
- * @param {{ override?: boolean, trades?: Array }} [opts]
+ * @param {{ override?: boolean, trades?: Array, enforce?: boolean, settings?: object }} [opts]
  * @returns {{ action: "ok" } | { action: "locked", message: string }}
  */
 export function assertTradeUnlocked(utcDateOrNow = new Date(), opts = {}) {
   const override = opts.override === true; // must be explicit boolean true
   const date =
     typeof utcDateOrNow === "string" ? utcDateOrNow : utcDateStr(utcDateOrNow);
+
+  const settings = opts.settings || {};
+  const mode = String(settings.sessionMode || "").toLowerCase();
+  const enforce =
+    opts.enforce !== false &&
+    settings.dailyLock !== false &&
+    mode !== "free";
 
   // When the client sends a trades ledger, that ledger is the source of
   // truth for whether *this* UTC day is locked — avoids stale in-memory
@@ -69,6 +77,10 @@ export function assertTradeUnlocked(utcDateOrNow = new Date(), opts = {}) {
     if (hasFillToday) lockDay(date);
     else unlockDay(date);
     syncLocksFromTrades(opts.trades);
+  }
+
+  if (!enforce) {
+    return { action: "ok", utcDate: date, override, enforced: false };
   }
 
   if (isDayLocked(date) && !override) {
@@ -83,7 +95,7 @@ export function assertTradeUnlocked(utcDateOrNow = new Date(), opts = {}) {
     };
   }
 
-  return { action: "ok", utcDate: date, override };
+  return { action: "ok", utcDate: date, override, enforced: true };
 }
 
 /**

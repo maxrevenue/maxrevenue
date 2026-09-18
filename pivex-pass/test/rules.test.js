@@ -33,25 +33,38 @@ describe("rules engine", () => {
     assert.equal(snap.status, "FAILED_OVERALL");
   });
 
-  it("blocks a second ticket the same UTC day", () => {
+  it("allows a second ticket the same UTC day in free mode (default)", () => {
     const trades = [{ id: 1, date: "2026-09-08", pnl: 500, instrument: "EURUSD" }];
     const sized = maxSafeRisk(DEFAULTS, trades, 0, new Date("2026-09-08T13:30:00Z"));
+    assert.equal(sized.allowed, true);
+  });
+
+  it("blocks a second ticket the same UTC day in strict mode", () => {
+    const settings = { ...DEFAULTS, sessionMode: "strict", dailyLock: true, maxTradesPerDay: 1, lockMinutesBeforeReset: 90 };
+    const trades = [{ id: 1, date: "2026-09-08", pnl: 500, instrument: "EURUSD" }];
+    const sized = maxSafeRisk(settings, trades, 0, new Date("2026-09-08T13:30:00Z"));
     assert.equal(sized.allowed, false);
     assert.match(sized.reason, /one ticket|already has a fill/i);
   });
 
     it("locks outside overlap window in strict mode", () => {
-    const w = passWindow(new Date("2026-09-08T10:00:00Z"), DEFAULTS);
+    const w = passWindow(new Date("2026-09-08T10:00:00Z"), { ...DEFAULTS, sessionMode: "strict" });
     assert.equal(w.ok, false);
   });
 
-  it("opens during London/NY overlap outside news", () => {
-    const w = passWindow(new Date("2026-09-08T14:00:00Z"), DEFAULTS);
+  it("allows weekends and nights in free mode", () => {
+    const w = passWindow(new Date("2026-09-12T22:00:00Z"), DEFAULTS);
+    assert.equal(w.ok, true);
+    assert.equal(w.mode, "free");
+  });
+
+  it("opens during London/NY overlap outside news (strict)", () => {
+    const w = passWindow(new Date("2026-09-08T14:00:00Z"), { ...DEFAULTS, sessionMode: "strict" });
     assert.equal(w.ok, true);
   });
 
   it("allows off-hours in anytime mode", () => {
-    const settings = { ...DEFAULTS, sessionMode: "anytime" };
+    const settings = { ...DEFAULTS, sessionMode: "anytime", dailyLock: true, maxTradesPerDay: 1 };
     const early = passWindow(new Date("2026-09-08T10:00:00Z"), settings);
     const news = passWindow(new Date("2026-09-08T12:30:00Z"), settings);
     assert.equal(early.ok, true);
@@ -61,7 +74,7 @@ describe("rules engine", () => {
   });
 
   it("still blocks a second ticket in anytime mode", () => {
-    const settings = { ...DEFAULTS, sessionMode: "anytime" };
+    const settings = { ...DEFAULTS, sessionMode: "anytime", dailyLock: true, maxTradesPerDay: 1, maxConsecutiveLosses: 3 };
     const trades = [{ id: 1, date: "2026-09-08", pnl: 500, instrument: "EURUSD" }];
     const sized = maxSafeRisk(settings, trades, 0, new Date("2026-09-08T10:00:00Z"));
     assert.equal(sized.allowed, false);

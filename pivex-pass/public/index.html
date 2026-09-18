@@ -214,13 +214,14 @@
           <div>
             <label class="field-label" for="setSessionMode">When can I trade?</label>
             <select id="setSessionMode">
+              <option value="free" selected>Anytime — no locks (default)</option>
+              <option value="anytime">Weekdays only (1 ticket/day)</option>
               <option value="strict">Only 12:00–16:00 UTC (safer)</option>
-              <option value="anytime">Anytime (weekdays)</option>
             </select>
           </div>
         </div>
         <div><label class="field-label" for="setImport">Import old save</label><input type="file" id="setImport" accept="application/json,.json"></div>
-        <p class="note">Keep defaults if you’re unsure. Safer choice: Strict + 0.75% risk.</p>
+        <p class="note">Default is Free (trade whenever). Floor-safe size (max 2.00 lots, ≥10 pip stop) still applies.</p>
         <button class="btn primary" id="saveSettings" type="button">Save settings</button>
       </div>
     </div>
