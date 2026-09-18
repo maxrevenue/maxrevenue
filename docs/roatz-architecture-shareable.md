@@ -1,22 +1,23 @@
-# RoatzBot + EchoForge + TickBus — Architecture Overview
+# RoatzBot + EchoForge + TickBus — Shareable Architecture (schema v2)
 
 **Repository:** [maxrevenue/maxrevenue](https://github.com/maxrevenue/maxrevenue)  
 **Integration trunk:** `integration/roatz-de09` (Roatz combat bot; `main` is a separate Pivex product line)  
-**Status (Mar 2026):** TickBus orchestrator + shadow harness **implemented on PR #21**; **first shadow NDJSON capture not run yet** — advisor vs legacy parity is the open validation gate.
+**TickBus work:** PR [#21](https://github.com/maxrevenue/maxrevenue/pull/21) (`cursor/tickbus-orchestrator-bus-bae7`)  
+**As of:** 2026-09-18 — NDJSON **schema v2 frozen** (rev 2); **first shadow capture not run** — operator `goldenDiff` is the open gate.
 
-This document is written for external collaborators (e.g. Gemini) who need the full system picture without reading the whole repo.
+Standalone overview for external reviewers (e.g. Gemini). Authoritative line-level contract: `docs/tickbus-wire-contract.md`. Bit layout source of truth: `docs/fingerprint-registry.md`.
 
 ---
 
 ## 1. Executive summary
 
-Roatz is a **Java 11** OSRS PvP combat agent attached to a RuneLite-based client. **EchoForge** is a **Java 17** behavior-tree / decision engine developed in parallel. Production integration goal:
+Roatz is a **Java 11** OSRS PvP combat agent on a RuneLite-based client. **EchoForge** is a **Java 17** behavior-tree engine in parallel.
 
-- **Agent JAR stays Java 11** — no EchoForge classes shipped inside the agent.
-- EchoForge runs as a **sidecar** (separate JVM) and sends **intents over a binary wire protocol**.
-- On-tick combat arbitration is moving from a **legacy monolith** (`CombatScript`) to a **zero-allocation TickBus orchestrator** (`LiveTickOrchestrator`) with **transcribed advisors** that mirror legacy behavior before EchoForge owns decisions.
-
-Validation strategy: **shadow mode** — orchestrator evaluates and records telemetry while **legacy still dispatches**. Offline tool **`goldenDiff`** compares orchestrator winners vs legacy `lastAction` per tick. **Legacy is the oracle; transcription is the candidate.**
+| Goal | Approach |
+|------|----------|
+| Keep agent on Java 11 | EchoForge runs as a **sidecar JVM**; intents over a **binary wire** |
+| Replace monolith dispatch safely | **TickBus orchestrator** + **transcribed advisors** mirror `CombatScript` before EchoForge owns decisions |
+| Prove equivalence | **Shadow mode**: orchestrator evaluates + records; **legacy still dispatches**. **`goldenDiff`** compares orch winners vs `legacyAction`. **Legacy = oracle; transcription = candidate.** |
 
 ---
 
@@ -44,253 +45,207 @@ flowchart LR
     EF --> ENC
   end
 
-  ENC -->|"TCP / length-prefixed WIRE_V2 frames"| ADV
+  ENC -->|"TCP length-prefixed WIRE_V1/V2"| ADV
   REC --> NDJSON[(session.ndjson)]
-  NDJSON --> GD[goldenDiff tool]
+  NDJSON --> GD[goldenDiff]
 ```
 
-| Component | JVM | Role |
-|-----------|-----|------|
-| RoatzBot agent | 11 | Client attach, vitals, legacy combat, TickBus, telemetry, paint overlays |
-| EchoForge sidecar | 17 | Heavy decision logic; emits intents with TTL + fingerprint preconditions |
-| NDJSON session file | — | Shadow/replay truth source; schema v2 frozen pre-first-capture |
-| `goldenDiff` | 11 (Gradle tool) | Parity verdict vs legacy dispatch |
+---
+
+## 3. Shadow hook order (fixed — do not reorder)
+
+In `CombatScript.onTick`:
+
+1. Vitals refresh (`readLatestHitsplat`, `refreshPvpVitals`, `noteLocalHpDrop`)
+2. **`TickBusHooks.evaluateEarly`** — orchestrator on **pre-legacy** state
+3. Legacy monolith (still runs when `-Droatz.tickbus.shadow=true`)
+4. **`publishState`** → **`TickBusHooks.recordShadowLegacy`** — pairs `lastAction` with orch line for same `tickIndex`
+
+Wrong order → false **TIMING_DIFF** and HP/prayer artifacts, not advisor bugs.
 
 ---
 
-## 3. Repository layout (Roatz-relevant)
+## 4. Orchestrator pipeline (tick thread, zero allocation)
 
-| Path | Purpose |
-|------|---------|
-| `src/com/bot/core/bus/` | `TickBus`, `Intent`, `IntentPool`, `Channel`, `Advisor`, `ActionKind` |
-| `src/com/bot/core/orchestrator/` | `LiveTickOrchestrator`, `ChannelRules`, `SuppressionTable`, `ReflectionDispatcher`, `TickResolutionSnapshot` |
-| `src/com/bot/core/model/` | `GameState`, `CombatTickState`, `FingerprintLayout` |
-| `src/com/bot/core/telemetry/` | `OffThreadNDJSONRecorder`, `TickRecord`, `LegacyComparability` |
-| `src/com/bot/core/sidecar/` | `AsyncSidecarAdvisor`, `SidecarFrameCodec`, metrics, wire reject logging |
-| `src/com/bot/overlay/` | Paint-thread HUD + winner tile overlay (debug only) |
-| `src/com/sun/java/fontmgr/` | Legacy `CombatScript`, `TickBusHooks`, `TickBusIntegration`, transcribed advisors |
-| `src/com/sun/java/fontmgr/overlay/` | RuneLite paint hook, `GameOverlay` registry |
-| `docs/tickbus-wire-contract.md` | Authoritative wire + shadow + schema contract |
-| `tools/tickbus/GoldenDiffTool.java` | Offline shadow session analyzer |
+1. `SuppressionTable.onVitals` — EAT lease early-release when `localHp > comboEatHpThreshold` (not “any HP tick-up”; sub-threshold regen must not release eat early)
+2. `TickBus.beginTick` / clear — reset bus + per-tick drop counters
+3. Each **Advisor** `evaluate` → `IntentPool.obtain` → `bus.publish` → `pool.release`
+4. Resolve channels **OFFENSIVE (0), SUSTAIN (1), DEFENSIVE (2)** — highest rank valid intent, suppression applied
+5. **`ChannelRules.applyExclusiveRules`** — eat vs offensive, equip noop, spec energy gate, etc.
+6. **Dispatch order:** **DEFENSIVE → SUSTAIN → OFFENSIVE**
+7. **`TickResolutionSnapshot`** — single pass: winners, `EliminationReason[]`, dispatch ordinals → **NDJSON + overlay** (must match)
+8. Suppression leases on dispatch (EAT 3t, EQUIP 1t, PRAYER 1t, SPECIAL until `specAvailableFromTick`)
 
----
+### Advisors (transcription phase)
 
-## 4. Single-tick control flow (shadow baseline)
-
-Hook order in `CombatScript.onTick` is **fixed** — wrong order produces false `TIMING_DIFF` in golden review:
-
-1. **Vitals refresh** — hitsplat, PvP vitals, HP drop notes.
-2. **`TickBusHooks.evaluateEarly`** — `LiveTickOrchestrator.onTick` on **pre-legacy** state (`CombatTickStateAdapter`).
-3. **Legacy monolith** — auto-prayer, NH, spec dumps, etc. (still runs when `-Droatz.tickbus.shadow=true`).
-4. **`publishState`** → **`TickBusHooks.recordShadowLegacy`** — pairs `script.lastAction` with the orch NDJSON line for that tick.
-
-```mermaid
-sequenceDiagram
-  participant CS as CombatScript
-  participant Orch as LiveTickOrchestrator
-  participant Leg as Legacy monolith
-  participant Rec as NDJSON recorder
-
-  CS->>CS: refresh vitals
-  CS->>Orch: evaluateEarly (tick N)
-  Orch->>Rec: recordKind=orch
-  CS->>Leg: legacy dispatch (tick N)
-  CS->>Rec: recordKind=legacy, legacyAction
-```
-
-### Orchestrator internal pipeline (tick thread, zero allocation hot path)
-
-1. `SuppressionTable.onVitals` — early-release eat leases on HP recovery.
-2. `TickBus.beginTick` / `clear` — reset bus + per-tick drop counters.
-3. Each **Advisor** `evaluate(state, bus)` — `IntentPool.obtain` → `bus.publish(intent)` → `pool.release()`.
-4. **Resolve** three channels: OFFENSIVE (0), SUSTAIN (1), DEFENSIVE (2) — highest rank valid intent per channel, respecting suppression.
-5. **`ChannelRules.applyExclusiveRules`** — e.g. eat suppresses offensive same tick; equip noop if already worn; spec if energy &lt; 50%.
-6. **Dispatch order:** DEFENSIVE → SUSTAIN → OFFENSIVE (prayer/gear before food before attack).
-7. **`TickResolutionSnapshot`** — one pass output: winners, `EliminationReason[]`, dispatch ordinals → **NDJSON recorder + overlay** (must not diverge).
-8. Apply **suppression leases** on dispatched kinds (eat 3 ticks, equip 1, prayer 1, spec until available tick).
+| Ordinal | Advisor | Source |
+|---------|---------|--------|
+| 0 | `AsyncSidecarAdvisor` | EchoForge wire (`-Droatz.sidecar=`; `-Droatz.sidecar.observe=true` = decode only, no bus publish) |
+| 1 | `SustainAdvisor` | Legacy eat (`hp <= comboEatHpThreshold`) |
+| 2 | `CombatAdvisor` | Legacy spec/attack |
 
 ---
 
-## 5. TickBus and intent model
+## 5. TickBus + intents
 
-- **Capacity:** 32 intents per tick, fixed array, no allocations on hot path.
-- **Rank:** `(priority.weight << 8) | (128 - advisorOrdinal)` — higher wins; tie keeps incumbent.
-- **Overflow:** When full, evict **lowest rank** only if incoming **strictly outranks** it; else drop incoming. NDJSON records `droppedPublishes` + `maxRankDropped` (spike = advisor bug, not missing sort).
-- **TTL (sidecar + bus):** Intent valid iff `tick >= bornTick && tick <= bornTick + ttlTicks` (**inclusive**, no +1 fudge).
-- **Fingerprints:** `(stateFp & mask) == (hash & mask)`; `mask == 0` → unconditional (+ `masklessIntents` counter for golden scrutiny).
+- **32 slots/tick**, fixed array, hot path no allocations
+- **Rank:** `(priority.weight << 8) | (128 - advisorOrdinal)`
+- **Overflow:** evict lowest rank only if incoming **strictly outranks**; else drop incoming → NDJSON `droppedPublishes`, `maxRankDropped` (`-1` if none)
+- **TTL:** valid iff `tick >= bornTick && tick <= bornTick + ttlTicks` (**inclusive**)
+- **Fingerprints:** `(stateFp & mask) == (hash & mask)`; `mask == 0` → unconditional + `masklessIntents` counter
 
-### Channels
+### Fingerprint registry (authoritative)
 
-| Index | Channel | Typical kinds |
-|-------|---------|----------------|
-| 0 | OFFENSIVE | ATTACK, SPECIAL |
-| 1 | SUSTAIN | EAT, SIP |
-| 2 | DEFENSIVE | PRAYER, EQUIP |
+| Field | Bits | Source | Consumers |
+|-------|------|--------|-----------|
+| Local HP | 0–7 | `localHp()` | SustainAdvisor, sidecar eat preconds |
+| Food present | 8 | `foodSlotIndex >= 0` | SustainAdvisor |
+| Protect prayer active | 9 | `CombatScript.protectPrayerMaskForTelemetry()` | PRAYER suppression early-release, bit 9 |
+| Spec energy | 16–23 | `specEnergyPercent()` | CombatAdvisor, sidecar |
 
----
+New sidecar-precondition fields → register in `FingerprintRegistry` + `docs/fingerprint-registry.md` or document waiver.
 
-## 6. Advisors (current transcription phase)
+### Suppression early-release (candidate-only; expect RULE_DIFF clusters vs legacy)
 
-| Advisor | Ordinal | Source | Notes |
-|---------|---------|--------|-------|
-| `AsyncSidecarAdvisor` | 0 | EchoForge wire | `-Droatz.sidecar=` enables; `-Droatz.sidecar.observe=true` = decode/observe only, no bus publish |
-| `SustainAdvisor` | 1 | Legacy eat paths | Transcribed from `CombatScript` |
-| `CombatAdvisor` | 2 | Legacy spec/attack | Transcribed from `CombatScript` |
-
-Long-term: EchoForge sidecar replaces transcription; shadow golden must pass before flipping dispatch ownership.
-
----
-
-## 7. EchoForge sidecar wire (summary)
-
-- **Version byte** + body: **WIRE_V1** (32 B body, not fully decoded yet) / **WIRE_V2** (40 B body).
-- **Reject path:** truncated frame, version mismatch → **`SidecarWireRejectLog`** + `wireRejects` (never silent close). Separate from watchdog “healthy” lag policy (deferred hysteresis).
-- **Health:** ack lag vs `ackTick`; unhealthy skips publish for that tick; healthy resets on fresh payload.
-- Full detail: `docs/tickbus-wire-contract.md`, `SidecarFrameCodec`.
-
-### Fingerprint registry (seed)
-
-| Field | Bits | Used by |
-|-------|------|---------|
-| Local HP | 0–7 | SustainAdvisor, eat preconds |
-| Spec energy | 16–23 | CombatAdvisor spec gate |
-
-Rule: new sidecar-precondition fields must register here or be explicitly waived.
+| Kind | Lease | Early release |
+|------|-------|----------------|
+| EAT / SIP | 3 ticks | `localHp > eatThreshold` where `eatThreshold = CombatScript.comboEatHpThreshold` (default **32**). Advisor eats at `hp <= threshold`; lease invalidates **strictly above** threshold. |
+| PRAYER | 1 tick | `protectPrayerMask == 0` (bit 9 / telemetry mask) |
+| EQUIP | 1 tick | Timeout only |
+| SPECIAL | until cooldown tick | Timeout only |
 
 ---
 
-## 8. Shadow telemetry (NDJSON schema v2 — frozen)
+## 6. Sidecar wire (summary)
 
-**Orchestrator line** (`recordKind: "orch"`, `schemaVersion: 2`):
-
-- `replayProjection`: `fingerprint`, `localHp`, `specEnergy`, `specAvailableFromTick` — **replay reads; never recomputes RNG/client state**.
-- `busIntents[]`: kind, priority, advisor, rank, item/npc/slot, bornTick, ttlTicks.
-- `winners[]`, `channelDrops[]`, `dispatchState[]`.
-- `droppedPublishes`, `maxRankDropped`, sidecar metrics + `wireRejects`.
-
-**Legacy line** (`recordKind: "legacy"`):
-
-- `legacyAction` — monolith oracle for that tick.
-- `uncomparableSubtype` when not diffable: **`NO_OPINION`** (empty/no action) or **`OUT_OF_VOCAB`** (outside captured vocabulary) — set at record time via `LegacyComparability`.
-
-Recorder: tick thread fills `TickRecord` ring slots → daemon thread writes NDJSON (no I/O on hot path).
+- Leading **version byte**: **WIRE_V1** (32 B body) / **WIRE_V2** (40 B body) — see `SidecarFrameCodec`
+- **Reject path:** malformed/truncated/version mismatch → increment **`wireRejects`**, `SidecarWireRejectLog` (no silent socket close), reader stays alive with backoff
+- **Health:** ack lag vs `ackTick`; unhealthy skips publish; resets on valid payload
+- Watchdog hysteresis deferred during shadow (observe-only path)
 
 ---
 
-## 9. Parity tool: `goldenDiff`
+## 7. NDJSON schema v2 (frozen — do not change without recapture)
+
+**Replay rule:** replay reads **`replayProjection`** from NDJSON; never re-derive vitals/RNG from live client.
+
+### `recordKind: "orch"` (`schemaVersion: 2`)
+
+**`replayProjection`** (matches `OffThreadNDJSONRecorder`):
+
+| Field | Notes |
+|-------|--------|
+| `fingerprint` | `FingerprintRegistry.compose(...)` |
+| `localHp`, `specEnergy`, `foodSlotIndex`, `protectPrayerMask` | Registry bits 0–7, 8, 9, 16–23 |
+| `eatThreshold` | `comboEatHpThreshold` — EAT lease input |
+| `specAvailableFromTick` | SPECIAL lease / cooldown |
+| `damageTaken` | **Per-tick** HP drop on orch lines (vitals delta). **Not** session-cumulative `damageTaken` on periodic lines — same field name, different `recordKind`. |
+| `targetNpcIndex` | `-1` reserved until target transcription lands |
+
+**`busIntents[]`:** `kind`, `priority`, `advisorOrdinal`, `rank`, `itemId`, `npcIndex`, `slotIndex`, `bornTick`, `ttlTicks`, interned `byline`, `elimination` on losers.
+
+**Also:** `winners[]`, `channelDrops[]`, `dispatchState[]`, `busSize`, `droppedPublishes`, `maxRankDropped`, `recordsDropped`, sidecar observe fields (`masklessIntents`, `sidecarAckLag`, `sidecarHealthy`, `staleTickDrops`, `staleStateDrops`, **`wireRejects`**).
+
+### `recordKind: "legacy"`
+
+`legacyAction` + optional `uncomparableSubtype`: **`NO_OPINION`** | **`OUT_OF_VOCAB`** (`LegacyComparability` at record time).
+
+### `recordKind: "periodic"` (every **50 ticks**, best-effort on close)
+
+Outcome counters from **projection transitions only** (not winners/dispatch): `eatsUsed`, `specsUsed`, `prayerUptimeTicks`, **`damageTaken`** (session-cumulative here).  
+`sidecarArrivalLagTicks` p50/p99 (histogram of `arrivalTickIndex - targetTickIndex`).
+
+**`goldenDiff`** uses **`ParityInput`** only — periodic/outcome/latency fields **do not** affect classification.
+
+---
+
+## 8. Parity gate: `goldenDiff`
 
 ```bash
 ./gradlew goldenDiff -Psession=/path/to/session.ndjson
 ```
 
-**Compares:** orch channel winners vs **`legacyAction`** on same `tickIndex`.
+Compares resolved **orch channel winners** vs **`legacyAction`** per `tickIndex`.
 
-**Categories:**
-
-| Bucket | Meaning |
-|--------|---------|
+| Category | Meaning |
+|----------|---------|
 | MATCH | Agreement |
-| RULE_DIFF | Orchestrator cleared winner; legacy acted |
+| RULE_DIFF | Orch cleared winner; legacy acted |
 | PRIORITY_DIFF | Both acted; different choice |
-| TIMING_DIFF | Orch line without legacy line (pairing) |
+| TIMING_DIFF | Orch without paired legacy line |
 | FEASIBILITY | Stub dispatch (LABEL_ONLY / NO_DISPATCHER) |
-| UNCOMPARABLE | Legacy no opinion or out of vocab — **excluded from rates**; subtypes **NO_OPINION** / **OUT_OF_VOCAB** reported |
+| UNCOMPARABLE | **Excluded from rates** — subtypes **NO_OPINION** / **OUT_OF_VOCAB** |
 
-**Reading protocol (after capture):**
+**Parity oracle:** legacy monolith dispatch at `recordShadowLegacy`; transcribed advisors are never the reference.
 
-- Stable counts + RULE_DIFF in known stub gaps → continue advisor transcription.
-- TIMING_DIFF clustered ±1 around eats → hook order / vitals refresh bug.
-- FEASIBILITY ≠ 0 → diff tool / dispatcher config, not advisors.
-- High UNCOMPARABLE/OUT_OF_VOCAB → expand legacy vocabulary capture, not logic.
+**Overlay cross-check:** on RULE_DIFF ticks, HUD `drop=` must match NDJSON `channelDrops` (same `TickResolutionSnapshot` pass).
 
 ---
 
-## 10. Debug overlay (paint thread)
-
-Enable: `-Droatz.overlay=true` (with tickbus on). **Not a decision brain.**
-
-- `OverlayPublisher`: double-buffer A/B; fill-then-set; optional one-frame tear under lag — **debug only; no automation on frame consistency**.
-- `TickBusHudOverlay`: precomputed strings only (`tickIndex`, `publishSequence`, STALE if frozen, lease line, channel lines with `drop=` reasons, sidecar `†` if `bornTick != tickIndex`).
-- `TickBusWinnerTileOverlay`: colors interacting target tile by channel winner (verifier, not timing signal).
-- Drop reasons same source as NDJSON: `TickResolutionSnapshot` from orchestrator.
-
----
-
-## 11. System properties (flags)
-
-| Property | Effect |
-|----------|--------|
-| `-Droatz.tickbus=true` | Orchestrator enabled |
-| `-Droatz.tickbus.shadow=true` | Orchestrator evaluates + records; **legacy still dispatches** |
-| `-Droatz.tickbus.rec=<path>` | NDJSON output path |
-| `-Droatz.overlay=true` | HUD + tile overlays on existing paint hook |
-| `-Droatz.sidecar=<host>` | Sidecar advisor enabled (socket reader wiring) |
-| `-Droatz.sidecar.observe=true` | Observe wire only; do not publish sidecar intents to bus |
-
-**Shadow capture (operator):**
+## 9. Operator capture (only open validation gate)
 
 ```text
 -Droatz.tickbus=true
 -Droatz.tickbus.shadow=true
--Droatz.tickbus.rec=<path>/session.ndjson
+-Droatz.tickbus.rec=./logs/session_01.ndjson
 -Droatz.overlay=true
 ```
 
----
+Then paste **`goldenDiff`** counts: **MATCH, RULE_DIFF, PRIORITY_DIFF, TIMING_DIFF, FEASIBILITY, UNCOMPARABLE** (NO_OPINION / OUT_OF_VOCAB).
 
-## 12. Definition of done (flip to production tickbus)
+**Flip to production tickbus (drop shadow):**
 
-1. Two shadow sessions, stable category distributions.
-2. `FEASIBILITY=0` on reviewed sessions.
-3. `NoAllocationTest` green.
-4. `-Droatz.tickbus=true` **without** shadow; recorder on for second validation pass.
-5. RULE_DIFF ticks: HUD `drop=` must match NDJSON (single resolution pass).
-
----
-
-## 13. Related PRs (EchoForge stack)
-
-| PR | Theme |
-|----|--------|
-| #17 | EchoForge core engine |
-| #18 | NDJSON + goldens |
-| #19 | SpecStrategy + reflection bridge |
-| **#21** | **TickBus orchestrator, shadow NDJSON, overlay, goldenDiff** (base: `integration/roatz-de09`) |
-
-EchoForge repo logic is **not** embedded in the agent JAR; integration is **wire + NDJSON + shadow parity**.
+1. Two shadow sessions, stable category distributions  
+2. `FEASIBILITY=0` on reviewed sessions  
+3. `NoAllocationTest` green  
+4. `-Droatz.tickbus=true` without shadow; recorder on for second pass  
 
 ---
 
-## 14. Design invariants (do not break)
+## 10. Debug overlay
 
-1. **Time base:** `GameState.tickIndex` / server tick only for TTL and suppression.
-2. **Zero allocation** on tick thread in orchestrator path (pools, fixed arrays, no bus snapshot on tick thread).
-3. **Single resolution pass** for recorder, overlay, and elimination reasons.
-4. **Legacy oracle** for shadow parity — not advisor isolation tests.
-5. **Schema v2 frozen** before first shadow capture; changes require recapture.
-6. **Java 11 agent / Java 17 sidecar** separation for production.
+`-Droatz.overlay=true` with tickbus — paint thread only; **not a decision brain**.
+
+- Double-buffer `OverlayPublisher`; one-frame tear possible under lag (debug only)
+- Precomputed HUD: `tickIndex`, `publishSequence`, STALE, leases, channel lines + `drop=`, sidecar `†` when `bornTick != tickIndex`
+- `TickBusWinnerTileOverlay` — verifier on target tile, not timing signal
 
 ---
 
-## 15. Open / deferred (explicit)
+## 11. Repo map (Roatz-relevant)
 
-| Item | Tier |
+| Path | Role |
 |------|------|
-| First shadow session + goldenDiff counts | **Operator gate** |
-| Watchdog two-threshold hysteresis | Deferred (observe-only sidecar in shadow) |
-| ChannelRules as generated data table | Tier 2 polish |
-| Fingerprint coverage enforcement test | Tier 2 |
-| Sidecar socket reader production wiring | Post–parity flip |
-| PRAYER lease early-release via fingerprint bit | TBD in registry |
+| `src/com/bot/core/orchestrator/` | `LiveTickOrchestrator`, `SuppressionTable`, `FingerprintRegistry`, `TickResolutionSnapshot` |
+| `src/com/bot/core/bus/` | `TickBus`, `Intent`, `IntentPool`, advisors |
+| `src/com/bot/core/telemetry/` | `OffThreadNDJSONRecorder`, `TickRecord`, `LegacyComparability` |
+| `src/com/bot/core/golden/` | `ParityInput`, `GoldenParityClassifier` |
+| `src/com/bot/core/sidecar/` | Wire codec, metrics, `SidecarWireRejectLog` |
+| `src/com/sun/java/fontmgr/` | `CombatScript`, `TickBusHooks`, transcribed advisors |
+| `tools/tickbus/GoldenDiffTool.java` | Offline analyzer |
+| `docs/tickbus-wire-contract.md` | Full contract + landed/remaining checklist |
+| `docs/fingerprint-registry.md` | Bit layout source of truth |
+| `docs/SCHEMA_FREEZE_DECISIONS.md` | Rev 2 decision log |
 
 ---
 
-## 16. Key references in repo
+## 12. Landed on PR #21 (rev 2) vs remaining
 
-- Contract: `docs/tickbus-wire-contract.md`
-- Implementation skill / prompt: `.cursor/skills/roatz-tickbus-orchestrator/`
-- Tests: `./gradlew test --tests 'com.bot.core.*' 'com.bot.overlay.*'`
+**Landed:** schema v2 projection + full `busIntents[]`, overflow/queue counters, `UNCOMPARABLE` subtypes, `ParityInput` gate, sidecar **`wireRejects`**, EAT/PRAYER suppression + tests, periodic NDJSON cadence, overlay tied to single resolution pass, fingerprint registry + tests.
+
+**Remaining:** first operator shadow capture + category paste; `targetNpcIndex` transcription; generated `ChannelRules` table polish; watchdog hysteresis when sidecar publishes; optional session-close `flushPeriodicBestEffort` wiring.
 
 ---
 
-*Generated for external architecture review. For line-level API detail, start with `LiveTickOrchestrator`, `TickBusIntegration`, and `docs/tickbus-wire-contract.md`.*
+## 13. Design invariants
+
+1. **Time base:** server tick / `GameState.tickIndex` for TTL and suppression  
+2. **Zero allocation** on orchestrator hot path  
+3. **One resolution pass** for recorder, overlay, elimination reasons  
+4. **Legacy oracle** for shadow parity  
+5. **Schema v2 frozen** — changes require recapture  
+6. **Java 11 agent / Java 17 sidecar** in production  
+
+---
+
+*For implementation entry points: `LiveTickOrchestrator`, `TickBusIntegration`, `OffThreadNDJSONRecorder`, `docs/tickbus-wire-contract.md`.*
